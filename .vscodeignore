@@ -11,7 +11,9 @@ tsconfig.json
 **/*.ts
 **/*.map
 out/**
+out-test/**
 !out/extension.js
+!prebuilt-models/**
 owen-*.vsix
 .vsixmanifest
 assets/belvoirdynamics-b.png

@@ -4,6 +4,7 @@ import { validateInputFile } from './validation/validator';
 import { runSimulation } from './workflows/runner';
 import { registerRunSweep } from './workflows/sweep';
 import { registerInsertMaterial } from './commands/insertMaterial';
+import { registerOpenPrebuiltModel } from './commands/openPrebuiltModel';
 import { registerOpenTutorial } from './commands/openTutorial';
 import { registerSearchReactorLibrary } from './community/browser';
 import { registerGeometryPreview } from './preview/webview';
@@ -40,6 +41,7 @@ export function activate(context: vscode.ExtensionContext) {
         registerGeometryPreview(context),
         registerSearchReactorLibrary(),
         registerInsertMaterial(context),
+        registerOpenPrebuiltModel(context),
         registerOpenTutorial(context),
         registerRunSweep(context),
     );

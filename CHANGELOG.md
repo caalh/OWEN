@@ -5,6 +5,29 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] — 2026-06-22
+
+A new **prebuilt models** picker brings ready-to-open benchmark and starter decks straight into
+the editor — no network, no Supabase account. The decks ship inside the extension.
+
+### Added
+
+- **OWEN: Open Prebuilt Model…** (`owen.openPrebuiltModel`). A Quick Pick of bundled reactor
+  decks, each labeled by code, scale, and provenance. Picking one opens the deck in a new editor
+  with the correct language (MCNP / Serpent / SCONE / Python for OpenMC). Available from the
+  Command Palette and the right-click **OWEN** submenu as well as the editor-title **OWEN** menu,
+  grouped next to *Insert Material*.
+- **Bundled decks** (in `prebuilt-models/`, honest provenance labels):
+  - **BEAVRS Full Core** — SCONE, full-core, *verified* (MIT BEAVRS Cycle 1 continuous-energy).
+  - **17x17 PWR Assembly** — MCNP, Serpent, and OpenMC, assembly scale, *example fixture — not
+    converged* (physically sane geometry/materials for visualization and as starters).
+  - **BEAVRS Core** — MCNP and Serpent, full-core, *example fixture — not converged*.
+
+### Notes
+
+- This offline picker is separate from the Supabase-backed **Search Reactor Library** command,
+  which is unchanged.
+
 ## [0.1.8] — 2026-06-22
 
 The 3D geometry preview now expands **MCNP** and **Serpent** universe/lattice hierarchies the

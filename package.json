@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit: syntax highlighting, lattice builder, geometry preview, validation, and workflow automation for MCNP, OpenMC, Serpent, and SCONE.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "belvoirdynamics",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "assets/owen-icon.png",
@@ -49,6 +49,7 @@
     "onCommand:owen.runSimulation",
     "onCommand:owen.openGeometryPreview",
     "onCommand:owen.searchReactorLibrary",
+    "onCommand:owen.openPrebuiltModel",
     "onCommand:owen.insertMaterial",
     "onCommand:owen.openTutorial",
     "onCommand:owen.runSweep",
@@ -146,6 +147,11 @@
         "category": "OWEN"
       },
       {
+        "command": "owen.openPrebuiltModel",
+        "title": "OWEN: Open Prebuilt Model…",
+        "category": "OWEN"
+      },
+      {
         "command": "owen.insertMaterial",
         "title": "OWEN: Insert Material from Database",
         "category": "OWEN"
@@ -200,6 +206,10 @@
           "group": "1_analyze@2"
         },
         {
+          "command": "owen.openPrebuiltModel",
+          "group": "1_analyze@3"
+        },
+        {
           "command": "owen.openLatticeBuilder",
           "group": "2_build@1"
         },
@@ -247,6 +257,10 @@
         {
           "command": "owen.insertMaterial",
           "group": "1_analyze@2"
+        },
+        {
+          "command": "owen.openPrebuiltModel",
+          "group": "1_analyze@3"
         },
         {
           "command": "owen.openLatticeBuilder",

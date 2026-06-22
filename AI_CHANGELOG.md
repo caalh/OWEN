@@ -12,6 +12,50 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-22 — v0.1.9 — Offline prebuilt-models picker (bundled benchmark decks)
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.1.8` → `0.1.9` in `package.json` and `package-lock.json`. Adds an offline,
+bundled "prebuilt models" picker so users can open canonical/starter reactor decks from the
+right-click menu without the Supabase community library (which stays a separate, creds-gated
+feature, untouched).
+
+### What changed
+
+- **New dir `prebuilt-models/`** (shipped in the VSIX). Decks copied from
+  `C:\Users\me\reactor-test-decks\`:
+  - `beavrs_scone_fullcore.scone` — SCONE BEAVRS full core, provenance **verified** (OWEN had no
+    bundled SCONE BEAVRS previously; website repo's `scone_beavrs_clean.inp` was deliberately not
+    used per instructions).
+  - `assembly_17x17_mcnp.i`, `assembly_17x17_serpent.sss`, `beavrs_core_mcnp.i`,
+    `beavrs_core_serpent.sss` — provenance **example fixture — not converged** (viz/starter decks).
+  - `assembly_17x17_openmc.py` — generated from the `omc_assembly_script` snippet body with
+    placeholders resolved (IndependentSource / RectangularPrism class / `model.run()`), provenance
+    **example fixture — not converged**.
+- **Manifest `prebuilt-models/index.json`** — array of `{id, name, code, scale, provenance,
+  description, filename}`.
+- **Command `owen.openPrebuiltModel`** (`src/commands/openPrebuiltModel.ts`, registered in
+  `extension.ts`). Loads the manifest via `context.extensionUri` + `vscode.workspace.fs`
+  (NOT `__dirname`, which breaks when esbuild bundles to `out/extension.js`). Quick Pick is
+  labeled `Code: Name` / `scale • provenance`. On pick, reads the deck file (again via
+  `extensionUri`) and opens it as an untitled doc with language `mcnp|serpent|scone|python`
+  (OpenMC → python).
+- **Menus** (`package.json`): command added to `commands`, `activationEvents`
+  (`onCommand:owen.openPrebuiltModel`), the `owen.contextMenu` (editor right-click) and
+  `owen.editorTitleMenu` submenus at group `1_analyze@3` (next to Insert Material), and the
+  Command Palette (default). Title: **"OWEN: Open Prebuilt Model…"**.
+- **Packaging:** `.vscodeignore` adds `!prebuilt-models/**` (defensive; nothing excluded them but
+  explicit). `out/` still ships only `extension.js`. `.gitignore` adds `out-test/`.
+- **Tests:** `src/test/suite/prebuiltModels.test.ts` — pure-logic checks (manifest non-empty,
+  required fields + valid code, unique ids, every referenced deck file exists & non-empty, SCONE
+  BEAVRS full-core is `verified`). Runs headless via `tsc --outDir out-test` + mocha; all pass.
+
+### Verify
+
+- `node ./node_modules/typescript/bin/tsc --noEmit` clean; `node esbuild.js --production` clean.
+- `mocha` on `prebuiltModels` + `extractor` suites: 22 passing.
+
 ## 2026-06-22 — v0.1.8 — MCNP + Serpent 3D lattice/universe expansion (full assembly & nested core)
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

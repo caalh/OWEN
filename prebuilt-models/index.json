@@ -1,0 +1,56 @@
+[
+  {
+    "id": "scone-beavrs-fullcore",
+    "name": "BEAVRS Full Core",
+    "code": "scone",
+    "scale": "full-core",
+    "provenance": "verified",
+    "description": "MIT BEAVRS PWR benchmark, full 193-assembly core (Cycle 1, 975 ppm boron, HFP 600K). Westinghouse 4-loop, 17x17 lattices. Continuous-energy eigenvalue deck.",
+    "filename": "beavrs_scone_fullcore.scone"
+  },
+  {
+    "id": "mcnp-assembly-17x17",
+    "name": "17x17 PWR Assembly",
+    "code": "mcnp",
+    "scale": "assembly",
+    "provenance": "example fixture — not converged",
+    "description": "Westinghouse-style 17x17 PWR assembly (264 fuel pins, 24 guide tubes, 1 instrument tube). Physically sane geometry/materials for visualization; kcode block is nominal.",
+    "filename": "assembly_17x17_mcnp.i"
+  },
+  {
+    "id": "serpent-assembly-17x17",
+    "name": "17x17 PWR Assembly",
+    "code": "serpent",
+    "scale": "assembly",
+    "provenance": "example fixture — not converged",
+    "description": "Westinghouse-style 17x17 PWR assembly for Serpent. Physically sane geometry/materials for visualization; settings are nominal.",
+    "filename": "assembly_17x17_serpent.sss"
+  },
+  {
+    "id": "openmc-assembly-17x17",
+    "name": "17x17 PWR Assembly",
+    "code": "openmc",
+    "scale": "assembly",
+    "provenance": "example fixture — not converged",
+    "description": "Westinghouse-style 17x17 PWR assembly for OpenMC (Python). Built from OWEN's omc_assembly_script snippet; modern OpenMC API. Starter/visualization deck, not a validated benchmark.",
+    "filename": "assembly_17x17_openmc.py"
+  },
+  {
+    "id": "mcnp-beavrs-core",
+    "name": "BEAVRS Core",
+    "code": "mcnp",
+    "scale": "full-core",
+    "provenance": "example fixture — not converged",
+    "description": "BEAVRS-style PWR core layout for MCNP. Physically sane geometry/materials for visualization; not a converged/validated benchmark.",
+    "filename": "beavrs_core_mcnp.i"
+  },
+  {
+    "id": "serpent-beavrs-core",
+    "name": "BEAVRS Core",
+    "code": "serpent",
+    "scale": "full-core",
+    "provenance": "example fixture — not converged",
+    "description": "BEAVRS-style PWR core layout for Serpent. Physically sane geometry/materials for visualization; not a converged/validated benchmark.",
+    "filename": "beavrs_core_serpent.sss"
+  }
+]

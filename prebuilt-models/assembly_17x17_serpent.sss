@@ -1,0 +1,71 @@
+% 17x17 PWR fuel assembly - OWEN 3D geometry preview test fixture (viz only)
+% =====================================================================
+% Westinghouse 17x17 PWR assembly: 264 UO2 pins, 24 guide tubes, 1
+% central instrument tube. Pitch 1.26 cm; radii 0.39218/0.40005/0.45720.
+% 3.1% enriched UO2. NOT converged/runnable - geometry & materials are
+% physically sane but settings are nominal. ZAID library assumed .80c.
+% Surface types: cyl/sqc; energies in MeV; set cards per Serpent 2.
+% =====================================================================
+% ----- Pin definitions (concentric: material radius ...) -----
+pin f31
+UO2_31 0.39218
+He     0.40005
+Zr     0.4572
+water
+pin gt
+water  0.56134
+Zr     0.60198
+water
+pin it
+air    0.43688
+Zr     0.48387
+water  0.56134
+Zr     0.60198
+water
+% ----- Assembly lattice (type 1 square, 17x17, pitch 1.26) -----
+lat asm 1 0.0 0.0 17 17 1.26
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31 f31 f31 f31  gt f31 f31  gt f31 f31  gt f31 f31 f31 f31 f31
+f31 f31 f31  gt f31 f31 f31 f31 f31 f31 f31 f31 f31  gt f31 f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31  gt f31 f31  gt f31 f31  gt f31 f31  gt f31 f31  gt f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31  gt f31 f31  gt f31 f31  it f31 f31  gt f31 f31  gt f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31  gt f31 f31  gt f31 f31  gt f31 f31  gt f31 f31  gt f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31 f31  gt f31 f31 f31 f31 f31 f31 f31 f31 f31  gt f31 f31 f31
+f31 f31 f31 f31 f31  gt f31 f31  gt f31 f31  gt f31 f31 f31 f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31 f31
+% ----- Bounding geometry -----
+surf box  sqc  0.0 0.0 10.71
+cell c1  0  fill asm  -box   % assembly inside the box
+cell c2  0  outside    box   % everything outside
+% ===================== MATERIALS =====================
+mat UO2_31 -10.40
+92235.80c 0.03100
+92238.80c 0.96900
+8016.80c  2.0
+mat He -0.00159
+2004.80c 1.0
+mat Zr -6.55
+40090.80c 0.5145
+40091.80c 0.1122
+40092.80c 0.1715
+40094.80c 0.1738
+40096.80c 0.0280
+mat water -0.74 moder lwtr 1001
+1001.80c 2.0
+8016.80c 1.0
+therm lwtr 600 lwj3.11t
+mat air -0.00120
+7014.80c 0.78
+8016.80c 0.21
+18040.80c 0.01
+% ===================== SETTINGS =====================
+set pop 5000 130 30
+set bc 1
