@@ -12,6 +12,82 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-22 — v0.1.8 — MCNP + Serpent 3D lattice/universe expansion (full assembly & nested core)
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.1.7` → `0.1.8` in `package.json` and `package-lock.json`. Brings the MCNP and
+Serpent preview parsers up to parity with the SCONE/OpenMC paths: they now expand full
+universe/lattice hierarchies (assembly → nested core) toward the shared geometry IR instead of
+drawing only bare pins / a single lattice.
+
+### MCNP (`src/preview/codes/mcnp.ts`) — rewritten
+
+- **Card preprocessing:** `logicalCards()` strips `$` inline + `c` comment cards, joins
+  continuation lines (≥5 leading spaces or trailing `&`), and normalises `=` spacing.
+  `classifyCard()` separates cell / surface / material cards (surface = mnemonic at token 1 or
+  after a transform number; material = `m\d+`).
+- **Surfaces:** `cz`, `c/z`, `cx/cy/c/x/c/y`, `pz`, `px`, `py`, and macrobodies `rpp`, `rcc`,
+  `rhp`/`hex`. Cylinder radius helper reads `cz`(p0) / `c/z`(p2) / `rcc`(p6).
+- **Materials by ZAID:** `classifyMaterial()` maps element sets to {name, component}: 92/94 →
+  fuel, 5+6 → B4C, 47/49 → Ag-In-Cd, 5+14+8+13 → borosilicate, Fe/Cr/Ni or Mn → steel, 40 →
+  Zircaloy, 1+8 → water, 2 → helium, 7+8 → air. Drives per-layer component + material colour.
+- **Pin universes:** cells grouped by `u=`; each cell's outer radius = the smallest cylinder it
+  is *inside* of (negative sense). Layers sorted by radius. Universe kind classified as
+  fuel / guide / instrument (guide = no fuel + Zr tube + water centre; instrument = inner air),
+  and Clad/Structure layers retagged guide_tube/instrument_tube accordingly.
+- **Lattices:** a `lat=1/2` cell with `u=` + `fill`. `parseFill()` handles uniform fills and
+  `i1:i2 j1:j2 k1:k2` index ranges (k=0 slice) with `nR` repeat expansion. Pitch from the lattice
+  cell's `px`/`py` plane pairs, an `rpp`, or an `rhp` facet vector (flat-to-flat = 2|r|).
+- **Hierarchy:** top universe = a universe-0 `fill` cell (preferring a lattice) else the
+  largest-pitch lattice; `placeUniverse()` recurses lattice→lattice→pin (depth-guarded). Pin
+  count picks fidelity: `> FULL_LAYER_LIMIT (4000)` ⇒ disc mode (one disc/pin), else concentric
+  shells (`emitLayers`). Large `cz`/`c/z` surfaces (> footprint·0.5) become faint vessel shells.
+  `MAX_CYLINDERS = 200000`. Decks with no universe/lattice fall back to the old bare z-axis
+  cylinder render (`renderBareSurfaces`).
+
+### Serpent (`src/preview/codes/serpent.ts`) — extended
+
+- Kept `pin` block parsing; added `surf` (`cyl`/`cylx/y`/`sqc`/`hexxc`/`hexyc`), `cell`
+  (`<name> <u> <mat | fill u2 | outside> <surfs>`), and **multiple + nested** `lat` cards
+  (`lat <u> <type> <x0> <y0> <nx> <ny> <pitch>` + grid rows read across lines until nx·ny tokens).
+- **Universe resolution:** `resolveFill()` follows `cell … fill u2` through bounding cells to a
+  pin or lattice. `pinLayers()` builds layers from a `pin` block or from CSG cells referencing
+  `cyl` surfaces. Core lattice = largest footprint (nx·ny·pitch²) or an explicit universe-0
+  `fill`. Recursive `placeUniverse()` mirrors SCONE/MCNP; disc mode for full cores; vessel shells
+  from large `cyl` surfaces. Instrument tubes detected from an air/void centre (Serpent pins are
+  often numbered, not named).
+
+### Test fixtures created (user lacked BEAVRS in these codes)
+
+Saved to `C:\Users\me\reactor-test-decks\` (alongside `beavrs_scone_fullcore.scone`):
+
+- `assembly_17x17_mcnp.i`, `assembly_17x17_serpent.sss` — Westinghouse 17×17 (264 fuel + 24
+  guide + 1 instrument = 289 positions; pitch 1.26; radii 0.39218/0.40005/0.45720).
+- `beavrs_core_mcnp.i`, `beavrs_core_serpent.sss` — nested core (~197 assemblies, pitch
+  21.50364; 3-region 1.6/2.4/3.1% loading; barrel + RPV shells). Viz-only, clearly commented;
+  not converged/runnable. ZAIDs use `.80c` (ENDF/B-VII.1 assumed); no invented ZAIDs.
+
+Verified via the bundled extractor (esbuild API → node): assemblies render **844 primitives /
+17 columns / 24 guide + 1 instrument tube**; cores render **~56.9k disc pins / 197 guide-tube
+rings per-assembly·24 = 4,728 guide tubes / 197 instrument tubes / vessel shells**, in disc mode.
+
+### Tests
+
+- Added 7 extractor tests (`src/test/suite/extractor.test.ts`): MCNP 3×3 lattice, MCNP nested
+  core (16 pins/4 cols), MCNP instrument-vs-guide classification, MCNP bare-pin back-compat;
+  Serpent 3×3 lattice, Serpent nested core, Serpent instrument-tube classification. **All 17
+  extractor tests pass headless** (`tsc --outDir out-test` then `mocha out-test/.../extractor.test.js`;
+  the extractor has no `vscode` import). The full `npm test` (validator/sweep/line guard) still
+  needs `@vscode/test-electron`, which is locked in this environment — run locally.
+
+### Build / verify
+
+- `node ./node_modules/typescript/bin/tsc --noEmit` clean; `node esbuild.js --production` clean;
+  `out/` ships only `extension.js` (`.vscodeignore` `out/**` + `!out/extension.js` preserved).
+  Per the env notes, `npx esbuild/tsc/vsce` hang on this machine — used the JS APIs / local
+  binaries throughout.
+
 ## 2026-06-22 — v0.1.7 — 3D geometry preview overhaul: real lattice/universe parsing, layer toggles, instancing
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

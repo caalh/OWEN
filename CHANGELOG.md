@@ -5,6 +5,45 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] — 2026-06-22
+
+The 3D geometry preview now expands **MCNP** and **Serpent** universe/lattice hierarchies the
+same way SCONE and OpenMC already did — so a real assembly or a full core renders, instead of
+a handful of bare pins.
+
+### Added
+
+- **MCNP lattice & universe expansion.** The preview now parses `u=` (universe), `fill=`
+  (including `i1:i2 j1:j2 k1:k2` index ranges with `nR` repeats), and `lat=1` (square) /
+  `lat=2` (hex) lattice cells, and resolves the full hierarchy — a root `fill` cell → a core
+  lattice of assembly lattices → pin universes — exactly like the SCONE path. Pin universes
+  become concentric shells from their `cz` / `c/z` cylinders (and z-aligned `rcc`), with pitch
+  taken from the lattice cell's `px`/`py` planes or an `rpp`/`rhp` macrobody. Materials are
+  classified by **ZAID** (92xxx/94xxx → fuel, Zr → clad, H+O → water, He → gap, B / Ag-In-Cd /
+  borosilicate → absorber, Fe-Cr-Ni → steel), so fuel, guide tubes, and instrument tubes are
+  tagged correctly for the layer/material toggles. A bare pin cell (no lattice) still renders
+  its z-axis cylinders as before.
+- **Serpent nested lattices + CSG basics.** `lat` cards now expand **nested** lattices (a core
+  lattice whose entries are assembly lattices whose entries are pin universes), square (type 1)
+  and hex (types 2/3, on a rectangular approximation). Added `surf` (`cyl`/`sqc`/`hexxc`/
+  `hexyc`) + `cell` parsing so CSG pins (cells referencing `cyl` surfaces) and `fill`-universe
+  resolution work alongside `pin` blocks. Core barrel / RPV `cyl` shells render as faint
+  context, and large cores switch to one-disc-per-pin mode so they stay interactive.
+
+### Changed
+
+- Full cores in MCNP and Serpent (≥ ~4,000 pins) now render in **disc mode** (one disc per pin,
+  colored by material, classified by component) just like SCONE; a single assembly shows full
+  concentric pin layers.
+
+### Known limitations
+
+- MCNP/Serpent **hex** (`lat=2` / Serpent type 2/3) lattices are laid out on a rectangular
+  approximation. MCNP `trcl`/transforms and off-z-axis cylinders are not applied. MCNP fuel of
+  different enrichments all classify to a single "UO2" material (MCNP materials are unnamed —
+  classified by ZAID); Serpent keeps distinct material names, so enrichment zones stay separately
+  toggleable there.
+
 ## [0.1.7] — 2026-06-22
 
 A ground-up rebuild of the **3D geometry preview**: it now parses real lattices and universe

@@ -1,21 +1,59 @@
 // Serpent geometry extractor.
 //
-// Parses `pin <name>` blocks (material + optional radius, terminated by a bare
-// material) and the first `lat` card with its grid rows. Components and colours
-// are derived from the per-layer material name so the toggle UI works. Serpent
-// `surf`/`cell` CSG and nested lattices are not expanded (see report) — pin +
-// one lattice covers the common assembly.
+// Expands a Serpent geometry toward the shared IR the same way the SCONE/MCNP
+// paths do:
+//   - `pin <name>` blocks (material + optional radius → concentric cylinders)
+//   - `surf <id> <type>` cards (cyl / sqc / cuboid / hexxc / hexyc)
+//   - `cell <name> <u> <mat|fill u2> <surfs>` (CSG pins + universe fills)
+//   - `lat <u> <type> <x0> <y0> <nx> <ny> <pitch>` square (type 1) and hex
+//     (types 2/3) lattices, **including nested lattices** (a core lattice whose
+//     entries are assembly lattices whose entries are pin universes).
+//
+// The full universe hierarchy is resolved and placed like SCONE: a single
+// assembly renders as concentric pin shells; a full core switches to disc mode
+// (one disc per pin) so it stays interactive. Unsupported constructs are
+// reported as warnings/notes rather than silently collapsing to one pin.
 
-import { CylinderSpec, ComponentId, ParseResult } from '../types';
-import { emitLayers, materialColor, materialComponent } from '../palette';
+import { CylinderSpec, Component, ComponentId, ParseResult } from '../types';
+import { emitLayers, materialColor, materialComponent, componentColor } from '../palette';
+
+const FULL_LAYER_LIMIT = 4000;
+const MAX_CYLINDERS = 200000;
 
 const SERPENT_KEYWORDS = new Set([
-    'pin', 'surf', 'cell', 'lat', 'set', 'mat', 'det', 'dep', 'plot', 'mesh', 'therm', 'include', 'trans',
+    'pin', 'surf', 'cell', 'lat', 'set', 'mat', 'det', 'dep', 'plot', 'mesh',
+    'therm', 'include', 'trans', 'src', 'ene', 'dtrans', 'div', 'branch', 'coef',
 ]);
 
 interface PinDef {
+    name: string;
     radii: number[];
     materials: string[];
+}
+
+interface SurfDef {
+    id: string;
+    type: string;
+    params: number[];
+}
+
+interface CellDef {
+    name: string;
+    universe: string;
+    fill: string | null; // universe this cell is filled with
+    material: string | null;
+    surfaces: { id: string; sense: number }[];
+}
+
+interface LatDef {
+    name: string;
+    type: number;
+    x0: number;
+    y0: number;
+    nx: number;
+    ny: number;
+    pitch: number;
+    grid: string[][]; // [row][col] of universe names
 }
 
 export function extractSerpentCylinders(text: string): CylinderSpec[] {
@@ -28,107 +66,391 @@ export function parseSerpent(text: string): ParseResult {
     const lines = text.split(/\r?\n/);
 
     const pins = new Map<string, PinDef>();
-    let current: string | null = null;
-
-    for (const raw of lines) {
-        const s = raw.trim();
-        if (!s || s.startsWith('%')) continue;
-        const lower = s.toLowerCase();
-
-        if (lower.startsWith('pin ')) {
-            const tokens = s.split(/\s+/);
-            current = tokens[1] ?? null;
-            if (current) pins.set(current, { radii: [], materials: [] });
-            continue;
-        }
-        if (current === null) continue;
-
-        const tokens = s.split(/\s+/);
-        if (SERPENT_KEYWORDS.has(tokens[0].toLowerCase())) { current = null; continue; }
-
-        const matName = tokens[0];
-        if (tokens.length >= 2) {
-            const r = parseFloat(tokens[1]);
-            if (!Number.isNaN(r)) {
-                pins.get(current)!.radii.push(r);
-                pins.get(current)!.materials.push(matName);
-            } else {
-                current = null;
-            }
-        } else {
-            pins.get(current)!.materials.push(matName);
-            current = null;
-        }
-    }
-
-    // First lattice card + its grid rows.
-    const latticeGrid: string[][] = [];
-    let latPitch = 1.295;
-    let latFound = false;
+    const surfs = new Map<string, SurfDef>();
+    const cells: CellDef[] = [];
+    const lats = new Map<string, LatDef>();
 
     for (let i = 0; i < lines.length; i++) {
-        const s = lines[i].trim();
-        if (!s || s.startsWith('%') || !s.toLowerCase().startsWith('lat ')) continue;
+        const s = stripComment(lines[i]).trim();
+        if (!s) continue;
         const tokens = s.split(/\s+/);
-        if (tokens.length >= 8) {
-            const lp = parseFloat(tokens[7]);
-            if (!Number.isNaN(lp)) { latPitch = lp; latFound = true; }
-        } else if (tokens.length >= 4) {
-            latFound = true;
+        const kw = tokens[0].toLowerCase();
+
+        if (kw === 'pin') {
+            i = parsePinBlock(lines, i, tokens, pins);
+        } else if (kw === 'surf') {
+            const surf = parseSurf(tokens);
+            if (surf) surfs.set(surf.id, surf);
+        } else if (kw === 'cell') {
+            const cell = parseCell(tokens);
+            if (cell) cells.push(cell);
+        } else if (kw === 'lat') {
+            i = parseLat(lines, i, tokens, lats);
         }
-        for (let j = i + 1; j < lines.length; j++) {
-            const rowS = lines[j].trim();
-            if (!rowS || rowS.startsWith('%')) continue;
-            const rowTokens = rowS.split(/\s+/);
-            if (rowTokens.some((t) => pins.has(t))) latticeGrid.push(rowTokens);
-            else break;
-        }
-        break;
     }
 
-    const cylinders: CylinderSpec[] = [];
-    const height = 40.0;
+    // Cell-defined (CSG) universes: group cells by universe id.
+    const cellsByUniverse = new Map<string, CellDef[]>();
+    for (const c of cells) {
+        if (!cellsByUniverse.has(c.universe)) cellsByUniverse.set(c.universe, []);
+        cellsByUniverse.get(c.universe)!.push(c);
+    }
 
-    const place = (pinName: string, x: number, y: number, label: string): void => {
-        const pin = pins.get(pinName);
-        if (pin && pin.radii.length) {
-            const components: ComponentId[] = [];
-            const colors: (string | undefined)[] = [];
-            const mats: (string | undefined)[] = [];
-            for (let i = 0; i < pin.radii.length; i++) {
-                const matName = pin.materials[i] ?? `mat${i}`;
-                components.push(materialComponent(matName));
-                colors.push(materialColor(matName));
-                mats.push(matName);
+    // Resolve a universe name to drawable geometry.
+    const isLat = (u: string) => lats.has(u);
+    const isPin = (u: string) => pins.has(u);
+
+    // A cell-defined universe that just fills another universe (e.g. a pin
+    // wrapped in a bounding cell) resolves through to that universe.
+    const resolveFill = (u: string, depth = 0): string => {
+        if (depth > 12) return u;
+        if (isLat(u) || isPin(u)) return u;
+        const cs = cellsByUniverse.get(u);
+        if (cs) {
+            for (const c of cs) {
+                if (c.fill && c.fill !== u) return resolveFill(c.fill, depth + 1);
             }
-            cylinders.push(...emitLayers(pin.radii, components, x, y, 0, height, label, colors, mats));
         }
+        return u;
     };
 
-    if (latFound && latticeGrid.length > 0) {
-        const nrows = latticeGrid.length;
-        const ncols = latticeGrid.reduce((m, r) => Math.max(m, r.length), 0);
-        const x0 = -(ncols - 1) * latPitch / 2;
-        const y0 = (nrows - 1) * latPitch / 2;
-        for (let r = 0; r < latticeGrid.length; r++) {
-            for (let c = 0; c < latticeGrid[r].length; c++) {
-                place(latticeGrid[r][c], x0 + c * latPitch, y0 - r * latPitch, `${latticeGrid[r][c]}_r${r}c${c}`);
+    // Build a pin (concentric layers) from a name: prefer a `pin` block, else
+    // CSG cells that reference `cyl` surfaces.
+    const pinLayers = (name: string): { radii: number[]; materials: string[] } | null => {
+        const pin = pins.get(name);
+        if (pin && pin.radii.length) return { radii: pin.radii, materials: pin.materials };
+        const cs = cellsByUniverse.get(name);
+        if (cs) {
+            const layers: { r: number; mat: string }[] = [];
+            for (const c of cs) {
+                if (!c.material) continue;
+                let outer = Infinity;
+                for (const sref of c.surfaces) {
+                    if (sref.sense >= 0) continue;
+                    const surf = surfs.get(sref.id);
+                    if (!surf) continue;
+                    const r = surfRadius(surf);
+                    if (r > 0 && r < outer) outer = r;
+                }
+                if (isFinite(outer)) layers.push({ r: outer, mat: c.material });
+            }
+            if (layers.length) {
+                layers.sort((a, b) => a.r - b.r);
+                return { radii: layers.map((l) => l.r), materials: layers.map((l) => l.mat) };
             }
         }
-        notes.push(`Expanded a ${nrows}×${ncols} lattice.`);
+        return null;
+    };
+
+    // Determine the core lattice: largest footprint (nx*ny*pitch²), like SCONE's
+    // "largest pitch" heuristic but tolerant of equal pitches.
+    let coreLat: string | null = null;
+    let bestFootprint = -1;
+    for (const [name, lat] of lats) {
+        const fp = lat.nx * lat.ny * lat.pitch * lat.pitch;
+        if (fp > bestFootprint) { bestFootprint = fp; coreLat = name; }
+    }
+    // If a cell in universe 0 fills a lattice, prefer that as the explicit root.
+    for (const c of cells) {
+        if (c.universe === '0' && c.fill) {
+            const r = resolveFill(c.fill);
+            if (isLat(r)) { coreLat = r; break; }
+        }
+    }
+
+    const totalPins = countPins(coreLat, lats, resolveFill, (u) => pinLayers(u) !== null);
+    const discMode = totalPins > FULL_LAYER_LIMIT;
+    const height = discMode ? 200 : 40;
+
+    let subPitch = 1.26;
+    for (const lat of lats.values()) if (lat.pitch > 0) subPitch = Math.min(subPitch, lat.pitch);
+
+    const cylinders: CylinderSpec[] = [];
+    let capped = false;
+
+    const classifyKind = (name: string, comps: ComponentId[], mats: string[]): 'fuel' | 'guide' | 'instrument' | 'other' => {
+        const low = name.toLowerCase();
+        if (comps.includes(Component.Fuel)) return 'fuel';
+        const hasTube = comps.includes(Component.Clad) || comps.includes(Component.Structure);
+        const innerIsAir = /air|void/i.test(mats[0] ?? '');
+        if (/instr|thimble|detector/.test(low)) return 'instrument';
+        if (hasTube && innerIsAir) return 'instrument';
+        if (/guide|\bgt\b|tube/.test(low)) return 'guide';
+        if (hasTube) return 'guide';
+        return 'other';
+    };
+
+    const placePin = (name: string, cx: number, cy: number, label: string): void => {
+        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        const layers = pinLayers(name);
+        if (!layers) return;
+        const positive = layers.radii.map((r, i) => ({ r, mat: layers.materials[i] ?? `mat${i}` })).filter((l) => l.r > 0);
+        if (positive.length === 0) return;
+        const comps = positive.map((l) => materialComponent(l.mat));
+        const kind = classifyKind(name, comps, positive.map((l) => l.mat));
+        if (kind === 'guide') comps.forEach((c, i) => { if (c === Component.Clad || c === Component.Structure) comps[i] = Component.GuideTube; });
+        else if (kind === 'instrument') comps.forEach((c, i) => { if (c === Component.Clad || c === Component.Structure) comps[i] = Component.InstrumentTube; });
+
+        if (discMode) {
+            let solidIdx = comps.findIndex((c) => c !== Component.Gap && c !== Component.Moderator);
+            if (solidIdx < 0) solidIdx = 0;
+            const matName = positive[solidIdx].mat;
+            let comp = comps[solidIdx];
+            let color = materialColor(matName);
+            if (kind === 'guide') { comp = Component.GuideTube; color = componentColor(comp); }
+            else if (kind === 'instrument') { comp = Component.InstrumentTube; color = componentColor(comp); }
+            cylinders.push({
+                label,
+                radius: Math.min(subPitch * 0.47, Math.max(...positive.map((l) => l.r))),
+                height,
+                x: cx,
+                y: cy,
+                z: 0,
+                color,
+                opacity: 1.0,
+                component: comp,
+                material: matName,
+            });
+            return;
+        }
+
+        const colors = positive.map((l) => materialColor(l.mat));
+        const mats = positive.map((l) => l.mat);
+        cylinders.push(...emitLayers(positive.map((l) => l.r), comps, cx, cy, 0, height, label, colors, mats));
+    };
+
+    const placeUniverse = (name: string, cx: number, cy: number, label: string, depth: number): void => {
+        if (depth > 12 || cylinders.length >= MAX_CYLINDERS) return;
+        const resolved = resolveFill(name);
+        const lat = lats.get(resolved);
+        if (lat) {
+            const x0 = cx + lat.x0 - (lat.nx - 1) * lat.pitch / 2;
+            const yTop = cy + lat.y0 + (lat.ny - 1) * lat.pitch / 2;
+            for (let row = 0; row < lat.grid.length; row++) {
+                for (let col = 0; col < lat.grid[row].length; col++) {
+                    const entry = lat.grid[row][col];
+                    const px = x0 + col * lat.pitch;
+                    const py = yTop - row * lat.pitch;
+                    const r = resolveFill(entry);
+                    if (lats.has(r)) placeUniverse(r, px, py, `${label}_r${row}c${col}`, depth + 1);
+                    else placePin(r, px, py, `${label}_r${row}c${col}`);
+                }
+            }
+            return;
+        }
+        placePin(resolved, cx, cy, label);
+    };
+
+    if (coreLat) {
+        placeUniverse(coreLat, 0, 0, 'core', 0);
+        const nested = [...lats.values()].some((l) => lats.get(coreLat!) && l.name !== coreLat && l.pitch < lats.get(coreLat!)!.pitch);
+        if (nested && !discMode) notes.push(`Resolved a nested core lattice (${lats.get(coreLat)!.nx}×${lats.get(coreLat)!.ny}).`);
+    } else if (lats.size > 0) {
+        // No clear core: place each lattice side by side.
+        let offset = 0;
+        for (const lat of lats.values()) {
+            placeUniverse(lat.name, offset, 0, lat.name, 0);
+            offset += lat.nx * lat.pitch + 5;
+        }
     } else {
+        // No lattice: lay out pin definitions side by side.
         let offset = 0;
         for (const [name, pin] of pins) {
-            if (!pin.radii.length) continue;
-            place(name, offset, 0, name);
+            if (!pin.radii.some((r) => r > 0)) continue;
+            placePin(name, offset, 0, name);
             offset += Math.max(...pin.radii) * 3 + 0.5;
         }
         if (pins.size > 0) notes.push('No lattice card found — laid out pin definitions side by side.');
     }
 
-    if (/\bsurf\b/.test(text) && cylinders.length === 0) {
-        warnings.push('Only `surf`/`cell` CSG was found; OWEN renders Serpent geometry from `pin` blocks and `lat` cards, which this deck does not define. Nothing to render.');
+    // Vessel / barrel context from large `cyl` surfaces.
+    if (cylinders.length > 0) {
+        let footprint = 0;
+        for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
+        const shells = [...surfs.values()]
+            .filter((s) => (s.type === 'cyl' || s.type === 'cylz') && surfRadius(s) > footprint * 0.5)
+            .sort((a, b) => surfRadius(b) - surfRadius(a));
+        for (const s of shells) {
+            cylinders.push({
+                label: `vessel_${s.id}`,
+                radius: surfRadius(s),
+                height,
+                x: 0,
+                y: 0,
+                z: 0,
+                color: componentColor(Component.Vessel),
+                opacity: 0.12,
+                component: Component.Vessel,
+                material: 'Structure',
+            });
+        }
+    }
+
+    if (discMode) {
+        notes.push(`Full-core view: ${cylinders.length.toLocaleString()} pins drawn as single discs (one per position). Open a single assembly to see concentric pin layers.`);
+    }
+    if ([...lats.values()].some((l) => l.type === 2 || l.type === 3) && !discMode) {
+        notes.push('Hex lattice (type 2/3) laid out on a rectangular approximation.');
+    }
+    if (capped) {
+        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Some pins are not shown.`);
+    }
+    if (cylinders.length === 0) {
+        if (/\bsurf\b/.test(text) || /\bcell\b/.test(text)) {
+            warnings.push('Could not expand any `pin`, `lat`, or `cell`/`surf` geometry into drawable cylinders. Check that pins reference `cyl` surfaces and lattices reference defined universes.');
+        } else {
+            warnings.push('No `pin` blocks, `lat` cards, or CSG cells found — nothing to render.');
+        }
     }
 
     return { cylinders, warnings, notes };
+}
+
+// ---------------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------------
+
+function stripComment(line: string): string {
+    // Serpent: `%` to end of line, and `/* */` blocks (handled crudely per line).
+    return line.replace(/%.*$/, '').replace(/\/\*.*?\*\//g, ' ');
+}
+
+function parsePinBlock(lines: string[], i: number, headerTokens: string[], pins: Map<string, PinDef>): number {
+    const name = headerTokens[1];
+    if (!name) return i;
+    const def: PinDef = { name, radii: [], materials: [] };
+    pins.set(name, def);
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+        const s = stripComment(lines[j]).trim();
+        if (!s) continue;
+        const tokens = s.split(/\s+/);
+        if (SERPENT_KEYWORDS.has(tokens[0].toLowerCase())) { j--; break; }
+        const matName = tokens[0];
+        if (tokens.length >= 2) {
+            const r = parseFloat(tokens[1]);
+            if (!Number.isNaN(r)) {
+                def.radii.push(r);
+                def.materials.push(matName);
+            } else {
+                // bare material that isn't a number → ill-formed; stop.
+                def.materials.push(matName);
+                break;
+            }
+        } else {
+            // bare material (outermost fill) terminates the pin.
+            def.materials.push(matName);
+            break;
+        }
+    }
+    return j;
+}
+
+function parseSurf(tokens: string[]): SurfDef | null {
+    // surf <id> <type> <params...>
+    if (tokens.length < 3) return null;
+    const id = tokens[1];
+    const type = tokens[2].toLowerCase();
+    const params = tokens.slice(3).map(Number).filter((n) => !Number.isNaN(n));
+    return { id, type, params };
+}
+
+function surfRadius(s: SurfDef): number {
+    switch (s.type) {
+        case 'cyl':
+        case 'cylz':
+            // cyl x0 y0 r  (z-axis) — radius is the 3rd param.
+            return s.params[2] ?? 0;
+        case 'cylx':
+        case 'cyly':
+            return s.params[2] ?? 0;
+        case 'sqc':
+            // sqc x0 y0 halfwidth → bounding radius ~ halfwidth.
+            return s.params[2] ?? 0;
+        case 'hexxc':
+        case 'hexyc':
+            // hexxc x0 y0 halfwidth(flat-to-flat/2).
+            return s.params[2] ?? 0;
+        default:
+            return 0;
+    }
+}
+
+function parseCell(tokens: string[]): CellDef | null {
+    // cell <name> <universe> <mat | fill u2 | outside> <surfaces...>
+    if (tokens.length < 4) return null;
+    const name = tokens[1];
+    const universe = tokens[2];
+    let fill: string | null = null;
+    let material: string | null = null;
+    let idx = 3;
+    if (tokens[3].toLowerCase() === 'fill') {
+        fill = tokens[4];
+        idx = 5;
+    } else {
+        material = tokens[3];
+        idx = 4;
+    }
+    const surfaces: { id: string; sense: number }[] = [];
+    for (let k = idx; k < tokens.length; k++) {
+        const t = tokens[k];
+        if (t === ':' || t === '#' || t === '(' || t === ')') continue;
+        const m = t.match(/^(-?)(\w+)$/);
+        if (m) surfaces.push({ id: m[2], sense: m[1] === '-' ? -1 : 1 });
+    }
+    return { name, universe, fill, material, surfaces };
+}
+
+function parseLat(lines: string[], i: number, headerTokens: string[], lats: Map<string, LatDef>): number {
+    // lat <u> <type> <x0> <y0> <nx> <ny> <pitch>
+    if (headerTokens.length < 8) return i;
+    const name = headerTokens[1];
+    const type = parseInt(headerTokens[2], 10);
+    const x0 = parseFloat(headerTokens[3]);
+    const y0 = parseFloat(headerTokens[4]);
+    const nx = parseInt(headerTokens[5], 10);
+    const ny = parseInt(headerTokens[6], 10);
+    const pitch = parseFloat(headerTokens[7]);
+    if (!(nx > 0 && ny > 0) || Number.isNaN(pitch)) return i;
+
+    const need = nx * ny;
+    const flat: string[] = [];
+    let j = i + 1;
+    for (; j < lines.length && flat.length < need; j++) {
+        const s = stripComment(lines[j]).trim();
+        if (!s) continue;
+        const tokens = s.split(/\s+/);
+        if (SERPENT_KEYWORDS.has(tokens[0].toLowerCase())) { j--; break; }
+        for (const t of tokens) {
+            flat.push(t);
+            if (flat.length >= need) break;
+        }
+    }
+    const grid: string[][] = [];
+    for (let r = 0; r < ny; r++) {
+        grid.push(flat.slice(r * nx, r * nx + nx));
+    }
+    lats.set(name, { name, type, x0, y0, nx, ny, pitch, grid });
+    return j - 1;
+}
+
+function countPins(
+    coreLat: string | null,
+    lats: Map<string, LatDef>,
+    resolveFill: (u: string) => string,
+    isPin: (u: string) => boolean,
+    depth = 0,
+): number {
+    if (!coreLat || depth > 12) return isPin(coreLat ?? '') ? 1 : 0;
+    const lat = lats.get(coreLat);
+    if (!lat) return isPin(coreLat) ? 1 : 0;
+    let total = 0;
+    for (const row of lat.grid) {
+        for (const entry of row) {
+            const r = resolveFill(entry);
+            if (lats.has(r)) total += countPins(r, lats, resolveFill, isPin, depth + 1);
+            else if (isPin(r)) total += 1;
+        }
+    }
+    return total;
 }

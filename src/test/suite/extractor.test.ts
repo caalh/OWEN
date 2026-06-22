@@ -145,6 +145,207 @@ geometry {
         assert.ok(cyls.some((c) => c.component === 'vessel'), 'expected a vessel shell from the zCylinder surface');
     });
 
+    // --- MCNP lattice / universe expansion (the v0.1.8 work) ---
+
+    test('expands an MCNP 3x3 square lattice of fuel + guide-tube universes', () => {
+        const deck = [
+            'MCNP mini 3x3 lattice',
+            '1 1 -10.4 -1    u=1 imp:n=1   $ fuel pellet',
+            '2 2 -6.5   1 -2 u=1 imp:n=1   $ clad',
+            '3 3 -0.7   2    u=1 imp:n=1   $ water',
+            '4 3 -0.7  -3    u=2 imp:n=1   $ guide-tube inner water',
+            '5 2 -6.5   3 -4 u=2 imp:n=1   $ guide tube',
+            '6 3 -0.7   4    u=2 imp:n=1   $ outer water',
+            '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+            '     fill=0:2 0:2 0:0',
+            '     1 2 1',
+            '     2 1 2',
+            '     1 2 1',
+            '20 0 -60 fill=10 imp:n=1',
+            '21 0  60 imp:n=0',
+            '',
+            '1 cz 0.40',
+            '2 cz 0.46',
+            '3 cz 0.56',
+            '4 cz 0.60',
+            '50 px -0.63',
+            '51 px  0.63',
+            '52 py -0.63',
+            '53 py  0.63',
+            '60 rpp -1.89 1.89 -1.89 1.89 -10 10',
+            '',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+            'm2 40090.80c 1.0',
+            'm3 1001.80c 2.0 8016.80c 1.0',
+            'mode n',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'mcnp');
+        assert.strictEqual(distinctX(cyls), 3, `expected a 3-column lattice, got ${distinctX(cyls)}`);
+        assert.strictEqual(cyls.filter((c) => c.component === 'guide_tube').length, 4,
+            'expected 4 guide-tube layers (the 4 guide positions)');
+        assert.ok(cyls.some((c) => c.component === 'fuel'), 'expected fuel pins from the 5 fuel positions');
+        // 5 fuel × 2 layers + 4 guide × 2 layers = 18 cylinders.
+        assert.strictEqual(cyls.length, 18, `expected 18 pin-layer cylinders, got ${cyls.length}`);
+    });
+
+    test('expands a nested MCNP core lattice (a lattice of assembly lattices of pins)', () => {
+        const deck = [
+            'MCNP nested core',
+            '1 1 -10.4 -1 u=1 imp:n=1',
+            '2 3 -0.7   1 u=1 imp:n=1',
+            '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+            '     fill=0:1 0:1 0:0',
+            '     1 1 1 1',
+            '20 0 70 -71 72 -73 lat=1 u=100 imp:n=1',
+            '     fill=0:1 0:1 0:0',
+            '     10 10 10 10',
+            '30 0 -60 fill=100 imp:n=1',
+            '31 0  60 imp:n=0',
+            '',
+            '1 cz 0.40',
+            '50 px -0.63',
+            '51 px  0.63',
+            '52 py -0.63',
+            '53 py  0.63',
+            '70 px -1.26',
+            '71 px  1.26',
+            '72 py -1.26',
+            '73 py  1.26',
+            '60 rpp -5 5 -5 5 -10 10',
+            '',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+            'm3 1001.80c 2.0 8016.80c 1.0',
+            'mode n',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'mcnp');
+        // 2x2 core × 2x2 assemblies × 1 fuel layer = 16 cylinders, 4 columns.
+        assert.strictEqual(cyls.length, 16, `expected 16 fuel cylinders, got ${cyls.length}`);
+        assert.strictEqual(distinctX(cyls), 4, 'expected 4 pin columns across the nested core');
+    });
+
+    test('classifies an MCNP instrument tube (air centre) vs guide tube (water centre)', () => {
+        const deck = [
+            'MCNP tube classification',
+            '1 4 -0.00120 -1    u=1 imp:n=1   $ air centre',
+            '2 2 -6.5      1 -2 u=1 imp:n=1   $ Zr thimble',
+            '3 3 -0.7      2    u=1 imp:n=1   $ water',
+            '4 3 -0.7     -3    u=2 imp:n=1   $ water centre',
+            '5 2 -6.5      3 -4 u=2 imp:n=1   $ Zr tube',
+            '6 3 -0.7      4    u=2 imp:n=1   $ water',
+            '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+            '     fill=0:1 0:1 0:0',
+            '     1 2 2 1',
+            '20 0 -60 fill=10 imp:n=1',
+            '21 0  60 imp:n=0',
+            '',
+            '1 cz 0.43',
+            '2 cz 0.48',
+            '3 cz 0.56',
+            '4 cz 0.60',
+            '50 px -0.63',
+            '51 px  0.63',
+            '52 py -0.63',
+            '53 py  0.63',
+            '60 rpp -1.26 1.26 -1.26 1.26 -10 10',
+            '',
+            'm2 40090.80c 1.0',
+            'm3 1001.80c 2.0 8016.80c 1.0',
+            'm4 7014.80c 0.78 8016.80c 0.21 18040.80c 0.01',
+            'mode n',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'mcnp');
+        assert.ok(cyls.some((c) => c.component === 'instrument_tube'),
+            'expected an instrument tube (air centre + Zr) to be classified');
+        assert.ok(cyls.some((c) => c.component === 'guide_tube'),
+            'expected a guide tube (water centre + Zr) to be classified');
+    });
+
+    test('still renders a bare MCNP pin cell when there is no lattice/universe', () => {
+        const deck = [
+            'Bare pin cell',
+            '1 1 -10.4 -1 imp:n=1',
+            '2 0       1  imp:n=0',
+            '',
+            '1 cz 0.41',
+            '2 cz 0.47',
+            '',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'mcnp');
+        assert.ok(cyls.some((c) => Math.abs(c.radius - 0.41) < 1e-6),
+            'expected the bare cz 0.41 cylinder to still render');
+    });
+
+    // --- Serpent lattice / nested-core expansion (the v0.1.8 work) ---
+
+    test('expands a Serpent 3x3 square lattice of pin + guide-tube universes', () => {
+        const deck = [
+            'pin 1',
+            'UO2 0.40',
+            'Zr 0.46',
+            'water',
+            'pin 2',
+            'water 0.56',
+            'Zr 0.60',
+            'water',
+            'lat 10 1 0.0 0.0 3 3 1.26',
+            '1 2 1',
+            '2 1 2',
+            '1 2 1',
+            'surf s1 sqc 0.0 0.0 1.89',
+            'cell c1 0 fill 10 -s1',
+            'cell c2 0 outside s1',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'serpent');
+        assert.strictEqual(distinctX(cyls), 3, `expected a 3-column lattice, got ${distinctX(cyls)}`);
+        assert.strictEqual(cyls.filter((c) => c.component === 'guide_tube').length, 4,
+            'expected 4 guide-tube layers');
+        assert.ok(cyls.some((c) => c.component === 'fuel'), 'expected fuel pins');
+    });
+
+    test('expands a nested Serpent core lattice (assemblies of pins)', () => {
+        const deck = [
+            'pin 1',
+            'UO2 0.40',
+            'water',
+            'lat 10 1 0.0 0.0 2 2 1.26',
+            '1 1',
+            '1 1',
+            'lat 100 1 0.0 0.0 2 2 2.52',
+            '10 10',
+            '10 10',
+            'surf s1 cyl 0.0 0.0 5.0',
+            'cell c1 0 fill 100 -s1',
+            'cell c2 0 outside s1',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'serpent');
+        const pins = cyls.filter((c) => c.component !== 'vessel');
+        assert.strictEqual(pins.length, 16, `expected 16 fuel cylinders, got ${pins.length}`);
+        assert.strictEqual(distinctX(pins), 4, 'expected 4 pin columns across the nested core');
+    });
+
+    test('classifies a Serpent instrument tube from an air centre', () => {
+        const deck = [
+            'pin f',
+            'UO2 0.40',
+            'water',
+            'pin it',
+            'air 0.43',
+            'Zr 0.48',
+            'water',
+            'lat 10 1 0.0 0.0 2 2 1.26',
+            'f it',
+            'it f',
+            'surf s1 sqc 0.0 0.0 1.26',
+            'cell c1 0 fill 10 -s1',
+            'cell c2 0 outside s1',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'serpent');
+        assert.ok(cyls.some((c) => c.component === 'instrument_tube'),
+            'expected an instrument tube (air centre) to be classified');
+        assert.ok(cyls.some((c) => c.component === 'fuel'), 'expected fuel pins');
+    });
+
     test('builds a component legend in buildScene', () => {
         const deck = `
 geometry { universes {

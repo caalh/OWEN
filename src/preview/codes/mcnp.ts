@@ -1,23 +1,92 @@
 // MCNP geometry extractor.
 //
-// MCNP geometry is constructive solid geometry over quadric surfaces. A full
-// universe/`fill`/`lat` expansion is out of scope here; OWEN renders the
-// z-axis cylinders that dominate pin/assembly previews:
-//   - `cz r`            — cylinder on the z-axis (origin)
-//   - `c/z x y r`       — cylinder parallel to z at (x, y)
-// Axial extent comes from `pz` planes when present. `lat`/`fill` lattices and
-// non-z-axis cylinders are reported, not silently dropped.
+// MCNP geometry is constructive solid geometry over quadric surfaces and
+// macrobodies, layered into a `universe` / `fill` / `lat` hierarchy. This
+// parser expands that hierarchy toward the shared geometry IR the same way the
+// SCONE path does:
+//
+//   surfaces (cz / c/z / pz / px / py / rpp / rcc / rhp|hex)
+//     → pin universes (cells sharing `u=N` → concentric cylinders, classified
+//       fuel / guide-tube / instrument-tube by their material ZAIDs)
+//     → lattice universes (`lat=1` square / `lat=2` hex cell + `fill` array)
+//     → the root `fill` cell → a full assembly or a nested core (a core
+//       lattice of assembly lattices of pins).
+//
+// Lattice `fill` index ranges (`fill= i1:i2 j1:j2 k1:k2 u u u …`, with `nR`
+// repeats) are expanded into placed sub-universes. Materials are classified by
+// ZAID (92xxx/94xxx → fuel, Zr → clad, H+O → water, He → gap, B/Ag-In-Cd →
+// absorber, Fe/Cr/Ni → steel) so the component/material toggles are meaningful
+// across codes. Anything that can't be expanded is reported as a warning rather
+// than silently collapsing to a single pin.
+//
+// A deck with no universes/lattices (a bare pin cell) still renders its z-axis
+// cylinders directly, as before.
 
 import { CylinderSpec, Component, ComponentId, ParseResult } from '../types';
-import { componentColor } from '../palette';
+import { componentColor, emitLayers, materialColor } from '../palette';
+
+const FULL_LAYER_LIMIT = 4000; // above this, draw one disc per pin
+const MAX_CYLINDERS = 200000;
+
+type SurfaceType =
+    | 'cz' | 'cx' | 'cy' | 'c/z' | 'c/x' | 'c/y'
+    | 'pz' | 'px' | 'py'
+    | 'rpp' | 'rcc' | 'rhp' | 'hex'
+    | 'other';
 
 interface MCNPSurface {
-    id: string;
-    type: 'cz' | 'cx' | 'cy' | 'c/z' | 'c/x' | 'c/y' | 'pz' | 'px' | 'py';
+    id: number;
+    type: SurfaceType;
     params: number[];
 }
 
-const SURFACE_RE = /^\s*\*?(\d+)\s+(c\/z|c\/x|c\/y|cz|cx|cy|pz|px|py)\s+([-+0-9.eE\s]+)/i;
+interface MaterialInfo {
+    name: string;
+    component: ComponentId;
+}
+
+interface MCNPCell {
+    id: number;
+    material: number;
+    surfaces: number[]; // signed surface ids from the geometry portion
+    u: number | null; // universe this cell belongs to (null = universe 0)
+    fill: FillSpec | null;
+    lat: number | null; // 1 = square, 2 = hex
+}
+
+interface FillSpec {
+    uniform: number | null; // single-universe fill
+    nx: number;
+    ny: number;
+    grid: number[][]; // [j][i]
+}
+
+interface PinLayer {
+    radius: number;
+    component: ComponentId;
+    material: string;
+    color: string;
+}
+
+interface PinUniverse {
+    id: number;
+    layers: PinLayer[];
+    kind: 'fuel' | 'guide' | 'instrument' | 'other';
+}
+
+interface LatUniverse {
+    id: number;
+    hex: boolean;
+    pitchX: number;
+    pitchY: number;
+    fill: FillSpec;
+}
+
+const SURFACE_MNEMONICS = new Set([
+    'cz', 'cx', 'cy', 'c/z', 'c/x', 'c/y', 'pz', 'px', 'py', 'p',
+    'rpp', 'rcc', 'rhp', 'hex', 'so', 's', 'sx', 'sy', 'sz', 'sph',
+    'kz', 'kx', 'ky', 'gq', 'sq', 'tz', 'tx', 'ty', 'box', 'rec', 'trc', 'ell', 'wed', 'arb',
+]);
 
 export function extractMcnpCylinders(text: string): CylinderSpec[] {
     return parseMcnp(text).cylinders;
@@ -26,9 +95,567 @@ export function extractMcnpCylinders(text: string): CylinderSpec[] {
 export function parseMcnp(text: string): ParseResult {
     const warnings: string[] = [];
     const notes: string[] = [];
-    const surfaces = parseSurfaces(text);
+
+    const cards = logicalCards(text);
+    const surfaces = new Map<number, MCNPSurface>();
+    const materials = new Map<number, MaterialInfo>();
+    const cells: MCNPCell[] = [];
+
+    for (const card of cards) {
+        const kind = classifyCard(card);
+        if (kind === 'surface') {
+            const s = parseSurface(card);
+            if (s) surfaces.set(s.id, s);
+        } else if (kind === 'cell') {
+            const c = parseCell(card);
+            if (c) cells.push(c);
+        } else if (kind === 'material') {
+            const m = parseMaterial(card);
+            if (m) materials.set(m.id, m.info);
+        }
+    }
+
+    // Axial extent from pz planes (global), else default per render mode.
     const zBounds = findZPlaneBounds(surfaces);
 
+    // Build pin and lattice universes.
+    const pinUniverses = new Map<number, PinUniverse>();
+    const latUniverses = new Map<number, LatUniverse>();
+
+    // Group cells by universe id.
+    const byUniverse = new Map<number, MCNPCell[]>();
+    for (const c of cells) {
+        const uid = c.u ?? 0;
+        if (!byUniverse.has(uid)) byUniverse.set(uid, []);
+        byUniverse.get(uid)!.push(c);
+    }
+
+    // Lattice universes: a cell with lat= and a universe id.
+    for (const c of cells) {
+        if (c.lat !== null && c.u !== null && c.fill) {
+            const { pitchX, pitchY, hex } = latticePitch(c, surfaces);
+            latUniverses.set(c.u, {
+                id: c.u,
+                hex: c.lat === 2 || hex,
+                pitchX,
+                pitchY,
+                fill: c.fill,
+            });
+        }
+    }
+
+    // Pin universes: cells with u=N that are NOT lattice cells.
+    for (const [uid, group] of byUniverse) {
+        if (uid === 0) continue;
+        if (latUniverses.has(uid)) continue;
+        const pin = buildPinUniverse(uid, group, surfaces, materials);
+        if (pin) pinUniverses.set(uid, pin);
+    }
+
+    // Determine the top universe to place: a universe-0 cell with fill=,
+    // preferring one that resolves to a lattice; else the largest lattice.
+    let topUid: number | null = null;
+    for (const c of byUniverse.get(0) ?? []) {
+        if (c.fill && c.fill.uniform !== null) {
+            const f = c.fill.uniform;
+            if (latUniverses.has(f) || pinUniverses.has(f)) {
+                if (topUid === null || latUniverses.has(f)) topUid = f;
+            }
+        }
+    }
+    if (topUid === null) {
+        let bestPitch = -1;
+        for (const lat of latUniverses.values()) {
+            const p = Math.max(lat.pitchX, lat.pitchY);
+            if (p > bestPitch) { bestPitch = p; topUid = lat.id; }
+        }
+    }
+
+    // No hierarchy at all → fall back to drawing standalone z-axis cylinders.
+    if (topUid === null && latUniverses.size === 0) {
+        return renderBareSurfaces(surfaces, zBounds, warnings, notes, text);
+    }
+
+    // Count pins to choose fidelity (layer mode vs. disc mode).
+    const totalPins = countPins(topUid, latUniverses, pinUniverses);
+    const discMode = totalPins > FULL_LAYER_LIMIT;
+
+    const height = zBounds
+        ? Math.max(0.1, zBounds.zmax - zBounds.zmin)
+        : (discMode ? 200 : 40);
+    const zmid = zBounds ? (zBounds.zmax + zBounds.zmin) / 2 : 0;
+
+    // Smallest lattice pitch → disc radius scale.
+    let subPitch = 1.26;
+    for (const lat of latUniverses.values()) subPitch = Math.min(subPitch, lat.pitchX, lat.pitchY);
+    if (!(subPitch > 0)) subPitch = 1.26;
+
+    const cylinders: CylinderSpec[] = [];
+    let capped = false;
+
+    const placePin = (uid: number, cx: number, cy: number, label: string): void => {
+        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        const pin = pinUniverses.get(uid);
+        if (!pin || pin.layers.length === 0) return;
+
+        if (discMode) {
+            // Dominant solid layer drives the colour; component from the pin's
+            // classified kind so guide/instrument tubes read correctly.
+            let solid = pin.layers.find((l) => l.component !== Component.Gap && l.component !== Component.Moderator) ?? pin.layers[0];
+            let comp: ComponentId = solid.component;
+            let color = solid.color;
+            if (pin.kind === 'guide') { comp = Component.GuideTube; color = componentColor(comp); }
+            else if (pin.kind === 'instrument') { comp = Component.InstrumentTube; color = componentColor(comp); }
+            cylinders.push({
+                label,
+                radius: Math.min(subPitch * 0.47, Math.max(...pin.layers.map((l) => l.radius))),
+                height,
+                x: cx,
+                y: cy,
+                z: zmid,
+                color,
+                opacity: 1.0,
+                component: comp,
+                material: solid.material,
+            });
+            return;
+        }
+
+        const radii = pin.layers.map((l) => l.radius);
+        const components = pin.layers.map((l) => l.component);
+        const colors = pin.layers.map((l) => l.color);
+        const mats = pin.layers.map((l) => l.material);
+        cylinders.push(...emitLayers(radii, components, cx, cy, zmid, height, label, colors, mats));
+    };
+
+    const placeUniverse = (uid: number, cx: number, cy: number, label: string, depth: number): void => {
+        if (depth > 12) return;
+        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        const lat = latUniverses.get(uid);
+        if (lat) {
+            const { nx, ny, grid } = lat.fill;
+            const x0 = cx - (nx - 1) * lat.pitchX / 2;
+            const y0 = cy - (ny - 1) * lat.pitchY / 2;
+            for (let j = 0; j < ny; j++) {
+                for (let i = 0; i < nx; i++) {
+                    const sub = grid[j]?.[i] ?? 0;
+                    if (sub === 0) continue;
+                    const px = x0 + i * lat.pitchX;
+                    const py = y0 + j * lat.pitchY;
+                    if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1);
+                    else placePin(sub, px, py, `${label}_r${j}c${i}`);
+                }
+            }
+            return;
+        }
+        placePin(uid, cx, cy, label);
+    };
+
+    if (topUid !== null) placeUniverse(topUid, 0, 0, 'core', 0);
+
+    if (cylinders.length === 0) {
+        warnings.push('Found `lat`/`fill`/`u` cards but could not expand the universe hierarchy (missing pin universes, fill array, or pitch surfaces). Check that pin universes reference cz/c/z cylinders and the lattice cell is bounded by px/py planes or an rpp.');
+        // Last resort: try drawing whatever bare cylinders exist.
+        const bare = renderBareSurfaces(surfaces, zBounds, [], [], text);
+        return { cylinders: bare.cylinders, warnings, notes: bare.notes };
+    }
+
+    // Vessel / barrel context: large z-axis cylinders not used as pins.
+    let footprint = 0;
+    for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
+    const vesselShells = [...surfaces.values()]
+        .filter((s) => (s.type === 'cz' || s.type === 'c/z') && cylinderRadius(s) > footprint * 0.5)
+        .sort((a, b) => cylinderRadius(b) - cylinderRadius(a));
+    for (const s of vesselShells) {
+        cylinders.push({
+            label: `vessel_${s.id}`,
+            radius: cylinderRadius(s),
+            height,
+            x: s.type === 'c/z' ? s.params[0] : 0,
+            y: s.type === 'c/z' ? s.params[1] : 0,
+            z: zmid,
+            color: componentColor(Component.Vessel),
+            opacity: 0.12,
+            component: Component.Vessel,
+            material: 'Structure',
+        });
+    }
+
+    if (discMode) {
+        notes.push(`Full-core view: ${cylinders.length.toLocaleString()} pins drawn as single discs (one per position). Open a single assembly to see concentric pin layers.`);
+    } else {
+        const assemblies = latUniverses.size;
+        notes.push(`Expanded the MCNP universe hierarchy (${pinUniverses.size} pin universe(s), ${assemblies} lattice(s)).`);
+    }
+    if (capped) {
+        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Some pins are not shown.`);
+    }
+
+    return { cylinders, warnings, notes };
+}
+
+// ---------------------------------------------------------------------------
+// Card preprocessing
+// ---------------------------------------------------------------------------
+
+/**
+ * Splits a deck into logical cards: strips `$` inline comments and `c` comment
+ * cards, joins continuation lines (≥5 leading spaces, or a trailing `&`), and
+ * normalises whitespace around `=`.
+ */
+function logicalCards(text: string): string[] {
+    const lines = text.split(/\r?\n/);
+    const cards: string[] = [];
+    let buf = '';
+
+    const flush = () => {
+        const trimmed = buf.trim();
+        if (trimmed) cards.push(trimmed.replace(/\s*=\s*/g, '='));
+        buf = '';
+    };
+
+    for (let raw of lines) {
+        raw = raw.replace(/\$.*$/, ''); // inline comment
+        if (raw.trim() === '') { flush(); continue; }
+        if (/^\s{0,4}c(\s|$)/i.test(raw)) continue; // comment card
+        const isCont = /^\s{5,}\S/.test(raw) || /&\s*$/.test(buf);
+        if (isCont && buf !== '') {
+            buf = buf.replace(/&\s*$/, '') + ' ' + raw.trim();
+        } else {
+            flush();
+            buf = raw.trim();
+        }
+    }
+    flush();
+    return cards;
+}
+
+function classifyCard(card: string): 'cell' | 'surface' | 'material' | 'other' {
+    const tokens = card.split(/\s+/);
+    if (tokens.length === 0) return 'other';
+    const first = tokens[0].toLowerCase();
+    if (/^m\d+$/.test(first)) return 'material';
+    // Surface: [*]id [transform] mnemonic ...
+    const idMatch = /^\*?\d+$/.test(tokens[0]);
+    if (idMatch) {
+        const t1 = (tokens[1] ?? '').toLowerCase();
+        const t2 = (tokens[2] ?? '').toLowerCase();
+        if (SURFACE_MNEMONICS.has(t1)) return 'surface';
+        if (/^\d+$/.test(t1) && SURFACE_MNEMONICS.has(t2)) return 'surface';
+        // Otherwise a cell card: id mat density geom...
+        return 'cell';
+    }
+    return 'other';
+}
+
+// ---------------------------------------------------------------------------
+// Surfaces
+// ---------------------------------------------------------------------------
+
+function parseSurface(card: string): MCNPSurface | null {
+    const tokens = card.split(/\s+/);
+    const idTok = tokens[0].replace(/^\*/, '');
+    const id = parseInt(idTok, 10);
+    if (Number.isNaN(id)) return null;
+    let idx = 1;
+    if (/^\d+$/.test(tokens[1] ?? '') && SURFACE_MNEMONICS.has((tokens[2] ?? '').toLowerCase())) {
+        idx = 2; // skip a transform number
+    }
+    const type = (tokens[idx] ?? '').toLowerCase();
+    const params = tokens.slice(idx + 1).map(Number).filter((n) => !Number.isNaN(n));
+    const knownTypes: SurfaceType[] = ['cz', 'cx', 'cy', 'c/z', 'c/x', 'c/y', 'pz', 'px', 'py', 'rpp', 'rcc', 'rhp', 'hex'];
+    const t = (knownTypes as string[]).includes(type) ? (type as SurfaceType) : 'other';
+    return { id, type: t, params };
+}
+
+function cylinderRadius(s: MCNPSurface): number {
+    if (s.type === 'cz') return s.params[0] ?? 0;
+    if (s.type === 'c/z') return s.params[2] ?? 0;
+    if (s.type === 'rcc') return s.params[6] ?? 0;
+    return 0;
+}
+
+function findZPlaneBounds(surfaces: Map<number, MCNPSurface>): { zmin: number; zmax: number } | null {
+    const pzs: number[] = [];
+    for (const s of surfaces.values()) {
+        if (s.type === 'pz') pzs.push(s.params[0]);
+        else if (s.type === 'rpp' && s.params.length >= 6) { pzs.push(s.params[4], s.params[5]); }
+        else if (s.type === 'rcc' && s.params.length >= 6) { pzs.push(s.params[2], s.params[2] + s.params[5]); }
+    }
+    if (pzs.length >= 2) {
+        const zmin = Math.min(...pzs);
+        const zmax = Math.max(...pzs);
+        if (zmax > zmin) return { zmin, zmax };
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Materials (classified by ZAID)
+// ---------------------------------------------------------------------------
+
+function parseMaterial(card: string): { id: number; info: MaterialInfo } | null {
+    const tokens = card.split(/\s+/);
+    const id = parseInt(tokens[0].slice(1), 10);
+    if (Number.isNaN(id)) return null;
+    const zaids: number[] = [];
+    for (let i = 1; i < tokens.length; i++) {
+        const zm = tokens[i].match(/^(\d+)(?:\.\d+[a-z])?$/i);
+        if (zm) {
+            const z = parseInt(zm[1], 10);
+            if (z >= 1000) zaids.push(z);
+        }
+    }
+    return { id, info: classifyMaterial(zaids) };
+}
+
+function classifyMaterial(zaids: number[]): MaterialInfo {
+    const elems = new Set(zaids.map((z) => Math.floor(z / 1000)));
+    const has = (z: number) => elems.has(z);
+    if (has(92) || has(94)) return { name: has(94) ? 'MOX' : 'UO2', component: Component.Fuel };
+    if (has(5) && has(6) && !has(26)) return { name: 'B4C', component: Component.Absorber };
+    if (has(47) || has(49) || (has(48) && has(47))) return { name: 'Ag-In-Cd', component: Component.Absorber };
+    if (has(5) && has(14) && has(8) && has(13)) return { name: 'Borosilicate', component: Component.Absorber };
+    if ((has(26) && has(24)) || (has(28) && has(24)) || has(25)) return { name: 'Steel', component: Component.Structure };
+    if (has(40)) return { name: 'Zircaloy', component: Component.Clad };
+    if (has(1) && has(8)) return { name: 'Water', component: Component.Moderator };
+    if (has(2)) return { name: 'Helium', component: Component.Gap };
+    if (has(7) && has(8)) return { name: 'Air', component: Component.Gap };
+    if (has(8) && elems.size === 1) return { name: 'Oxide', component: Component.Other };
+    return { name: 'material', component: Component.Other };
+}
+
+// ---------------------------------------------------------------------------
+// Cells
+// ---------------------------------------------------------------------------
+
+function parseCell(card: string): MCNPCell | null {
+    const tokens = card.split(/\s+/);
+    const id = parseInt(tokens[0], 10);
+    if (Number.isNaN(id)) return null;
+    const material = parseInt(tokens[1], 10);
+    if (Number.isNaN(material)) return null;
+
+    // Geometry starts after material (and density if material != 0).
+    let gStart = 2;
+    if (material !== 0) gStart = 3; // skip density
+
+    // Find where params begin (first token containing '=').
+    let pStart = tokens.findIndex((t, i) => i >= gStart && t.includes('='));
+    if (pStart < 0) pStart = tokens.length;
+
+    const geomTokens = tokens.slice(gStart, pStart);
+    const surfaces: number[] = [];
+    for (const g of geomTokens) {
+        const m = g.match(/-?\d+/g);
+        if (m) for (const n of m) surfaces.push(parseInt(n, 10));
+    }
+
+    const paramTokens = tokens.slice(pStart);
+    let u: number | null = null;
+    let lat: number | null = null;
+    let fill: FillSpec | null = null;
+
+    for (let i = 0; i < paramTokens.length; i++) {
+        const tok = paramTokens[i];
+        const eq = tok.indexOf('=');
+        if (eq < 0) continue;
+        const key = tok.slice(0, eq).toLowerCase().replace(/^\*/, '');
+        const val = tok.slice(eq + 1);
+        if (key === 'u') u = parseInt(val, 10);
+        else if (key === 'lat') lat = parseInt(val, 10);
+        else if (key === 'fill') {
+            // Collect this token's value plus following tokens until the next 'key='.
+            const fillToks: string[] = [];
+            if (val) fillToks.push(val);
+            for (let j = i + 1; j < paramTokens.length; j++) {
+                if (paramTokens[j].includes('=')) break;
+                fillToks.push(paramTokens[j]);
+            }
+            fill = parseFill(fillToks);
+        }
+    }
+    if (u !== null && Number.isNaN(u)) u = null;
+    if (lat !== null && Number.isNaN(lat)) lat = null;
+
+    return { id, material, surfaces, u, fill, lat };
+}
+
+function parseFill(tokens: string[]): FillSpec | null {
+    if (tokens.length === 0) return null;
+    const rangeRe = /^(-?\d+):(-?\d+)$/;
+    if (tokens.length >= 3 && rangeRe.test(tokens[0]) && rangeRe.test(tokens[1]) && rangeRe.test(tokens[2])) {
+        const [i1, i2] = tokens[0].match(rangeRe)!.slice(1).map(Number);
+        const [j1, j2] = tokens[1].match(rangeRe)!.slice(1).map(Number);
+        const [k1, k2] = tokens[2].match(rangeRe)!.slice(1).map(Number);
+        const nx = i2 - i1 + 1;
+        const ny = j2 - j1 + 1;
+        const nz = k2 - k1 + 1;
+        if (nx <= 0 || ny <= 0 || nz <= 0 || nx * ny * nz > 5_000_000) return null;
+        const values = expandRepeats(tokens.slice(3));
+        const grid: number[][] = [];
+        for (let j = 0; j < ny; j++) {
+            const row: number[] = [];
+            for (let i = 0; i < nx; i++) {
+                const idx = i + j * nx; // k = 0 slice
+                row.push(idx < values.length ? values[idx] : 0);
+            }
+            grid.push(row);
+        }
+        return { uniform: null, nx, ny, grid };
+    }
+    // Single-universe fill.
+    const single = parseInt(tokens[0], 10);
+    if (!Number.isNaN(single)) return { uniform: single, nx: 1, ny: 1, grid: [[single]] };
+    return null;
+}
+
+/** Expands MCNP `nR` repeat shorthand in a fill value list. */
+function expandRepeats(tokens: string[]): number[] {
+    const out: number[] = [];
+    for (const tok of tokens) {
+        const rep = tok.match(/^(\d+)[rR]$/);
+        if (rep) {
+            const n = parseInt(rep[1], 10);
+            const last = out.length ? out[out.length - 1] : 0;
+            for (let k = 0; k < n; k++) out.push(last);
+            continue;
+        }
+        const n = parseInt(tok, 10);
+        if (!Number.isNaN(n)) out.push(n);
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Pin universes
+// ---------------------------------------------------------------------------
+
+function buildPinUniverse(
+    uid: number,
+    cells: MCNPCell[],
+    surfaces: Map<number, MCNPSurface>,
+    materials: Map<number, MaterialInfo>,
+): PinUniverse | null {
+    const layers: PinLayer[] = [];
+    for (const cell of cells) {
+        if (cell.lat !== null) continue;
+        // A cell filled with another universe is structural, not a drawable layer.
+        if (cell.fill) continue;
+        // Outer radius = smallest cylinder this cell is *inside* of (negative sense).
+        let outer = Infinity;
+        for (const s of cell.surfaces) {
+            if (s >= 0) continue;
+            const surf = surfaces.get(-s);
+            if (!surf) continue;
+            const r = cylinderRadius(surf);
+            if (r > 0 && r < outer) outer = r;
+        }
+        if (!isFinite(outer)) continue; // background fill cell (no bounding cylinder)
+        const info = materials.get(cell.material) ?? { name: cell.material === 0 ? 'void' : 'material', component: Component.Other };
+        layers.push({
+            radius: outer,
+            component: info.component,
+            material: info.name,
+            color: materialColor(info.name),
+        });
+    }
+    if (layers.length === 0) return null;
+    layers.sort((a, b) => a.radius - b.radius);
+
+    // Classify the universe and reassign component tags so the toggle UI groups
+    // guide / instrument tubes correctly (a guide tube's Zr ring is a guide
+    // tube, not generic clad).
+    const hasFuel = layers.some((l) => l.component === Component.Fuel);
+    let kind: PinUniverse['kind'] = 'other';
+    if (hasFuel) {
+        kind = 'fuel';
+    } else {
+        const innermost = layers[0];
+        const innerIsAir = /air|void/i.test(innermost.material);
+        const hasTube = layers.some((l) => l.component === Component.Clad || l.component === Component.Structure);
+        if (hasTube && innerIsAir) kind = 'instrument';
+        else if (hasTube) kind = 'guide';
+    }
+
+    if (kind === 'guide') {
+        for (const l of layers) if (l.component === Component.Clad || l.component === Component.Structure) l.component = Component.GuideTube;
+    } else if (kind === 'instrument') {
+        for (const l of layers) if (l.component === Component.Clad || l.component === Component.Structure) l.component = Component.InstrumentTube;
+    }
+
+    return { id: uid, layers, kind };
+}
+
+// ---------------------------------------------------------------------------
+// Lattice pitch
+// ---------------------------------------------------------------------------
+
+function latticePitch(cell: MCNPCell, surfaces: Map<number, MCNPSurface>): { pitchX: number; pitchY: number; hex: boolean } {
+    const pxs: number[] = [];
+    const pys: number[] = [];
+    let pitchX = 0;
+    let pitchY = 0;
+    let hex = false;
+
+    for (const s of cell.surfaces) {
+        const surf = surfaces.get(Math.abs(s));
+        if (!surf) continue;
+        if (surf.type === 'px') pxs.push(surf.params[0]);
+        else if (surf.type === 'py') pys.push(surf.params[0]);
+        else if (surf.type === 'rpp' && surf.params.length >= 4) {
+            pitchX = Math.abs(surf.params[1] - surf.params[0]);
+            pitchY = Math.abs(surf.params[3] - surf.params[2]);
+        } else if ((surf.type === 'rhp' || surf.type === 'hex') && surf.params.length >= 9) {
+            // Facet vector r → flat-to-flat = 2|r|.
+            const ff = 2 * Math.hypot(surf.params[6], surf.params[7], surf.params[8]);
+            pitchX = ff;
+            pitchY = ff;
+            hex = true;
+        }
+    }
+    if (pxs.length >= 2) pitchX = Math.max(...pxs) - Math.min(...pxs);
+    if (pys.length >= 2) pitchY = Math.max(...pys) - Math.min(...pys);
+    if (!(pitchX > 0)) pitchX = pitchY > 0 ? pitchY : 1.26;
+    if (!(pitchY > 0)) pitchY = pitchX;
+    return { pitchX, pitchY, hex };
+}
+
+// ---------------------------------------------------------------------------
+// Pin counting (fidelity decision)
+// ---------------------------------------------------------------------------
+
+function countPins(
+    topUid: number | null,
+    latUniverses: Map<number, LatUniverse>,
+    pinUniverses: Map<number, PinUniverse>,
+    depth = 0,
+): number {
+    if (topUid === null || depth > 12) return 0;
+    const lat = latUniverses.get(topUid);
+    if (!lat) return pinUniverses.has(topUid) ? 1 : 0;
+    let total = 0;
+    for (const row of lat.fill.grid) {
+        for (const sub of row) {
+            if (sub === 0) continue;
+            if (latUniverses.has(sub)) total += countPins(sub, latUniverses, pinUniverses, depth + 1);
+            else if (pinUniverses.has(sub)) total += 1;
+        }
+    }
+    return total;
+}
+
+// ---------------------------------------------------------------------------
+// Bare-surface fallback (no universes / lattices)
+// ---------------------------------------------------------------------------
+
+function renderBareSurfaces(
+    surfaces: Map<number, MCNPSurface>,
+    zBounds: { zmin: number; zmax: number } | null,
+    warnings: string[],
+    notes: string[],
+    text: string,
+): ParseResult {
     let height = 10.0;
     let zmid = 0;
     if (zBounds) {
@@ -38,44 +665,38 @@ export function parseMcnp(text: string): ParseResult {
 
     const cylinders: CylinderSpec[] = [];
     let offAxis = 0;
-
     for (const surf of surfaces.values()) {
         if (surf.type === 'cz') {
-            const radius = surf.params[0];
-            if (radius > 0) cylinders.push(makeCyl(0, 0, zmid, radius, height, surf.id));
+            const r = surf.params[0];
+            if (r > 0) cylinders.push(makeBareCyl(0, 0, zmid, r, height, surf.id));
         } else if (surf.type === 'c/z') {
-            // c/z x y r
-            const [x, y, radius] = surf.params;
-            if (radius > 0) cylinders.push(makeCyl(x ?? 0, y ?? 0, zmid, radius, height, surf.id));
+            const [x, y, r] = surf.params;
+            if (r > 0) cylinders.push(makeBareCyl(x ?? 0, y ?? 0, zmid, r, height, surf.id));
+        } else if (surf.type === 'rcc' && surf.params.length >= 7) {
+            const r = surf.params[6];
+            if (r > 0) cylinders.push(makeBareCyl(surf.params[0], surf.params[1], zmid, r, height, surf.id));
         } else if (surf.type === 'cx' || surf.type === 'cy' || surf.type === 'c/x' || surf.type === 'c/y') {
             offAxis++;
         }
     }
 
-    // Concentric z-axis cylinders at the same (x,y) get layered components so the
-    // toggle UI is meaningful (innermost = fuel … outermost = moderator).
     assignComponents(cylinders);
 
-    if (/\bfill\b|\blat\b/i.test(text)) {
-        warnings.push('This deck uses `lat`/`fill` lattices. OWEN does not yet expand MCNP universe/lattice hierarchies, so repeated pins are not instantiated — only the explicitly-defined surfaces are shown.');
-    }
     if (offAxis > 0) {
         notes.push(`${offAxis} non-z-axis cylinder(s) (cx/cy/c/x/c/y) were skipped — the preview renders z-axis cylinders only.`);
     }
     if (cylinders.length === 0) {
-        warnings.push('No z-axis cylinders (cz / c/z) found. OWEN renders MCNP geometry from z-axis cylinders; macrobodies and other quadrics are not yet supported.');
+        warnings.push('No z-axis cylinders (cz / c/z / z-aligned rcc) found, and no `lat`/`fill`/`u` universe hierarchy to expand. Nothing to render.');
     } else {
-        notes.push(`Rendered ${cylinders.length} z-axis cylinder(s).`);
+        notes.push(`Rendered ${cylinders.length} z-axis cylinder(s) (no lattice/universe hierarchy in this deck).`);
     }
-
     return { cylinders, warnings, notes };
 }
 
-function makeCyl(x: number, y: number, z: number, radius: number, height: number, surfaceId: string): CylinderSpec {
-    return { x, y, z, radius, height, surfaceId, component: Component.Other, material: `surface ${surfaceId}` };
+function makeBareCyl(x: number, y: number, z: number, radius: number, height: number, surfaceId: number): CylinderSpec {
+    return { x, y, z, radius, height, surfaceId: String(surfaceId), component: Component.Other, material: `surface ${surfaceId}` };
 }
 
-/** Group cylinders by (x,y); within a stack, assign fuel→gap→clad→moderator. */
 function assignComponents(cylinders: CylinderSpec[]): void {
     const groups = new Map<string, CylinderSpec[]>();
     for (const c of cylinders) {
@@ -95,34 +716,4 @@ function assignComponents(cylinders: CylinderSpec[]): void {
             prevR = c.radius;
         });
     }
-}
-
-function parseSurfaces(text: string): Map<string, MCNPSurface> {
-    const map = new Map<string, MCNPSurface>();
-    const lines = text.split(/\r?\n/);
-    for (const raw of lines) {
-        const trimmed = raw.trim();
-        if (!trimmed || /^c(\s|$)/i.test(trimmed)) continue;
-        const m = raw.match(SURFACE_RE);
-        if (!m) continue;
-        const params = m[3]
-            .replace(/\$.*$/, '')
-            .trim()
-            .split(/\s+/)
-            .map(parseFloat)
-            .filter((n) => !isNaN(n));
-        map.set(m[1], { id: m[1], type: m[2].toLowerCase() as MCNPSurface['type'], params });
-    }
-    return map;
-}
-
-function findZPlaneBounds(surfaces: Map<string, MCNPSurface>): { zmin: number; zmax: number } | null {
-    const pzs: number[] = [];
-    for (const s of surfaces.values()) {
-        if (s.type === 'pz') pzs.push(s.params[0]);
-    }
-    if (pzs.length >= 2) {
-        return { zmin: Math.min(...pzs), zmax: Math.max(...pzs) };
-    }
-    return null;
 }
