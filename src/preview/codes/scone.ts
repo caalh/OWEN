@@ -6,15 +6,23 @@
 // cellUniverse / rootUniverse / surface / cell). It then resolves the universe
 // hierarchy, finds the core lattice, and recursively places assemblies → pins.
 //
-// For a full core (BEAVRS-scale, ~55k pins) it switches to "disc mode" — one
-// full-height cylinder per pin position, coloured by material and tagged with a
-// logical component — so the webview can instance it and offer layer toggles.
-// For a single assembly (≤ FULL_LAYER_LIMIT pins) it emits the full concentric
-// shells per pin (fuel / gap / clad / moderator …). Vessel/barrel surfaces are
-// rendered as faint shells so a reactor reads as a reactor.
+// Fidelity is driven by `FidelityOptions` (see types.ts):
+//   - detail 'layers' emits full concentric pin shells (fuel / gap / clad /
+//     moderator …) for EVERY pin, even in a full BEAVRS-scale core; the webview
+//     instances them so a few dozen draw calls cover ~hundreds of thousands of
+//     cylinders. detail 'disc' draws one disc per pin (fastest). 'auto' picks
+//     layers for a single assembly and disc for a full core.
+//   - axial expands the deck's real z-segment structure (active fuel / plenum /
+//     grid spacers / dashpot / end plugs) from `cellUniverse` axial stacks whose
+//     member cells are bounded by z-planes. When off, an axial stack collapses
+//     to a single representative pin over the full model height.
+//
+// Vessel/barrel surfaces are rendered as faint shells so a reactor reads as a
+// reactor. Anything that can't be parsed is reported as a warning/note rather
+// than silently drawing one pin.
 
-import { CylinderSpec, Component, ComponentId, ParseResult } from '../types';
-import { emitLayers, materialColor, materialComponent, componentColor } from '../palette';
+import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
+import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 
 interface LeafBlock {
     name: string;
@@ -42,14 +50,19 @@ interface SurfaceDef {
     halfwidth?: number;
 }
 
-const FULL_LAYER_LIMIT = 4000; // above this, draw one disc per pin
-const MAX_CYLINDERS = 200000;
+interface AxialSegment {
+    zmin: number;
+    zmax: number;
+    universe: number;
+}
+
+const MAX_CYLINDERS = 500000;
 
 export function extractSconeCylinders(text: string): CylinderSpec[] {
     return parseScone(text).cylinders;
 }
 
-export function parseScone(rawText: string): ParseResult {
+export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult {
     const warnings: string[] = [];
     const notes: string[] = [];
     const text = stripComments(rawText);
@@ -59,7 +72,9 @@ export function parseScone(rawText: string): ParseResult {
     const latDefs = new Map<number, LatDef>();
     const cellUniCells = new Map<number, number[]>(); // cellUniverse id -> cell ids
     const cellToUniverse = new Map<number, number>(); // cell id -> universe it is filled with
+    const cellSurfaces = new Map<number, number[]>(); // cell id -> signed surface ids
     const surfaces = new Map<number, SurfaceDef>();
+    const planeZ = new Map<number, number>(); // plane surface id -> z elevation
 
     for (const block of blocks) {
         const id = num(field(block.inner, 'id'));
@@ -90,13 +105,19 @@ export function parseScone(rawText: string): ParseResult {
         } else if (type === 'celluniverse' && id !== null) {
             cellUniCells.set(id, numList(paren(block.inner, 'cells')));
         } else if (type === 'simplecell' || type === 'cell') {
-            // cell that may fill a sub-universe (filltype uni; universe N)
             if (id !== null) {
+                cellSurfaces.set(id, numList(paren(block.inner, 'surfaces')));
                 const ft = (field(block.inner, 'filltype') ?? '').toLowerCase();
                 if (ft === 'uni') {
                     const uni = num(field(block.inner, 'universe'));
                     if (uni !== null) cellToUniverse.set(id, uni);
                 }
+            }
+        } else if (type === 'plane' && id !== null) {
+            const coeffs = numList(paren(block.inner, 'coeffs'));
+            // a x + b y + c z = d → z-plane when (a,b)=(0,0) and c != 0.
+            if (coeffs.length >= 4 && coeffs[0] === 0 && coeffs[1] === 0 && coeffs[2] !== 0) {
+                planeZ.set(id, coeffs[3] / coeffs[2]);
             }
         } else if (isSurfaceType(type) && id !== null) {
             const radius = num(field(block.inner, 'radius')) ?? undefined;
@@ -131,9 +152,6 @@ export function parseScone(rawText: string): ParseResult {
                 const pin = resolveToPin(ref, depth + 1);
                 if (pin !== null) counts.set(pin, (counts.get(pin) ?? 0) + 1);
             }
-            // Prefer a pin that actually has geometry (radii) over a bare
-            // water-fill pin, so an axial stack that is mostly water but has a
-            // fuel segment still resolves to the fuel pin.
             let best: number | null = null;
             let bestScore = -1;
             for (const [pin, n] of counts) {
@@ -147,6 +165,33 @@ export function parseScone(rawText: string): ParseResult {
         return null;
     };
 
+    // An axial stack is a cellUniverse whose member cells are bounded by z-planes
+    // (a top-to-bottom stack of segments). Build the sorted segment list.
+    const axialCache = new Map<number, AxialSegment[] | null>();
+    const axialStack = (uid: number): AxialSegment[] | null => {
+        if (axialCache.has(uid)) return axialCache.get(uid)!;
+        axialCache.set(uid, null);
+        const cells = cellUniCells.get(uid);
+        if (!cells) return null;
+        const segs: AxialSegment[] = [];
+        for (const cid of cells) {
+            const uni = cellToUniverse.get(cid);
+            if (uni === undefined) continue;
+            const surfs = cellSurfaces.get(cid) ?? [];
+            const zs: number[] = [];
+            for (const s of surfs) {
+                const z = planeZ.get(Math.abs(s));
+                if (z !== undefined) zs.push(z);
+            }
+            if (zs.length === 0) continue; // radial overlay, not an axial segment
+            segs.push({ zmin: Math.min(...zs), zmax: Math.max(...zs), universe: uni });
+        }
+        if (segs.length < 2) return null; // need a real stack
+        segs.sort((a, b) => a.zmin - b.zmin);
+        axialCache.set(uid, segs);
+        return segs;
+    };
+
     // Core lattice = largest pitch.
     let coreLatId: number | null = null;
     let corePitch = -1;
@@ -154,11 +199,20 @@ export function parseScone(rawText: string): ParseResult {
 
     // Count pin positions to pick viz fidelity.
     const totalPins = countPins(coreLatId, latDefs, resolveToPin);
-    const discMode = totalPins > FULL_LAYER_LIMIT;
+    const { detail, autoDetail } = resolveDetail(opts, totalPins);
+    const discMode = detail === 'disc';
 
-    // Heights.
+    // Does the deck define axial structure anywhere reachable?
+    const hasAxial = [...cellUniCells.keys()].some((uid) => axialStack(uid) !== null);
+    const axialOn = !!opts?.axial && hasAxial;
+
+    // Heights / global axial extent.
     const vessel = collectVessel(surfaces);
-    const coreHeight = vessel.height ?? (discMode ? 200 : 40);
+    const planeVals = [...planeZ.values()];
+    const zLo = planeVals.length ? Math.min(...planeVals) : 0;
+    const zHi = planeVals.length ? Math.max(...planeVals) : (vessel.height ?? (discMode ? 200 : 40));
+    const coreHeight = vessel.height ?? Math.max(1, zHi - zLo);
+    const coreZ = planeVals.length ? (zLo + zHi) / 2 : 0;
 
     const cylinders: CylinderSpec[] = [];
     let capped = false;
@@ -166,7 +220,14 @@ export function parseScone(rawText: string): ParseResult {
     let subPinPitch = 1.26;
     for (const lat of latDefs.values()) if (lat.pitch < corePitch || corePitch < 0) subPinPitch = Math.min(subPinPitch, lat.pitch);
 
-    const placePin = (uid: number, cx: number, cy: number, label: string): void => {
+    const refineComponent = (pinName: string, comp: ComponentId): ComponentId => {
+        const low = pinName.toLowerCase();
+        if (/plenum|spring/.test(low) && (comp === Component.Structure || comp === Component.Clad)) return Component.Plenum;
+        if (/nozzle|endplug|support|\bbw\b/.test(low) && comp === Component.Structure) return Component.EndPlug;
+        return comp;
+    };
+
+    const placePinAt = (uid: number, cx: number, cy: number, z: number, height: number, label: string): void => {
         if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
         const pin = pinDefs.get(uid);
         if (!pin) return;
@@ -175,16 +236,9 @@ export function parseScone(rawText: string): ParseResult {
         const isInstr = /instr|thimble/.test(nameLow);
         const isAbsorber = /bp|burn|absorb|poison|control|\bcr\b|rod/.test(nameLow);
         const radii = pin.radii.filter((r) => r > 0);
-        if (radii.length === 0) {
-            // pure-fill pin (e.g. pinWater) — nothing to draw.
-            return;
-        }
+        if (radii.length === 0) return; // pure-fill pin (water) — nothing to draw
 
         if (discMode) {
-            // Pick the dominant solid material (skip a leading gas/water fill so
-            // fuel pins read as fuel) for the colour, but classify the *component*
-            // primarily from the pin name — a guide tube is a guide tube even
-            // though its bulk material is Zircaloy.
             let matIdx = 0;
             for (let i = 0; i < pin.fills.length; i++) {
                 const c = materialComponent(pin.fills[i] ?? '');
@@ -196,14 +250,14 @@ export function parseScone(rawText: string): ParseResult {
             if (isGuide) { comp = Component.GuideTube; color = componentColor(comp); }
             else if (isInstr) { comp = Component.InstrumentTube; color = componentColor(comp); }
             else if (isAbsorber) { comp = Component.Absorber; color = componentColor(comp); }
-            else { comp = materialComponent(matName); color = materialColor(matName); }
+            else { comp = refineComponent(pin.name, materialComponent(matName)); color = materialColor(matName); }
             cylinders.push({
                 label,
                 radius: Math.min(subPinPitch * 0.47, Math.max(...radii)),
-                height: coreHeight,
+                height,
                 x: cx,
                 y: cy,
-                z: 0,
+                z,
                 color,
                 opacity: 1.0,
                 component: comp,
@@ -221,28 +275,44 @@ export function parseScone(rawText: string): ParseResult {
             if (isGuide && comp !== Component.Moderator && comp !== Component.Gap) comp = Component.GuideTube;
             if (isInstr && comp !== Component.Moderator && comp !== Component.Gap) comp = Component.InstrumentTube;
             if (isAbsorber && (comp === Component.Structure || comp === Component.Clad)) comp = Component.Absorber;
+            comp = refineComponent(pin.name, comp);
             components.push(comp);
             colors.push(materialColor(matName));
             mats.push(matName);
         }
-        cylinders.push(...emitLayers(radii, components, cx, cy, 0, coreHeight, label, colors, mats));
+        cylinders.push(...emitLayers(radii, components, cx, cy, z, height, label, colors, mats));
+    };
+
+    // Place an entry (sub-universe of an assembly) at (cx,cy): either an axial
+    // stack (when axial detail is on) or a single representative pin.
+    const placeEntry = (uid: number, cx: number, cy: number, label: string): void => {
+        if (axialOn) {
+            const segs = axialStack(uid);
+            if (segs) {
+                for (let i = 0; i < segs.length; i++) {
+                    const seg = segs[i];
+                    const pin = resolveToPin(seg.universe);
+                    if (pin === null) continue;
+                    const h = Math.max(0.01, seg.zmax - seg.zmin);
+                    placePinAt(pin, cx, cy, (seg.zmin + seg.zmax) / 2, h, `${label}_z${i}`);
+                }
+                return;
+            }
+        }
+        const pin = resolveToPin(uid);
+        if (pin !== null) placePinAt(pin, cx, cy, coreZ, coreHeight, label);
     };
 
     const placeAssembly = (asmUid: number, cx: number, cy: number, label: string): void => {
         const lat = latDefs.get(asmUid);
-        if (!lat) {
-            const pin = resolveToPin(asmUid);
-            if (pin !== null) placePin(pin, cx, cy, label);
-            return;
-        }
+        if (!lat) { placeEntry(asmUid, cx, cy, label); return; }
         const x0 = cx - (lat.nx - 1) * lat.pitch / 2;
         const y0 = cy + (lat.ny - 1) * lat.pitch / 2;
         for (let r = 0; r < lat.grid.length; r++) {
             for (let c = 0; c < lat.grid[r].length; c++) {
                 const px = x0 + c * lat.pitch;
                 const py = y0 - r * lat.pitch;
-                const pin = resolveToPin(lat.grid[r][c]);
-                if (pin !== null) placePin(pin, px, py, `${label}_r${r}c${c}`);
+                placeEntry(lat.grid[r][c], px, py, `${label}_r${r}c${c}`);
             }
         }
     };
@@ -257,10 +327,7 @@ export function parseScone(rawText: string): ParseResult {
                 const ay = cy0 - r * core.pitch;
                 const uid = core.grid[r][c];
                 if (latDefs.has(uid)) placeAssembly(uid, ax, ay, `asm_r${r}c${c}`);
-                else {
-                    const pin = resolveToPin(uid);
-                    if (pin !== null) placePin(pin, ax, ay, `core_r${r}c${c}`);
-                }
+                else placeEntry(uid, ax, ay, `core_r${r}c${c}`);
             }
         }
         const nested = [...latDefs.values()].some((l) => l.pitch < corePitch);
@@ -274,20 +341,25 @@ export function parseScone(rawText: string): ParseResult {
             offset += lat.nx * lat.pitch + 5;
         }
     } else {
-        // No lattice: lay out pins in a row.
         let offset = 0;
         for (const [id, pin] of pinDefs) {
-            placePin(id, offset, 0, pin.name);
+            placePinAt(id, offset, 0, coreZ, coreHeight, pin.name);
             const maxR = pin.radii.length ? Math.max(...pin.radii) : 1;
             offset += maxR * 3 + 0.5;
         }
     }
 
     if (discMode) {
-        notes.push(`Full-core view: ${cylinders.length.toLocaleString()} pins drawn as single discs (one per position). Open a single assembly to see concentric pin layers.`);
+        const pinCount = cylinders.length;
+        notes.push(`Full-core view: ${pinCount.toLocaleString()} pins drawn as single discs (one per position). Switch "Pin detail" to Detailed layers for concentric fuel/gap/clad/coolant shells.`);
+    }
+    if (axialOn) {
+        notes.push('Axial detail: each pin expanded into its real z-segments (active fuel / plenum / grids / dashpot / end plugs).');
+    } else if (hasAxial) {
+        notes.push('This deck defines axial structure (active fuel / plenum / grids / dashpot). Enable "Axial segments" to expand it; the Slice (Z) control cuts the stack.');
     }
     if (capped) {
-        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Some pins are not shown.`);
+        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Some pins are not shown — switch Pin detail to Disc, turn off Axial segments, or open a single assembly.`);
     }
 
     // Vessel / barrel shells for full-reactor context.
@@ -302,7 +374,7 @@ export function parseScone(rawText: string): ParseResult {
                     height: coreHeight,
                     x: 0,
                     y: 0,
-                    z: 0,
+                    z: coreZ,
                     color: componentColor(Component.Vessel),
                     opacity: 0.12,
                     component: Component.Vessel,
@@ -312,7 +384,8 @@ export function parseScone(rawText: string): ParseResult {
         }
     }
 
-    return { cylinders, warnings, notes };
+    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
+    return { cylinders, warnings, notes, fidelity };
 }
 
 // ---------------------------------------------------------------------------
@@ -339,8 +412,6 @@ function findLeafBlocks(text: string): LeafBlock[] {
         if (!inner.includes('{')) {
             blocks.push({ name: m[1], inner });
         }
-        // do not skip ahead: container blocks should still expose their leaves,
-        // which the regex will find on subsequent iterations.
     }
     return blocks;
 }
@@ -403,7 +474,6 @@ function countPins(
     resolveToPin: (uid: number) => number | null,
 ): number {
     if (coreLatId === null || !latDefs.has(coreLatId)) {
-        // sum of all lattice cells as a rough proxy
         let total = 0;
         for (const lat of latDefs.values()) total += lat.nx * lat.ny;
         return total;

@@ -12,6 +12,88 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-22 — v0.2.0 — Cross-code 3D viz parity (full-core layers, enrichment, axial, hex, trcl, nested OpenMC)
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.1.9` → `0.2.0` in `package.json` and `package-lock.json`. Major viz milestone:
+brings all four preview parsers (MCNP / OpenMC / Serpent / SCONE) to the same fidelity, with a
+re-extractable fidelity model so a full BEAVRS core renders concentric layers and stays
+interactive.
+
+### Shared IR / fidelity infrastructure
+
+- **`src/preview/types.ts`** — new `FidelityOptions` (`detail: 'auto'|'disc'|'layers'`,
+  `axial: boolean`) and `FidelityState` (resolved `detail`, `axial`, `autoDetail`, `totalPins`,
+  `hasAxial`), echoed back on `ParseResult`/`GeometryScene`. New components `grid`, `plenum`,
+  `end_plug` + labels.
+- **`src/preview/palette.ts`** — `LAYER_PIN_LIMIT = 4000` and `resolveDetail(opts, totalPins)`
+  (auto = disc above the limit, else layers; explicit choice wins). `parseEnrichmentTag()` reads
+  `UO2-16` / `UO2_31` (tenths-of-%) and `UO2 3.1%` forms; `fuelEnrichmentColor(pct)` ramps pale
+  amber→deep red so enrichment bands separate by color; `materialColor()` now routes tagged UO2
+  through it (fixes SCONE/Serpent bands all sharing one fuel color).
+- **`src/preview/extractor.ts`** — `buildScene(text, lang, opts)` threads `FidelityOptions` to
+  each parser and surfaces `fidelity` on the scene.
+
+### Per-code parsers
+
+- **MCNP (`codes/mcnp.ts`)** — `resolveDetail` replaces the hard count threshold (full cores can
+  now render layers). **Enrichment:** `parseMaterial` captures per-ZAID fractions;
+  `uraniumEnrichment()` → name `UO2 X.X%` (else `UO2 (mN)` so distinct material numbers never
+  merge). **trcl:** `parseCell` reads `trcl=(…)`/`*trcl`; `buildTransform`/`applyTransform`
+  (translation + optional 3×3 cosine matrix; `*` ⇒ deg→cos) applied to the root fill cell's
+  placement. **Hex:** `lat=2` placed on real hex basis `a1=(p,0)`, `a2=(p/2, p·√3/2)`.
+  `MAX_CYLINDERS` 200k→500k.
+- **Serpent (`codes/serpent.ts`)** — `resolveDetail`; hex types 2/3 placed on real hex coords
+  (type 2 X-type, type 3 Y-type transpose) instead of the rect approximation (note updated).
+  Enrichment bands distinguished via the palette change. Returns `fidelity`.
+- **OpenMC (`codes/openmc.ts`)** — **nested cores:** `findNamedLattices()` parses each
+  `name.universes = …` (literal grid or `buildNumpyGrid(text, arrName)`), `findNamedPitch`/
+  `findNamedLowerLeft`; a top lattice that references other lattices and isn't itself referenced
+  is expanded recursively (`placeGrid`). Disc/Layers fidelity (`placePin`), `findFuelName()`
+  recovers enrichment from `add_nuclide('U235'…)`, `addVesselShells()` from large `ZCylinder`s.
+  Returns `fidelity`. Single-assembly path preserved.
+- **SCONE (`codes/scone.ts`)** — `resolveDetail`; **axial:** parses `type plane; coeffs (0 0 1 d)`
+  z-planes and per-cell `surfaces (…)`; `axialStack(uid)` builds a sorted segment list for any
+  `cellUniverse` whose member cells are z-plane-bounded (≥2 ⇒ a stack). `placeEntry` expands
+  segments when `axial` is on (each segment resolved to its radial pin at its own z/height), else
+  collapses to one representative pin over the true plane extent. `refineComponent` tags
+  plenum/spring → Plenum and nozzle/support/BW → End Plug. `MAX_CYLINDERS` → 500k.
+
+### Webview (`src/preview/webview.ts`)
+
+- Host stores `lastText`/`lastLanguage`/`fidelity`; a `setFidelity` message re-extracts and
+  re-posts (`rebuildScene`) so toggling detail/axial never drops geometry (ready-handshake kept).
+- New **Fidelity** panel section: Pin detail (Auto/Disc/Layers buttons, active state + `auto →`
+  hint), **Axial segments** checkbox (shown only when `hasAxial`), a busy `…` indicator, and a
+  pin-count hint. New **Slice (Z · axial)** clipping plane (world-Y = deck-z). `reflectFidelity()`
+  syncs the controls from `scene.fidelity`.
+
+### Verified on the on-disk fixtures (`C:\Users\me\reactor-test-decks\`, via `scripts/viz-check.mjs`)
+
+- assembly_17x17 **MCNP/Serpent**: 844 prims, fuel band `UO2 3.1%` / `UO2_31`.
+- beavrs_core **MCNP**: auto **disc 56,938**; **layers 166,273**; bands `UO2 1.6/2.4/3.1%`.
+- beavrs_core **Serpent**: auto disc 56,937; layers 166,272; bands `UO2_16/24/31`.
+- beavrs_scone_fullcore **SCONE**: auto disc 55,784; **layers 170,411**; `hasAxial=true`;
+  disc+axial expands plenum/end_plug/grid segments (hits the 500k cap → honest truncation warning).
+
+### Tests
+
+- `src/test/suite/extractor.test.ts` +8: disc-vs-layers cylinder counts; MCNP enrichment band
+  separation (distinct names + colors); MCNP trcl translation; MCNP `lat=2` hex √3⁄2 row spacing;
+  Serpent type-2 hex spacing; SCONE axial segment expansion (collapsed 1 level vs axial 2 levels +
+  plenum); OpenMC nested core (4 columns, guide tubes, nested note). **24 extractor tests pass
+  headless** (`tsc --outDir out-test` + `mocha`). The electron suite (`@vscode/test-electron`) is
+  env-locked here — run locally.
+
+### Build / verify
+
+- `node ./node_modules/typescript/bin/tsc --noEmit` clean; `node esbuild.js --production` clean
+  (`out/extension.js` ~357 KB). Per env notes, used the JS APIs / local binaries (the
+  `npx esbuild/tsc/vsce` CLIs hang on this machine). `.vscodeignore` unchanged (`out/**` +
+  `!out/extension.js`, `out-test/**`, `src/**`, `scripts/**` excluded). Marketplace + Open VSX
+  republish need the user's tokens (not in this environment).
+
 ## 2026-06-22 — v0.1.9 — Offline prebuilt-models picker (bundled benchmark decks)
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

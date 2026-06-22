@@ -68,6 +68,33 @@ export interface GeometryScene {
     warnings: string[];
     notes: string[];
     primitiveCount: number;
+    fidelity: FidelityState;
+}
+
+/**
+ * Render fidelity knobs. The same deck can be expanded at different levels of
+ * detail so a full BEAVRS core stays interactive: `detail` chooses single-disc
+ * pins vs. concentric radial layers, and `axial` opts into the deck's real
+ * z-segment structure (active fuel / plenum / grids / dashpot / end plugs).
+ *
+ * `'auto'` lets each parser pick based on pin count (disc for huge cores,
+ * layers for a single assembly) with a one-click override from the webview.
+ */
+export interface FidelityOptions {
+    detail?: 'auto' | 'disc' | 'layers';
+    axial?: boolean;
+}
+
+/** Resolved fidelity the parser actually used, echoed back to the webview. */
+export interface FidelityState {
+    detail: 'disc' | 'layers';
+    axial: boolean;
+    /** Auto choice for `detail` given the pin count (drives the default UI). */
+    autoDetail: 'disc' | 'layers';
+    /** Number of placed pin positions (before layering/axial expansion). */
+    totalPins: number;
+    /** True when the deck actually defines axial segment structure to show. */
+    hasAxial: boolean;
 }
 
 /** Per-code parser return value: geometry plus any caveats worth surfacing. */
@@ -77,6 +104,8 @@ export interface ParseResult {
     warnings?: string[];
     /** Soft notes: approximations made (hex→rect, disc mode, …). */
     notes?: string[];
+    /** Fidelity actually applied, for the webview's toggle state. */
+    fidelity?: FidelityState;
 }
 
 /**
@@ -92,6 +121,9 @@ export const Component = {
     InstrumentTube: 'instrument_tube',
     Absorber: 'absorber',
     Structure: 'structure',
+    Grid: 'grid',
+    Plenum: 'plenum',
+    EndPlug: 'end_plug',
     Reflector: 'reflector',
     Vessel: 'vessel',
     Other: 'other',
@@ -109,6 +141,9 @@ export const COMPONENT_LABELS: Readonly<Record<string, string>> = {
     instrument_tube: 'Instrument Tubes',
     absorber: 'Absorber',
     structure: 'Structure',
+    grid: 'Grid Spacers',
+    plenum: 'Plenum / Spring',
+    end_plug: 'End Plugs / Nozzles',
     reflector: 'Reflector',
     vessel: 'Vessel / Barrel',
     other: 'Other',

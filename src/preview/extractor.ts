@@ -14,6 +14,8 @@ import {
     MaterialSummary,
     COMPONENT_LABELS,
     Component,
+    FidelityOptions,
+    FidelityState,
 } from './types';
 import { componentColor } from './palette';
 import { parseMcnp } from './codes/mcnp';
@@ -23,16 +25,16 @@ import { parseScone } from './codes/scone';
 
 export type { CylinderSpec };
 
-function parse(text: string, language: string): ParseResult {
+function parse(text: string, language: string, opts?: FidelityOptions): ParseResult {
     switch (language) {
         case 'mcnp':
-            return parseMcnp(text);
+            return parseMcnp(text, opts);
         case 'openmc':
-            return parseOpenmc(text);
+            return parseOpenmc(text, opts);
         case 'serpent':
-            return parseSerpent(text);
+            return parseSerpent(text, opts);
         case 'scone':
-            return parseScone(text);
+            return parseScone(text, opts);
         default:
             console.warn(`[owen.preview] unknown language ${language}`);
             return { cylinders: [], warnings: [`Unknown language "${language}" — no geometry parser available.`] };
@@ -43,13 +45,17 @@ function parse(text: string, language: string): ParseResult {
  * Extracts cylinder specs from an input deck. Dispatches to per-language
  * parsers; unknown languages return an empty array.
  */
-export function extractCylinders(text: string, language: string): CylinderSpec[] {
-    return parse(text, language).cylinders;
+export function extractCylinders(text: string, language: string, opts?: FidelityOptions): CylinderSpec[] {
+    return parse(text, language, opts).cylinders;
 }
 
+const DEFAULT_FIDELITY: FidelityState = {
+    detail: 'layers', axial: false, autoDetail: 'layers', totalPins: 0, hasAxial: false,
+};
+
 /** Full scene for the webview: geometry + legend summaries + caveats. */
-export function buildScene(text: string, language: string): GeometryScene {
-    const result = parse(text, language);
+export function buildScene(text: string, language: string, opts?: FidelityOptions): GeometryScene {
+    const result = parse(text, language, opts);
     const cylinders = result.cylinders;
 
     const components = summarizeComponents(cylinders);
@@ -63,6 +69,7 @@ export function buildScene(text: string, language: string): GeometryScene {
         warnings: result.warnings ?? [],
         notes: result.notes ?? [],
         primitiveCount: cylinders.length,
+        fidelity: result.fidelity ?? DEFAULT_FIDELITY,
     };
 }
 

@@ -14,11 +14,10 @@
 // (one disc per pin) so it stays interactive. Unsupported constructs are
 // reported as warnings/notes rather than silently collapsing to one pin.
 
-import { CylinderSpec, Component, ComponentId, ParseResult } from '../types';
-import { emitLayers, materialColor, materialComponent, componentColor } from '../palette';
+import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
+import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 
-const FULL_LAYER_LIMIT = 4000;
-const MAX_CYLINDERS = 200000;
+const MAX_CYLINDERS = 500000;
 
 const SERPENT_KEYWORDS = new Set([
     'pin', 'surf', 'cell', 'lat', 'set', 'mat', 'det', 'dep', 'plot', 'mesh',
@@ -60,7 +59,7 @@ export function extractSerpentCylinders(text: string): CylinderSpec[] {
     return parseSerpent(text).cylinders;
 }
 
-export function parseSerpent(text: string): ParseResult {
+export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult {
     const warnings: string[] = [];
     const notes: string[] = [];
     const lines = text.split(/\r?\n/);
@@ -159,7 +158,8 @@ export function parseSerpent(text: string): ParseResult {
     }
 
     const totalPins = countPins(coreLat, lats, resolveFill, (u) => pinLayers(u) !== null);
-    const discMode = totalPins > FULL_LAYER_LIMIT;
+    const { detail, autoDetail } = resolveDetail(opts, totalPins);
+    const discMode = detail === 'disc';
     const height = discMode ? 200 : 40;
 
     let subPitch = 1.26;
@@ -224,13 +224,33 @@ export function parseSerpent(text: string): ParseResult {
         const resolved = resolveFill(name);
         const lat = lats.get(resolved);
         if (lat) {
+            const hex = lat.type === 2 || lat.type === 3;
+            const p = lat.pitch;
             const x0 = cx + lat.x0 - (lat.nx - 1) * lat.pitch / 2;
             const yTop = cy + lat.y0 + (lat.ny - 1) * lat.pitch / 2;
+            const ox = cx + lat.x0;
+            const oy = cy + lat.y0;
             for (let row = 0; row < lat.grid.length; row++) {
                 for (let col = 0; col < lat.grid[row].length; col++) {
                     const entry = lat.grid[row][col];
-                    const px = x0 + col * lat.pitch;
-                    const py = yTop - row * lat.pitch;
+                    let px: number;
+                    let py: number;
+                    if (hex) {
+                        // Real hex coordinates. Serpent type 2 = X-type, 3 = Y-type;
+                        // both use a 60° basis, transposed between the two types.
+                        const ic = col - (lat.nx - 1) / 2;
+                        const jc = (lat.ny - 1) / 2 - row;
+                        if (lat.type === 2) {
+                            px = ox + (ic + jc * 0.5) * p;
+                            py = oy + jc * (Math.sqrt(3) / 2) * p;
+                        } else {
+                            px = ox + ic * (Math.sqrt(3) / 2) * p;
+                            py = oy + (jc + ic * 0.5) * p;
+                        }
+                    } else {
+                        px = x0 + col * lat.pitch;
+                        py = yTop - row * lat.pitch;
+                    }
                     const r = resolveFill(entry);
                     if (lats.has(r)) placeUniverse(r, px, py, `${label}_r${row}c${col}`, depth + 1);
                     else placePin(r, px, py, `${label}_r${row}c${col}`);
@@ -287,13 +307,13 @@ export function parseSerpent(text: string): ParseResult {
     }
 
     if (discMode) {
-        notes.push(`Full-core view: ${cylinders.length.toLocaleString()} pins drawn as single discs (one per position). Open a single assembly to see concentric pin layers.`);
+        notes.push(`Full-core view: ${cylinders.length.toLocaleString()} pins drawn as single discs (one per position). Switch "Pin detail" to Detailed layers for concentric fuel/gap/clad/coolant shells.`);
     }
-    if ([...lats.values()].some((l) => l.type === 2 || l.type === 3) && !discMode) {
-        notes.push('Hex lattice (type 2/3) laid out on a rectangular approximation.');
+    if ([...lats.values()].some((l) => l.type === 2 || l.type === 3)) {
+        notes.push('Hex lattice (type 2/3) placed on real hexagonal coordinates.');
     }
     if (capped) {
-        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Some pins are not shown.`);
+        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
     }
     if (cylinders.length === 0) {
         if (/\bsurf\b/.test(text) || /\bcell\b/.test(text)) {
@@ -303,7 +323,8 @@ export function parseSerpent(text: string): ParseResult {
         }
     }
 
-    return { cylinders, warnings, notes };
+    const fidelity: FidelityState = { detail, axial: false, autoDetail, totalPins, hasAxial: false };
+    return { cylinders, warnings, notes, fidelity };
 }
 
 // ---------------------------------------------------------------------------

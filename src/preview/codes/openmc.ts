@@ -15,12 +15,19 @@
 // surfaces grouped by role (fuel / clad / gap, guide tube, instrument tube).
 // Hex lattices are detected but only laid out on a rectangular approximation.
 
-import { CylinderSpec, Component, ComponentId, ParseResult } from '../types';
-import { componentColor, emitLayers, extractNumbers, materialColor } from '../palette';
+import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
+import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail } from '../palette';
 
 interface NamedValue {
     name: string;
     value: number;
+}
+
+interface NamedLattice {
+    name: string;
+    grid: string[][];
+    pitch: [number, number];
+    lowerLeft: [number, number] | null;
 }
 
 interface PinTemplate {
@@ -35,7 +42,9 @@ export function extractOpenmcCylinders(text: string): CylinderSpec[] {
     return parseOpenmc(text).cylinders;
 }
 
-export function parseOpenmc(text: string): ParseResult {
+const MAX_CYLINDERS = 500000;
+
+export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     const warnings: string[] = [];
     const notes: string[] = [];
     const lines = text.split(/\r?\n/);
@@ -44,15 +53,25 @@ export function parseOpenmc(text: string): ParseResult {
     const pitch = findPitch(lines);
     const lowerLeft = findLowerLeft(lines);
     const height = findHeight(lines);
+    const fuelName = findFuelName(text);
 
-    const fuelTemplate = buildTemplate(radiiPool, 'fuel');
+    const fuelTemplate = buildTemplate(radiiPool, 'fuel', fuelName);
     const guideTemplate = buildTemplate(radiiPool, 'guide');
     const instrTemplate = buildTemplate(radiiPool, 'instrument');
 
     const universeMap = findUniverseMap(text);
-    const grid = findLatticeGrid(text) ?? buildNumpyGrid(text);
+    const named = findNamedLattices(text);
     const isHex = /HexLattice/.test(text);
     const hasLattice = /RectLattice|HexLattice|\.universes\b/.test(text);
+
+    // Resolve a nested core (a lattice whose entries are other lattices).
+    const latByName = new Map(named.map((l) => [l.name, l]));
+    const referenced = new Set<string>();
+    for (const lat of named) for (const row of lat.grid) for (const t of row) if (latByName.has(t)) referenced.add(t);
+    const topLattices = named.filter((l) => !referenced.has(l.name) && l.grid.some((row) => row.some((t) => latByName.has(t))));
+    const nested = topLattices.length > 0 ? topLattices[0] : null;
+
+    const grid = nested ? nested.grid : (findLatticeGrid(text) ?? buildNumpyGrid(text));
 
     if (!grid || grid.length === 0) {
         const single = fuelTemplate ?? defaultTemplate('fuel');
@@ -62,64 +81,215 @@ export function parseOpenmc(text: string): ParseResult {
         } else {
             notes.push('No lattice found — rendered a single pin cell.');
         }
-        return { cylinders: cyls, warnings, notes };
+        const fidelity: FidelityState = { detail: 'layers', axial: false, autoDetail: 'layers', totalPins: 1, hasAxial: false };
+        return { cylinders: cyls, warnings, notes, fidelity };
     }
 
-    const rows = grid.length;
-    const cols = grid.reduce((m, r) => Math.max(m, r.length), 0);
-    const px = pitch[0];
-    const py = pitch[1];
-
-    let x0: number;
-    let y0: number;
-    if (lowerLeft) {
-        x0 = lowerLeft[0] + px / 2;
-        y0 = lowerLeft[1] + (rows - 1) * py + py / 2; // top row first
-    } else {
-        x0 = -(cols - 1) * px / 2;
-        y0 = (rows - 1) * py / 2;
-    }
+    // Count placed pins to pick fidelity.
+    const totalPins = countOpenmcPins(grid, latByName, universeMap);
+    const { detail, autoDetail } = resolveDetail(opts, totalPins);
+    const discMode = detail === 'disc';
 
     const cylinders: CylinderSpec[] = [];
-    const MAX = 120000;
     let capped = false;
 
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < grid[r].length; c++) {
-            if (cylinders.length >= MAX) { capped = true; break; }
-            const token = grid[r][c];
-            const role = classifyToken(token, universeMap);
-            let template: PinTemplate | null;
-            switch (role) {
-                case 'guide':
-                    template = guideTemplate ?? defaultTemplate('guide');
-                    break;
-                case 'instrument':
-                    template = instrTemplate ?? defaultTemplate('instrument');
-                    break;
-                case 'empty':
-                    template = null;
-                    break;
-                default:
-                    template = fuelTemplate ?? defaultTemplate('fuel');
-            }
-            if (!template || !template.render) continue;
-            const x = x0 + c * px;
-            const y = y0 - r * py;
-            cylinders.push(
-                ...emitLayers(template.radii, template.components, x, y, 0, height, `${role}_r${r}c${c}`, undefined, template.materials),
-            );
+    const templateFor = (token: string): PinTemplate | null => {
+        const role = classifyToken(token, universeMap);
+        switch (role) {
+            case 'guide': return guideTemplate ?? defaultTemplate('guide');
+            case 'instrument': return instrTemplate ?? defaultTemplate('instrument');
+            case 'empty': return null;
+            default: return fuelTemplate ?? defaultTemplate('fuel');
         }
+    };
+
+    const subPitch = nested ? smallestPitch(named) : Math.min(pitch[0], pitch[1]);
+
+    const placePin = (token: string, x: number, y: number, label: string): void => {
+        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        const template = templateFor(token);
+        if (!template || !template.render) return;
+        if (discMode) {
+            const solidIdx = Math.max(0, template.components.findIndex((c) => c !== Component.Gap && c !== Component.Moderator));
+            cylinders.push({
+                label,
+                radius: Math.min(subPitch * 0.47, Math.max(...template.radii)),
+                height,
+                x, y, z: 0,
+                color: materialColor(template.materials[solidIdx] ?? template.materials[0] ?? 'UO2'),
+                opacity: 1.0,
+                component: template.components[solidIdx] ?? Component.Fuel,
+                material: template.materials[solidIdx] ?? template.materials[0],
+            });
+            return;
+        }
+        cylinders.push(
+            ...emitLayers(template.radii, template.components, x, y, 0, height, label, undefined, template.materials),
+        );
+    };
+
+    const placeGrid = (lat: NamedLattice | { grid: string[][]; pitch: [number, number]; lowerLeft: [number, number] | null }, cx: number, cy: number, label: string, depth: number): void => {
+        if (depth > 8 || cylinders.length >= MAX_CYLINDERS) return;
+        const g = lat.grid;
+        const rows = g.length;
+        const cols = g.reduce((m, r) => Math.max(m, r.length), 0);
+        const px = lat.pitch[0];
+        const py = lat.pitch[1];
+        let x0: number;
+        let y0: number;
+        if (lat.lowerLeft) {
+            x0 = lat.lowerLeft[0] + px / 2;
+            y0 = lat.lowerLeft[1] + (rows - 1) * py + py / 2;
+        } else {
+            x0 = cx - (cols - 1) * px / 2;
+            y0 = cy + (rows - 1) * py / 2;
+        }
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < g[r].length; c++) {
+                const token = g[r][c];
+                const x = x0 + c * px;
+                const y = y0 - r * py;
+                const sub = latByName.get(token);
+                if (sub) placeGrid(sub, x, y, `${label}_r${r}c${c}`, depth + 1);
+                else placePin(token, x, y, `${classifyToken(token, universeMap)}_r${r}c${c}`);
+            }
+        }
+    };
+
+    if (nested) {
+        placeGrid(nested, 0, 0, 'core', 0);
+        notes.push(`Expanded a nested OpenMC core (${nested.grid.length}×${nested.grid[0]?.length ?? 0} of ${named.length - 1} assembly lattice(s)).`);
+    } else {
+        placeGrid({ grid, pitch, lowerLeft }, 0, 0, 'asm', 0);
+        const rows = grid.length;
+        const cols = grid.reduce((m, r) => Math.max(m, r.length), 0);
+        notes.push(`Expanded a ${rows}×${cols} lattice (${cylinders.length} ${discMode ? 'pins' : 'pin layers'}).`);
     }
 
-    notes.push(`Expanded a ${rows}×${cols} lattice (${cylinders.length} pin layers).`);
-    if (capped) warnings.push(`Geometry exceeded the ${MAX.toLocaleString()}-primitive cap and was truncated.`);
+    // Vessel / barrel shells from large bounding ZCylinders.
+    addVesselShells(text, cylinders, height);
+
+    if (discMode) {
+        notes.push(`Disc mode: one disc per pin. Switch "Pin detail" to Detailed layers for concentric fuel/gap/clad/coolant shells.`);
+    }
+    if (capped) warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
     if (isHex) {
-        notes.push('Hex lattice laid out on a rectangular approximation (axial spacing is exact, hex offset is not).');
+        notes.push('Hex lattice laid out on a rectangular approximation (OpenMC HexLattice index order is not reconstructed).');
         for (const cyl of cylinders) cyl.label = `hexapprox_${cyl.label}`;
     }
 
-    return { cylinders, warnings, notes };
+    const fidelity: FidelityState = { detail, axial: false, autoDetail, totalPins, hasAxial: false };
+    return { cylinders, warnings, notes, fidelity };
+}
+
+// ---------------------------------------------------------------------------
+// Nested-lattice / core helpers
+// ---------------------------------------------------------------------------
+
+/** Finds named RectLattices and their `.universes` grids, pitch, lower_left. */
+function findNamedLattices(text: string): NamedLattice[] {
+    const out: NamedLattice[] = [];
+    const uniRe = /([A-Za-z_]\w*)\s*\.\s*universes\s*=\s*/g;
+    let m: RegExpExecArray | null;
+    while ((m = uniRe.exec(text)) !== null) {
+        const name = m[1];
+        const rhsStart = uniRe.lastIndex;
+        const rhs = text.slice(rhsStart, rhsStart + 4000);
+        let grid: string[][] | null = null;
+        const trimmed = rhs.replace(/^\s+/, '');
+        if (trimmed.startsWith('[')) {
+            const open = text.indexOf('[', rhsStart);
+            const close = matchBracket(text, open);
+            if (close > open) grid = parseRows(text.slice(open + 1, close));
+        } else {
+            const vm = trimmed.match(/^([A-Za-z_]\w*)/);
+            if (vm) grid = buildNumpyGrid(text, vm[1]);
+        }
+        if (!grid || grid.length === 0) continue;
+        out.push({
+            name,
+            grid,
+            pitch: findNamedPitch(text, name) ?? [1.26, 1.26],
+            lowerLeft: findNamedLowerLeft(text, name),
+        });
+    }
+    return out;
+}
+
+function findNamedPitch(text: string, name: string): [number, number] | null {
+    const re = new RegExp(`${escapeRe(name)}\\s*\\.\\s*pitch\\s*=\\s*([^\\n]+)`);
+    const m = text.match(re);
+    if (!m) return null;
+    const nums = extractNumbers(m[1]);
+    if (nums.length >= 2) return [nums[0], nums[1]];
+    if (nums.length === 1) return [nums[0], nums[0]];
+    return null;
+}
+
+function findNamedLowerLeft(text: string, name: string): [number, number] | null {
+    const re = new RegExp(`${escapeRe(name)}\\s*\\.\\s*lower_left\\s*=\\s*([^\\n]+)`);
+    const m = text.match(re);
+    if (!m) return null;
+    const nums = extractNumbers(m[1]);
+    if (nums.length >= 2) return [nums[0], nums[1]];
+    return null;
+}
+
+function smallestPitch(named: NamedLattice[]): number {
+    let p = Infinity;
+    for (const l of named) p = Math.min(p, l.pitch[0], l.pitch[1]);
+    return isFinite(p) && p > 0 ? p : 1.26;
+}
+
+function countOpenmcPins(grid: string[][], latByName: Map<string, NamedLattice>, universeMap: Map<string, string>, depth = 0): number {
+    if (depth > 8) return 0;
+    let total = 0;
+    for (const row of grid) {
+        for (const token of row) {
+            const sub = latByName.get(token);
+            if (sub) total += countOpenmcPins(sub.grid, latByName, universeMap, depth + 1);
+            else if (classifyToken(token, universeMap) !== 'empty') total += 1;
+        }
+    }
+    return total;
+}
+
+/** Recovers the fuel material name (with enrichment) from add_nuclide calls. */
+function findFuelName(text: string): string | null {
+    const matRe = /openmc\.Material\s*\(([^)]*)\)/g;
+    // Fallback: scan whole text for U235/U238 fractions to compute enrichment.
+    const u5 = text.match(/add_nuclide\s*\(\s*['"]U235['"]\s*,\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/);
+    const u8 = text.match(/add_nuclide\s*\(\s*['"]U238['"]\s*,\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/);
+    if (u5) {
+        const a = Math.abs(Number(u5[1]));
+        const b = u8 ? Math.abs(Number(u8[1])) : 0;
+        if (a > 0 && a + b > 0) return `UO2 ${((a / (a + b)) * 100).toFixed(1)}%`;
+    }
+    void matRe;
+    return null;
+}
+
+function addVesselShells(text: string, cylinders: CylinderSpec[], height: number): void {
+    if (cylinders.length === 0) return;
+    let footprint = 0;
+    for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
+    const radii: number[] = [];
+    const zr = /openmc\.ZCylinder\s*\(([^)]*)\)/g;
+    for (const m of text.matchAll(zr)) {
+        const rm = m[1].match(/r\s*=\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/);
+        if (rm) {
+            const r = Number(rm[1]);
+            if (r > footprint * 1.2) radii.push(r);
+        }
+    }
+    radii.sort((a, b) => b - a);
+    for (const r of radii.slice(0, 4)) {
+        cylinders.push({
+            label: `vessel_${r}`, radius: r, height, x: 0, y: 0, z: 0,
+            color: componentColor(Component.Vessel), opacity: 0.12,
+            component: Component.Vessel, material: 'Structure',
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +392,7 @@ function classifyToken(token: string, universeMap: Map<string, string>): Role {
     return 'fuel';
 }
 
-function buildTemplate(pool: NamedValue[], role: Role): PinTemplate | null {
+function buildTemplate(pool: NamedValue[], role: Role, fuelName?: string | null): PinTemplate | null {
     let matcher: RegExp;
     if (role === 'fuel') matcher = /(fuel|pellet|gap|clad)/i;
     else if (role === 'guide') matcher = /guide/i;
@@ -238,7 +408,9 @@ function buildTemplate(pool: NamedValue[], role: Role): PinTemplate | null {
 
     const radii = sorted.map((s) => s[0]);
     const components = sorted.map((s) => assignComponent(s[1], role));
-    const materials = sorted.map((s) => s[1]);
+    // Name the fuel layer after the actual material (with enrichment) so the
+    // legend/colour distinguishes 1.6 / 2.4 / 3.1 % bands like SCONE/Serpent.
+    const materials = sorted.map((s, i) => (role === 'fuel' && fuelName && components[i] === Component.Fuel ? fuelName : s[1]));
     return { radii, components, materials, render: true };
 }
 
@@ -348,8 +520,9 @@ function parseRows(body: string): string[][] | null {
  * idiom. Handles element assignments (`arr[i, j] = X`, `arr[i][j] = X`) and
  * coordinate-list loops (`for (i, j) in [(r,c), …]: arr[i, j] = X`).
  */
-function buildNumpyGrid(text: string): string[][] | null {
-    const fullRe = /([A-Za-z_]\w*)\s*=\s*np(?:numpy)?\.(?:full|empty|zeros|ones)\s*\(\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*(?:,\s*([A-Za-z_]\w*))?/;
+function buildNumpyGrid(text: string, arrName?: string): string[][] | null {
+    const namePat = arrName ? escapeRe(arrName) : '[A-Za-z_]\\w*';
+    const fullRe = new RegExp(`(${namePat})\\s*=\\s*np(?:numpy)?\\.(?:full|empty|zeros|ones)\\s*\\(\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)\\s*(?:,\\s*([A-Za-z_]\\w*))?`);
     const m = text.match(fullRe);
     if (!m) return null;
     const arr = m[1];

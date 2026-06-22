@@ -1,16 +1,26 @@
 import * as vscode from 'vscode';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
 import { buildScene, CylinderSpec } from './extractor';
-import { GeometryScene } from './types';
+import { GeometryScene, FidelityOptions } from './types';
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let webviewReady = false;
 let lastScene: GeometryScene | undefined;
+let lastText = '';
+let lastLanguage = 'mcnp';
+let fidelity: FidelityOptions = { detail: 'auto', axial: false };
 
 function postScene(): void {
     if (currentPanel && webviewReady && lastScene) {
         currentPanel.webview.postMessage({ type: 'scene', scene: lastScene });
     }
+}
+
+/** Re-extracts the current source at the requested fidelity and re-posts it. */
+function rebuildScene(): void {
+    if (!lastText) return;
+    lastScene = buildScene(lastText, lastLanguage, fidelity);
+    postScene();
 }
 
 export function registerGeometryPreview(context: vscode.ExtensionContext): vscode.Disposable {
@@ -21,7 +31,10 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
             return;
         }
         const language = detectMonteCarloLanguage(editor.document) ?? 'mcnp';
-        lastScene = buildScene(editor.document.getText(), language);
+        lastText = editor.document.getText();
+        lastLanguage = language;
+        fidelity = { detail: 'auto', axial: false };
+        lastScene = buildScene(lastText, language, fidelity);
 
         if (currentPanel) {
             currentPanel.reveal(vscode.ViewColumn.Beside);
@@ -35,9 +48,16 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
             );
             currentPanel.onDidDispose(() => { currentPanel = undefined; webviewReady = false; }, null, context.subscriptions);
             currentPanel.webview.onDidReceiveMessage((msg) => {
-                if (msg && msg.type === 'ready') {
+                if (!msg) return;
+                if (msg.type === 'ready') {
                     webviewReady = true;
                     postScene();
+                } else if (msg.type === 'setFidelity') {
+                    fidelity = {
+                        detail: msg.detail === 'disc' || msg.detail === 'layers' ? msg.detail : 'auto',
+                        axial: !!msg.axial,
+                    };
+                    rebuildScene();
                 }
             }, null, context.subscriptions);
             currentPanel.webview.html = buildHtml(currentPanel.webview);
@@ -95,6 +115,8 @@ function buildHtml(webview: vscode.Webview): string {
   .btnrow { display: flex; gap: 6px; margin: 8px 0 2px; }
   button { background: #1c2740; color: #cdd6f4; border: 1px solid #2b3a5c; border-radius: 5px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
   button:hover { background: #24345a; }
+  button.active { background: var(--accent); color: #0b1018; border-color: var(--accent); font-weight: 600; }
+  #detailBtns { width: 100%; } #detailBtns button { flex: 1; }
   .ctrl { font-size: 11px; margin-top: 8px; }
   .ctrl label { display: flex; justify-content: space-between; opacity: 0.8; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
@@ -133,6 +155,23 @@ function buildHtml(webview: vscode.Webview): string {
         <div id="materials" style="display:none"></div>
       </div>
 
+      <div class="section" id="fidelitySection">
+        <div class="title"><span>Fidelity</span><span id="fidBusy" style="display:none">…</span></div>
+        <div class="ctrl">
+          <label><span>Pin detail</span><span id="fidAuto"></span></label>
+          <div class="btnrow" id="detailBtns">
+            <button data-detail="auto" id="detAuto">Auto</button>
+            <button data-detail="disc" id="detDisc">Disc</button>
+            <button data-detail="layers" id="detLayers">Layers</button>
+          </div>
+        </div>
+        <label class="row" id="axialRow" style="display:none">
+          <input type="checkbox" id="axialOn" />
+          <span class="name">Axial segments</span>
+        </label>
+        <div class="ctrl" id="fidHint" style="opacity:0.6"></div>
+      </div>
+
       <div class="section">
         <div class="title"><span>View</span></div>
         <div class="ctrl">
@@ -146,6 +185,10 @@ function buildHtml(webview: vscode.Webview): string {
         <div class="ctrl">
           <label><span><input type="checkbox" id="clipYOn" /> Slice (Y)</span><span id="clipYVal"></span></label>
           <input type="range" id="clipY" min="-1" max="1" step="0.01" value="0" disabled />
+        </div>
+        <div class="ctrl">
+          <label><span><input type="checkbox" id="clipZOn" /> Slice (Z · axial)</span><span id="clipZVal"></span></label>
+          <input type="range" id="clipZ" min="-1" max="1" step="0.01" value="0" disabled />
         </div>
         <div class="btnrow"><button id="resetView">Reset view</button></div>
       </div>
@@ -189,6 +232,8 @@ function buildHtml(webview: vscode.Webview): string {
 
     const clipX = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
     const clipY = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+    const clipZ = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0); // world Y = deck z (axial)
+    let lastFidelity = null;
 
     let groups = [];          // { mesh, instances: [{matrix, comp, mat}] }
     let compEnabled = {};     // component id -> bool
@@ -302,6 +347,7 @@ function buildHtml(webview: vscode.Webview): string {
       const planes = [];
       if (document.getElementById('clipOn').checked) planes.push(clipX);
       if (document.getElementById('clipYOn').checked) planes.push(clipY);
+      if (document.getElementById('clipZOn').checked) planes.push(clipZ);
       for (const g of groups) g.mesh.material.clippingPlanes = planes;
     }
 
@@ -320,6 +366,27 @@ function buildHtml(webview: vscode.Webview): string {
 
       renderRows('components', (sc.components || []), (item) => item.id, compEnabled, true);
       renderRows('materials', (sc.materials || []), (item) => item.name, matEnabled, false);
+      reflectFidelity(sc.fidelity || {});
+    }
+
+    function reflectFidelity(f) {
+      document.getElementById('fidBusy').style.display = 'none';
+      lastFidelity = f;
+      const detail = f.detail || 'layers';
+      for (const id of ['detAuto', 'detDisc', 'detLayers']) {
+        document.getElementById(id).classList.remove('active');
+      }
+      // Highlight the resolved detail; "Auto" stays highlighted only if chosen.
+      const map = { disc: 'detDisc', layers: 'detLayers' };
+      if (map[detail]) document.getElementById(map[detail]).classList.add('active');
+      document.getElementById('fidAuto').textContent = f.autoDetail ? ('auto → ' + f.autoDetail) : '';
+      const axRow = document.getElementById('axialRow');
+      axRow.style.display = f.hasAxial ? 'flex' : 'none';
+      document.getElementById('axialOn').checked = !!f.axial;
+      const hint = document.getElementById('fidHint');
+      const pins = (f.totalPins || 0).toLocaleString();
+      hint.textContent = pins + ' pin positions • ' + (detail === 'disc' ? 'one disc per pin' : 'concentric layers')
+        + (f.axial ? ' • axial segments' : '');
     }
 
     function renderRows(containerId, items, keyOf, enabledMap, isComp) {
@@ -352,6 +419,7 @@ function buildHtml(webview: vscode.Webview): string {
       // clip slider ranges
       const sx = document.getElementById('clipX'); sx.min = b.minX; sx.max = b.maxX; sx.value = cx; clipX.constant = cx;
       const sy = document.getElementById('clipY'); sy.min = b.minZ; sy.max = b.maxZ; sy.value = cz; clipY.constant = cz;
+      const sz = document.getElementById('clipZ'); sz.min = b.minY; sz.max = b.maxY; sz.value = cy; clipZ.constant = cy;
     }
 
     // --- UI wiring ---
@@ -377,7 +445,22 @@ function buildHtml(webview: vscode.Webview): string {
     const clipYOn = document.getElementById('clipYOn'), clipYs = document.getElementById('clipY');
     clipYOn.addEventListener('change', () => { clipYs.disabled = !clipYOn.checked; applyClipping(); });
     clipYs.addEventListener('input', () => { clipY.constant = parseFloat(clipYs.value); document.getElementById('clipYVal').textContent = parseFloat(clipYs.value).toFixed(1); });
+    const clipZOn = document.getElementById('clipZOn'), clipZs = document.getElementById('clipZ');
+    clipZOn.addEventListener('change', () => { clipZs.disabled = !clipZOn.checked; applyClipping(); });
+    clipZs.addEventListener('input', () => { clipZ.constant = parseFloat(clipZs.value); document.getElementById('clipZVal').textContent = parseFloat(clipZs.value).toFixed(1); });
     document.getElementById('resetView').addEventListener('click', resetView);
+
+    // --- Fidelity controls (re-extracted by the extension host) ---
+    function requestFidelity(detail) {
+      const axial = document.getElementById('axialOn').checked;
+      const d = detail || (lastFidelity && lastFidelity.detail) || 'auto';
+      document.getElementById('fidBusy').style.display = 'inline';
+      vscode.postMessage({ type: 'setFidelity', detail: d, axial });
+    }
+    document.querySelectorAll('#detailBtns button').forEach((b) => {
+      b.addEventListener('click', () => requestFidelity(b.getAttribute('data-detail')));
+    });
+    document.getElementById('axialOn').addEventListener('change', () => requestFidelity(null));
 
     window.addEventListener('resize', () => {
       camera.aspect = stage.clientWidth / stage.clientHeight; camera.updateProjectionMatrix();

@@ -1,7 +1,26 @@
 // Colors, material/component classification, and small numeric helpers shared
 // by every per-code parser.
 
-import { Component, ComponentId } from './types';
+import { Component, ComponentId, FidelityOptions } from './types';
+
+/**
+ * Above this many placed pin positions, `'auto'` fidelity falls back to one
+ * disc per pin instead of full concentric layers, so a full BEAVRS core stays
+ * interactive. The webview offers a one-click upgrade to detailed layers.
+ */
+export const LAYER_PIN_LIMIT = 4000;
+
+/** Resolves the effective radial detail given the user/auto fidelity choice. */
+export function resolveDetail(
+    opts: FidelityOptions | undefined,
+    totalPins: number,
+    limit: number = LAYER_PIN_LIMIT,
+): { detail: 'disc' | 'layers'; autoDetail: 'disc' | 'layers' } {
+    const autoDetail: 'disc' | 'layers' = totalPins > limit ? 'disc' : 'layers';
+    const choice = opts?.detail ?? 'auto';
+    const detail = choice === 'disc' || choice === 'layers' ? choice : autoDetail;
+    return { detail, autoDetail };
+}
 
 export const DEFAULT_PALETTE: readonly string[] = [
     '#f4a261',
@@ -24,6 +43,9 @@ export const COMPONENT_COLORS: Readonly<Record<string, string>> = {
     [Component.InstrumentTube]: '#a3b18a',
     [Component.Absorber]: '#2d2d2d',
     [Component.Structure]: '#b0b0b0',
+    [Component.Grid]: '#c9a227',
+    [Component.Plenum]: '#d4a373',
+    [Component.EndPlug]: '#8d99ae',
     [Component.Reflector]: '#9d8189',
     [Component.Vessel]: '#6c757d',
     [Component.Other]: '#577590',
@@ -67,7 +89,42 @@ const MATERIAL_COLOR_MAP: Readonly<Record<string, string>> = {
     graphite: '#3a3a3a',
 };
 
+/**
+ * Recovers an enrichment percentage from a fuel material name. Handles the
+ * SCONE/Serpent `UO2-16` / `UO2_31` convention (tenths of a percent) and an
+ * explicit `UO2 3.1%` / `UO2 3.1` form. Returns null when not a tagged fuel.
+ */
+export function parseEnrichmentTag(name: string): number | null {
+    const m = name.match(/uo2[\s_-]*?(\d+(?:\.\d+)?)\s*%?/i);
+    if (!m) return null;
+    const raw = parseFloat(m[1]);
+    if (Number.isNaN(raw)) return null;
+    // ">10 and integer with no dot" → tenths-of-percent code (16 → 1.6%).
+    if (raw > 10 && /^\d+$/.test(m[1])) return raw / 10;
+    return raw;
+}
+
+/**
+ * Distinct color for a UO2 fuel band by U-235 enrichment (wt%). Low enrichment
+ * reads pale amber, high enrichment deep orange-red, so 1.6 / 2.4 / 3.1 % bands
+ * are visually separable like SCONE's named UO2-16/24/31 materials.
+ */
+export function fuelEnrichmentColor(pct: number): string {
+    const lo = 0.7;
+    const hi = 5.0;
+    const t = Math.max(0, Math.min(1, (pct - lo) / (hi - lo)));
+    // pale amber (#ffe08a) -> deep orange-red (#d00000)
+    const a = [0xff, 0xe0, 0x8a];
+    const b = [0xd0, 0x00, 0x00];
+    const mix = a.map((c, i) => Math.round(c + (b[i] - c) * t));
+    return '#' + mix.map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
 export function materialColor(materialName: string): string {
+    // Enrichment-tagged UO2 (UO2-16 / UO2_31 / "UO2 3.1%") → distinct band color.
+    const enr = parseEnrichmentTag(materialName);
+    if (enr !== null) return fuelEnrichmentColor(enr);
+
     const low = materialName.toLowerCase().replace(/[\s_-]+/g, '');
     for (const key of Object.keys(MATERIAL_COLOR_MAP)) {
         if (low.includes(key.replace(/[-]/g, ''))) return MATERIAL_COLOR_MAP[key];

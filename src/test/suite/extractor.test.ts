@@ -346,6 +346,210 @@ geometry {
         assert.ok(cyls.some((c) => c.component === 'fuel'), 'expected fuel pins');
     });
 
+    // --- v0.2.0 cross-code viz parity ---
+
+    const mcnp3x3 = [
+        'MCNP mini 3x3 lattice',
+        '1 1 -10.4 -1    u=1 imp:n=1',
+        '2 2 -6.5   1 -2 u=1 imp:n=1',
+        '3 3 -0.7   2    u=1 imp:n=1',
+        '4 3 -0.7  -3    u=2 imp:n=1',
+        '5 2 -6.5   3 -4 u=2 imp:n=1',
+        '6 3 -0.7   4    u=2 imp:n=1',
+        '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+        '     fill=0:2 0:2 0:0',
+        '     1 2 1',
+        '     2 1 2',
+        '     1 2 1',
+        '20 0 -60 fill=10 imp:n=1',
+        '21 0  60 imp:n=0',
+        '',
+        '1 cz 0.40',
+        '2 cz 0.46',
+        '3 cz 0.56',
+        '4 cz 0.60',
+        '50 px -0.63',
+        '51 px  0.63',
+        '52 py -0.63',
+        '53 py  0.63',
+        '60 rpp -1.89 1.89 -1.89 1.89 -10 10',
+        '',
+        'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+        'm2 40090.80c 1.0',
+        'm3 1001.80c 2.0 8016.80c 1.0',
+        'mode n',
+    ].join('\n');
+
+    test('fidelity: disc draws one cylinder per pin, layers draws concentric shells', () => {
+        const disc = extractCylinders(mcnp3x3, 'mcnp', { detail: 'disc' });
+        const layers = extractCylinders(mcnp3x3, 'mcnp', { detail: 'layers' });
+        // 9 pin positions → 9 discs; layered → 18 (each pin = 2 shells).
+        assert.strictEqual(disc.length, 9, `expected 9 discs, got ${disc.length}`);
+        assert.strictEqual(layers.length, 18, `expected 18 shells, got ${layers.length}`);
+        assert.ok(disc.every((c) => !c.innerRadius), 'disc mode pins should have no inner radius');
+    });
+
+    test('MCNP distinguishes enrichment zones (1.6 / 3.1 %) as separate materials', () => {
+        const deck = [
+            'MCNP two-enrichment lattice',
+            '1 1 -10.4 -1 u=1 imp:n=1   $ 1.6%',
+            '2 3 -0.7   1 u=1 imp:n=1',
+            '3 2 -10.4 -1 u=2 imp:n=1   $ 3.1%',
+            '4 3 -0.7   1 u=2 imp:n=1',
+            '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+            '     fill=0:1 0:0 0:0',
+            '     1 2',
+            '20 0 -60 fill=10 imp:n=1',
+            '21 0  60 imp:n=0',
+            '',
+            '1 cz 0.40',
+            '50 px -0.63',
+            '51 px  0.63',
+            '52 py -0.63',
+            '53 py  0.63',
+            '60 rpp -1.26 1.26 -0.63 0.63 -10 10',
+            '',
+            'm1 92235.80c 0.016 92238.80c 0.984 8016.80c 2.0',
+            'm2 92235.80c 0.031 92238.80c 0.969 8016.80c 2.0',
+            'm3 1001.80c 2.0 8016.80c 1.0',
+            'mode n',
+        ].join('\n');
+        const scene = buildScene(deck, 'mcnp');
+        const names = scene.materials.map((m) => m.name);
+        assert.ok(names.some((n) => /1\.6\s*%/.test(n)), `expected a 1.6% band, got ${names.join(', ')}`);
+        assert.ok(names.some((n) => /3\.1\s*%/.test(n)), `expected a 3.1% band, got ${names.join(', ')}`);
+        const colors = new Set(scene.materials.filter((m) => /UO2/.test(m.name)).map((m) => m.color));
+        assert.ok(colors.size >= 2, 'expected distinct colors per enrichment band');
+    });
+
+    test('MCNP applies a trcl translation to the placed core', () => {
+        const deck = [
+            'MCNP trcl translation',
+            '1 1 -10.4 -1 u=1 imp:n=1',
+            '2 3 -0.7   1 u=1 imp:n=1',
+            '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+            '     fill=0:0 0:0 0:0',
+            '     1',
+            '20 0 -60 fill=10 trcl=(100 0 0) imp:n=1',
+            '21 0  60 imp:n=0',
+            '',
+            '1 cz 0.40',
+            '50 px -0.63',
+            '51 px  0.63',
+            '52 py -0.63',
+            '53 py  0.63',
+            '60 rpp -0.63 0.63 -0.63 0.63 -10 10',
+            '',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+            'm3 1001.80c 2.0 8016.80c 1.0',
+            'mode n',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'mcnp').filter((c) => c.component === 'fuel');
+        assert.ok(cyls.length >= 1, 'expected a fuel pin');
+        assert.ok(cyls.every((c) => Math.abs(c.x - 100) < 1e-6), `expected x≈100 after trcl, got ${cyls.map((c) => c.x)}`);
+    });
+
+    test('MCNP lat=2 places pins on hexagonal coordinates (row √3/2 spacing)', () => {
+        const deck = [
+            'MCNP hex lattice',
+            '1 1 -10.4 -1 u=1 imp:n=1',
+            '2 3 -0.7   1 u=1 imp:n=1',
+            '10 0 50 -51 52 -53 lat=2 u=10 imp:n=1',
+            '     fill=0:2 0:2 0:0',
+            '     1 1 1',
+            '     1 1 1',
+            '     1 1 1',
+            '20 0 -60 fill=10 imp:n=1',
+            '21 0  60 imp:n=0',
+            '',
+            '1 cz 0.40',
+            '50 px -0.63',
+            '51 px  0.63',
+            '52 py -0.63',
+            '53 py  0.63',
+            '60 rpp -2 2 -2 2 -10 10',
+            '',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+            'm3 1001.80c 2.0 8016.80c 1.0',
+            'mode n',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'mcnp').filter((c) => c.component === 'fuel');
+        const ys = [...new Set(cyls.map((c) => Math.round(c.y * 1000) / 1000))].sort((a, b) => a - b);
+        assert.strictEqual(ys.length, 3, `expected 3 hex rows, got ${ys.length}`);
+        const spacing = (ys[2] - ys[0]) / 2;
+        const expected = (Math.sqrt(3) / 2) * 1.26;
+        assert.ok(Math.abs(spacing - expected) < 1e-3, `expected hex row spacing ${expected.toFixed(3)}, got ${spacing.toFixed(3)}`);
+    });
+
+    test('Serpent type-2 hex lattice uses √3/2 row spacing (not rectangular)', () => {
+        const deck = [
+            'pin 1',
+            'UO2 0.40',
+            'water',
+            'lat 10 2 0.0 0.0 3 3 1.26',
+            '1 1 1',
+            '1 1 1',
+            '1 1 1',
+            'surf s1 cyl 0.0 0.0 5.0',
+            'cell c1 0 fill 10 -s1',
+            'cell c2 0 outside s1',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'serpent').filter((c) => c.component === 'fuel');
+        const ys = [...new Set(cyls.map((c) => Math.round(c.y * 1000) / 1000))].sort((a, b) => a - b);
+        assert.strictEqual(ys.length, 3, `expected 3 hex rows, got ${ys.length}`);
+        const spacing = (ys[2] - ys[0]) / 2;
+        const expected = (Math.sqrt(3) / 2) * 1.26;
+        assert.ok(Math.abs(spacing - expected) < 1e-3, `expected ${expected.toFixed(3)}, got ${spacing.toFixed(3)}`);
+    });
+
+    test('SCONE expands axial segment stacks (cellUniverse bounded by z-planes)', () => {
+        const deck = `
+geometry {
+  surfaces {
+    pz1 { id 1; type plane; coeffs (0 0 1 0); }
+    pz2 { id 2; type plane; coeffs (0 0 1 10); }
+    pz3 { id 3; type plane; coeffs (0 0 1 20); }
+  }
+  cells {
+    seg1 { id 100; type simpleCell; surfaces (-2 1); filltype uni; universe 10; }
+    seg2 { id 101; type simpleCell; surfaces (-3 2); filltype uni; universe 11; }
+  }
+  universes {
+    pinFuel   { id 10; type pinUniverse; radii (0.4 0.46 0.0); fills (UO2 Zircaloy Water); }
+    pinPlenum { id 11; type pinUniverse; radii (0.06 0.46 0.0); fills (Inconel Zircaloy Water); }
+    stack { id 50; type cellUniverse; cells (100 101); }
+    asm   { id 9999; type latUniverse; origin (0 0 0); pitch (1.26 1.26 0); shape (1 1 0); padMat Water; map ( 50 ); }
+  }
+}`;
+        const collapsed = buildScene(deck, 'scone', { detail: 'layers', axial: false });
+        assert.ok(collapsed.fidelity.hasAxial, 'expected the deck to be detected as having axial structure');
+        const zCollapsed = new Set(collapsed.cylinders.filter((c) => c.component !== 'vessel').map((c) => Math.round(c.z)));
+        assert.strictEqual(zCollapsed.size, 1, 'collapsed view should use one representative axial height');
+
+        const axial = extractCylinders(deck, 'scone', { detail: 'layers', axial: true });
+        const zAxial = new Set(axial.filter((c) => c.component !== 'vessel').map((c) => Math.round(c.z)));
+        assert.strictEqual(zAxial.size, 2, `expected 2 axial levels, got ${[...zAxial].join(', ')}`);
+        assert.ok(axial.some((c) => c.component === 'plenum'), 'expected a plenum segment from the spring pin');
+    });
+
+    test('OpenMC expands a nested core (a core lattice of assembly lattices)', () => {
+        const deck = [
+            'import openmc',
+            'fuel_or = openmc.ZCylinder(r=0.41)',
+            'clad_or = openmc.ZCylinder(r=0.475)',
+            'asm = openmc.RectLattice()',
+            'asm.pitch = (1.26, 1.26)',
+            'asm.universes = [[F, F],[F, G]]',
+            'core = openmc.RectLattice()',
+            'core.pitch = (2.52, 2.52)',
+            'core.universes = [[asm, asm],[asm, asm]]',
+        ].join('\n');
+        const scene = buildScene(deck, 'openmc');
+        assert.strictEqual(distinctX(scene.cylinders), 4, `expected 4 pin columns across the nested core, got ${distinctX(scene.cylinders)}`);
+        assert.ok(scene.cylinders.some((c) => c.component === 'guide_tube'), 'expected guide tubes inside the nested assemblies');
+        assert.ok(/nested/i.test(scene.notes.join(' ')), 'expected a nested-core note');
+    });
+
     test('builds a component legend in buildScene', () => {
         const deck = `
 geometry { universes {

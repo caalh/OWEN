@@ -5,6 +5,56 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-06-22
+
+**Major 3D visualization milestone — full cross-code geometry parity.** The 3D preview now
+renders MCNP, OpenMC, Serpent, and SCONE at the same high fidelity: concentric pin layers in
+the full core, enrichment-distinguished fuel bands, real axial structure, and true hex
+placement.
+
+### Added
+
+- **Concentric pin layers in full-core view — for every code.** Previously a full core drew
+  each pin as a single material disc; only a single assembly showed fuel/gap/clad/coolant
+  shells. Now a **Pin detail** control (Auto / Disc / Layers) lets you render full concentric
+  layers across an entire BEAVRS-scale core (~56k pins → ~170k cylinders) and it stays
+  interactive — the webview draws everything with `THREE.InstancedMesh`, so hundreds of
+  thousands of cylinders cost only a few dozen draw calls. **Auto** picks Disc for big cores
+  and Layers for a single assembly, with one click to override.
+- **Enrichment-distinguished fuel — now in MCNP too.** MCNP fuel materials used to all collapse
+  to a single "UO2". The preview now reads the `92235`/`92238` fractions on each material card
+  and labels distinct bands (e.g. **UO2 1.6 %**, **UO2 2.4 %**, **UO2 3.1 %**) with distinct
+  colors, so enrichment zones are separately toggleable — matching SCONE (`UO2-16/24/31`) and
+  Serpent (`UO2_31`), whose enrichment bands now also get distinct band colors.
+- **Axial multi-segment stacks.** Decks that define real axial structure (active fuel, plenum,
+  spring, grid spacers, dashpot, end plugs, reflector segments) can now be expanded with the
+  **Axial segments** toggle. The SCONE BEAVRS deck's true axial stack renders as stacked
+  segments with their own components (Plenum / Grid Spacers / End Plugs legend entries). A new
+  **Slice (Z · axial)** plane cuts vertically through the stack.
+- **Real hexagonal placement.** MCNP `lat=2` and Serpent lattice types 2/3 are now placed on
+  true hex coordinates (√3⁄2 row spacing with the correct shear) instead of a rectangular
+  approximation.
+- **MCNP `trcl` transforms.** Cell `trcl` (translation, plus an optional rotation matrix, and
+  `*trcl` angle form) is now applied to the placed core/universe.
+- **OpenMC nested cores.** The OpenMC parser now expands a nested core (a core lattice whose
+  entries are assembly lattices) — not just a single assembly — and recovers fuel enrichment
+  from `add_nuclide('U235', …)`, draws barrel/vessel shells from large `ZCylinder` surfaces,
+  and supports Disc/Layers fidelity like the other codes.
+
+### Changed
+
+- The geometry panel gained a **Fidelity** section (Pin detail, Axial segments) that
+  re-extracts the deck on the extension host when you change it, so toggling detail never
+  drops the geometry. Component/material/axial toggles and the slice planes all compose.
+
+### Known limitations
+
+- On a full BEAVRS-scale core, **Axial segments** combined with that many pins exceeds the
+  safety cap and is truncated (with a clear warning) — axial detail is best inspected per
+  assembly or with the Z slice; full-core radial layers + enrichment bands render in full.
+- OpenMC nested-core detection is regex-based (decks are arbitrary Python); cores built by
+  functions/comprehensions OWEN can't execute still fall back with an honest message.
+
 ## [0.1.9] — 2026-06-22
 
 A new **prebuilt models** picker brings ready-to-open benchmark and starter decks straight into

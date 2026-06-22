@@ -22,11 +22,10 @@
 // A deck with no universes/lattices (a bare pin cell) still renders its z-axis
 // cylinders directly, as before.
 
-import { CylinderSpec, Component, ComponentId, ParseResult } from '../types';
-import { componentColor, emitLayers, materialColor } from '../palette';
+import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
+import { componentColor, emitLayers, materialColor, resolveDetail } from '../palette';
 
-const FULL_LAYER_LIMIT = 4000; // above this, draw one disc per pin
-const MAX_CYLINDERS = 200000;
+const MAX_CYLINDERS = 500000;
 
 type SurfaceType =
     | 'cz' | 'cx' | 'cy' | 'c/z' | 'c/x' | 'c/y'
@@ -45,6 +44,13 @@ interface MaterialInfo {
     component: ComponentId;
 }
 
+interface CellTransform {
+    /** Translation (cm). */
+    t: [number, number, number];
+    /** Optional 3×3 rotation, row-major (direction cosines). */
+    rot: number[] | null;
+}
+
 interface MCNPCell {
     id: number;
     material: number;
@@ -52,6 +58,7 @@ interface MCNPCell {
     u: number | null; // universe this cell belongs to (null = universe 0)
     fill: FillSpec | null;
     lat: number | null; // 1 = square, 2 = hex
+    trcl: CellTransform | null;
 }
 
 interface FillSpec {
@@ -92,7 +99,7 @@ export function extractMcnpCylinders(text: string): CylinderSpec[] {
     return parseMcnp(text).cylinders;
 }
 
-export function parseMcnp(text: string): ParseResult {
+export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     const warnings: string[] = [];
     const notes: string[] = [];
 
@@ -155,11 +162,12 @@ export function parseMcnp(text: string): ParseResult {
     // Determine the top universe to place: a universe-0 cell with fill=,
     // preferring one that resolves to a lattice; else the largest lattice.
     let topUid: number | null = null;
+    let rootTransform: CellTransform | null = null;
     for (const c of byUniverse.get(0) ?? []) {
         if (c.fill && c.fill.uniform !== null) {
             const f = c.fill.uniform;
             if (latUniverses.has(f) || pinUniverses.has(f)) {
-                if (topUid === null || latUniverses.has(f)) topUid = f;
+                if (topUid === null || latUniverses.has(f)) { topUid = f; rootTransform = c.trcl; }
             }
         }
     }
@@ -178,7 +186,8 @@ export function parseMcnp(text: string): ParseResult {
 
     // Count pins to choose fidelity (layer mode vs. disc mode).
     const totalPins = countPins(topUid, latUniverses, pinUniverses);
-    const discMode = totalPins > FULL_LAYER_LIMIT;
+    const { detail, autoDetail } = resolveDetail(opts, totalPins);
+    const discMode = detail === 'disc';
 
     const height = zBounds
         ? Math.max(0.1, zBounds.zmax - zBounds.zmin)
@@ -234,14 +243,26 @@ export function parseMcnp(text: string): ParseResult {
         const lat = latUniverses.get(uid);
         if (lat) {
             const { nx, ny, grid } = lat.fill;
-            const x0 = cx - (nx - 1) * lat.pitchX / 2;
-            const y0 = cy - (ny - 1) * lat.pitchY / 2;
+            // Hex (lat=2): use real hex basis vectors a1=(p,0), a2=(p/2, p·√3/2)
+            // so rows shear and stack at √3/2 spacing instead of a square grid.
+            const p = lat.pitchX;
+            const x0sq = cx - (nx - 1) * lat.pitchX / 2;
+            const y0sq = cy - (ny - 1) * lat.pitchY / 2;
             for (let j = 0; j < ny; j++) {
                 for (let i = 0; i < nx; i++) {
                     const sub = grid[j]?.[i] ?? 0;
                     if (sub === 0) continue;
-                    const px = x0 + i * lat.pitchX;
-                    const py = y0 + j * lat.pitchY;
+                    let px: number;
+                    let py: number;
+                    if (lat.hex) {
+                        const ic = i - (nx - 1) / 2;
+                        const jc = j - (ny - 1) / 2;
+                        px = cx + (ic + jc * 0.5) * p;
+                        py = cy + jc * (Math.sqrt(3) / 2) * p;
+                    } else {
+                        px = x0sq + i * lat.pitchX;
+                        py = y0sq + j * lat.pitchY;
+                    }
                     if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1);
                     else placePin(sub, px, py, `${label}_r${j}c${i}`);
                 }
@@ -252,6 +273,15 @@ export function parseMcnp(text: string): ParseResult {
     };
 
     if (topUid !== null) placeUniverse(topUid, 0, 0, 'core', 0);
+
+    // Apply the root cell's trcl to the placed geometry (translation + rotation).
+    if (rootTransform) {
+        for (const c of cylinders) {
+            const [nx2, ny2, nz2] = applyTransform(rootTransform, c.x, c.y, c.z);
+            c.x = nx2; c.y = ny2; c.z = nz2;
+        }
+        notes.push(`Applied a trcl transform to the placed core (Δ=(${rootTransform.t.map((v) => v.toFixed(2)).join(', ')})${rootTransform.rot ? ', rotation' : ''}).`);
+    }
 
     if (cylinders.length === 0) {
         warnings.push('Found `lat`/`fill`/`u` cards but could not expand the universe hierarchy (missing pin universes, fill array, or pitch surfaces). Check that pin universes reference cz/c/z cylinders and the lattice cell is bounded by px/py planes or an rpp.');
@@ -282,16 +312,20 @@ export function parseMcnp(text: string): ParseResult {
     }
 
     if (discMode) {
-        notes.push(`Full-core view: ${cylinders.length.toLocaleString()} pins drawn as single discs (one per position). Open a single assembly to see concentric pin layers.`);
+        notes.push(`Full-core view: ${cylinders.length.toLocaleString()} pins drawn as single discs (one per position). Switch "Pin detail" to Detailed layers for concentric fuel/gap/clad/coolant shells.`);
     } else {
         const assemblies = latUniverses.size;
         notes.push(`Expanded the MCNP universe hierarchy (${pinUniverses.size} pin universe(s), ${assemblies} lattice(s)).`);
     }
+    if ([...latUniverses.values()].some((l) => l.hex)) {
+        notes.push('Hex lattice (lat=2) placed on real hexagonal coordinates.');
+    }
     if (capped) {
-        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Some pins are not shown.`);
+        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
     }
 
-    return { cylinders, warnings, notes };
+    const fidelity: FidelityState = { detail, axial: false, autoDetail, totalPins, hasAxial: false };
+    return { cylinders, warnings, notes, fidelity };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,20 +433,44 @@ function parseMaterial(card: string): { id: number; info: MaterialInfo } | null 
     const id = parseInt(tokens[0].slice(1), 10);
     if (Number.isNaN(id)) return null;
     const zaids: number[] = [];
-    for (let i = 1; i < tokens.length; i++) {
+    const fracByZaid = new Map<number, number>();
+    for (let i = 1; i < tokens.length - 1; i++) {
         const zm = tokens[i].match(/^(\d+)(?:\.\d+[a-z])?$/i);
         if (zm) {
             const z = parseInt(zm[1], 10);
-            if (z >= 1000) zaids.push(z);
+            if (z >= 1000) {
+                zaids.push(z);
+                const frac = Number(tokens[i + 1]);
+                if (!Number.isNaN(frac)) fracByZaid.set(z, Math.abs(frac));
+            }
         }
     }
-    return { id, info: classifyMaterial(zaids) };
+    return { id, info: classifyMaterial(zaids, fracByZaid, id) };
 }
 
-function classifyMaterial(zaids: number[]): MaterialInfo {
+/**
+ * U-235 enrichment (wt/at%) from the 92235 / 92238 fractions on the material
+ * card, so distinct enrichment zones render as separate, separately-toggleable
+ * bands instead of all collapsing to one "UO2".
+ */
+function uraniumEnrichment(fracByZaid: Map<number, number>): number | null {
+    const u5 = fracByZaid.get(92235) ?? 0;
+    const u8 = fracByZaid.get(92238) ?? 0;
+    if (u5 <= 0 || u5 + u8 <= 0) return null;
+    return (u5 / (u5 + u8)) * 100;
+}
+
+function classifyMaterial(zaids: number[], fracByZaid: Map<number, number>, id: number): MaterialInfo {
     const elems = new Set(zaids.map((z) => Math.floor(z / 1000)));
     const has = (z: number) => elems.has(z);
-    if (has(92) || has(94)) return { name: has(94) ? 'MOX' : 'UO2', component: Component.Fuel };
+    if (has(92) || has(94)) {
+        if (has(94)) return { name: 'MOX', component: Component.Fuel };
+        const enr = uraniumEnrichment(fracByZaid);
+        // Name carries the enrichment when inferable, else the material number,
+        // so every distinct fuel material stays a separate band/colour.
+        const name = enr !== null ? `UO2 ${enr.toFixed(1)}%` : `UO2 (m${id})`;
+        return { name, component: Component.Fuel };
+    }
     if (has(5) && has(6) && !has(26)) return { name: 'B4C', component: Component.Absorber };
     if (has(47) || has(49) || (has(48) && has(47))) return { name: 'Ag-In-Cd', component: Component.Absorber };
     if (has(5) && has(14) && has(8) && has(13)) return { name: 'Borosilicate', component: Component.Absorber };
@@ -455,12 +513,15 @@ function parseCell(card: string): MCNPCell | null {
     let u: number | null = null;
     let lat: number | null = null;
     let fill: FillSpec | null = null;
+    let trcl: CellTransform | null = null;
 
     for (let i = 0; i < paramTokens.length; i++) {
         const tok = paramTokens[i];
         const eq = tok.indexOf('=');
         if (eq < 0) continue;
-        const key = tok.slice(0, eq).toLowerCase().replace(/^\*/, '');
+        const rawKey = tok.slice(0, eq).toLowerCase();
+        const key = rawKey.replace(/^\*/, '');
+        const starred = rawKey.startsWith('*');
         const val = tok.slice(eq + 1);
         if (key === 'u') u = parseInt(val, 10);
         else if (key === 'lat') lat = parseInt(val, 10);
@@ -473,12 +534,46 @@ function parseCell(card: string): MCNPCell | null {
                 fillToks.push(paramTokens[j]);
             }
             fill = parseFill(fillToks);
+        } else if (key === 'trcl') {
+            const nums: number[] = [];
+            const grab = (s: string) => { for (const m of s.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g) ?? []) nums.push(Number(m)); };
+            if (val) grab(val);
+            for (let j = i + 1; j < paramTokens.length; j++) {
+                if (paramTokens[j].includes('=')) break;
+                grab(paramTokens[j]);
+            }
+            trcl = buildTransform(nums, starred);
         }
     }
     if (u !== null && Number.isNaN(u)) u = null;
     if (lat !== null && Number.isNaN(lat)) lat = null;
 
-    return { id, material, surfaces, u, fill, lat };
+    return { id, material, surfaces, u, fill, lat, trcl };
+}
+
+/** Builds a cell transform from a trcl number list (translation + optional 3×3). */
+function buildTransform(nums: number[], starred: boolean): CellTransform | null {
+    if (nums.length < 3) return null;
+    const t: [number, number, number] = [nums[0], nums[1], nums[2]];
+    let rot: number[] | null = null;
+    if (nums.length >= 12) {
+        rot = nums.slice(3, 12);
+        // `*trcl` gives the matrix as angles in degrees → convert to cosines.
+        if (starred) rot = rot.map((deg) => Math.cos((deg * Math.PI) / 180));
+    }
+    return { t, rot };
+}
+
+/** Applies a cell transform (rotation then translation) to a point. */
+function applyTransform(tr: CellTransform, x: number, y: number, z: number): [number, number, number] {
+    let rx = x, ry = y, rz = z;
+    if (tr.rot) {
+        const m = tr.rot;
+        rx = m[0] * x + m[1] * y + m[2] * z;
+        ry = m[3] * x + m[4] * y + m[5] * z;
+        rz = m[6] * x + m[7] * y + m[8] * z;
+    }
+    return [rx + tr.t[0], ry + tr.t[1], rz + tr.t[2]];
 }
 
 function parseFill(tokens: string[]): FillSpec | null {
