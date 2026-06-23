@@ -12,6 +12,77 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-22 — v0.2.1 — Fix: MCNP lattice fill grid dropped on tab / short-indent continuation lines
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.0` → `0.2.1` in `package.json` and `package-lock.json`. Bug-fix release for the
+3D geometry preview.
+
+### Symptom
+
+A real, hand-written 17×17 PWR assembly deck (`basic_mcnp_test.inp`) rendered in the OWEN 3D
+preview as **a single cylinder** instead of the full 289-position lattice.
+
+### Root cause — `src/preview/codes/mcnp.ts`, `logicalCards()` continuation rule
+
+MCNP continues a card when the following line has columns 1–5 blank (or the previous line ends in
+`&`). The parser encoded this as `/^\s{5,}\S/` — *exactly ≥5 leading spaces*. The user's deck
+indented the `fill=-8:8 -8:8 0:0` line and every row of the 289-entry universe grid with a **tab**
+(and some decks use 2–4 spaces). Those rows therefore did **not** match the continuation test, so
+they were split off from cell 21 as their own bogus "cards" and discarded. With the `fill` array
+never assembled:
+
+- the `lat=1 u=3` lattice universe was registered without a usable fill grid,
+- the container `fill=3` chain could not expand,
+- the parser hit the bare-surface fallback and drew only the pin's `cz` shells at the origin — which
+  reads as "one cylinder."
+
+So of the six candidate issues, **#1 (continuation-line assembly)** was the culprit; #2–#6 already
+worked once the card was joined.
+
+### Fix
+
+- **Continuation rule loosened to `/^\s+\S/`** — any non-blank, non-comment line that begins with
+  *any* leading whitespace (tab, 1–4 spaces, or the classic ≥5) now continues the previous card, as
+  before does a trailing `&`. No legitimate MCNP card starts with leading whitespace (card
+  numbers/names live in columns 1–5), so this is strictly more forgiving and matches real
+  hand-written decks and tab-inserting editors. (As a bonus, multi-line `m`-card ZAID lists indented
+  with <5 spaces now assemble too.)
+- **`expandRepeats()` now also handles `nI` (linear interpolate, rounded to integer universe ids)
+  and `nJ`/`j` (jump → 0/background)** in addition to the existing `nR` repeat shorthand, per the
+  fill-array spec.
+- **`parseCell()` strips cell-complement operators (`#n`, `#(...)`)** before pulling signed surface
+  ids, so a `#5` can't be misread as surface 5 and inject a phantom bounding cylinder.
+
+### Tests — `src/test/suite/extractor.test.ts` (pure-logic, run headless via mocha `--ui tdd`)
+
+Five new tests reproducing the deck's structure:
+
+- TAB-indented 17×17 fill grid → **289 placed positions, 817 cylinders** (264 fuel × 3 shells + 25
+  water columns), **no fallback warning** — the regression guard for this exact bug.
+- 2-space-indented grid → identical result in disc mode (289 discs, 17 columns).
+- Pitch derived from the cell's own `px`/`py` planes (±0.63 → 1.26 cm; columns span ±10.08).
+- Container `fill=3` → `lat=1 u=3` → `u=1`/`u=2` chain resolves (hierarchy note, not bare fallback).
+- `nR` repeat shorthand inside a tab-continued fill array.
+
+All 29 extractor tests pass. `tsc --noEmit` clean; `node esbuild.js --production` clean (`out/` ships
+only `extension.js`).
+
+### Fixture
+
+`C:\Users\me\reactor-test-decks\basic_mcnp_test.inp` was reconstructed (the user's file was an
+unsaved editor buffer, not on disk) as a faithful, valid Westinghouse-style 17×17 deck — 264 UO2
+pins + 25 guide/instrument water columns, pitch 1.26 cm, criticality `kcode`/`ksrc`, labelled as a
+viz/example fixture — and added to `scripts/viz-check.mjs`. viz-check reports **817 prims / 289
+pins** for it (full 17×17), with the other four decks unchanged.
+
+> Publishing: marketplace/OVSX tokens are not present in this environment (as with 0.1.9 / 0.2.0), so
+> this release is shipped via the GitHub mirror + `gh release`; the `vsce publish` / `ovsx publish`
+> commands are reported for a maintainer with tokens to run.
+
+---
+
 ## 2026-06-22 — v0.2.0 — Cross-code 3D viz parity (full-core layers, enrichment, axial, hex, trcl, nested OpenMC)
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

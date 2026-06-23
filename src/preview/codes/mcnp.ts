@@ -334,8 +334,19 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
 
 /**
  * Splits a deck into logical cards: strips `$` inline comments and `c` comment
- * cards, joins continuation lines (≥5 leading spaces, or a trailing `&`), and
- * normalises whitespace around `=`.
+ * cards, joins continuation lines, and normalises whitespace around `=`.
+ *
+ * Continuation rule (lenient, to match real hand-written decks): a non-blank,
+ * non-comment line that begins with *any* leading whitespace — a tab, a couple
+ * of spaces, or the classic ≥5 blank columns — continues the previous card, as
+ * does a previous line ending in `&`. MCNP itself only treats columns 1–5 blank
+ * as a continuation, but real decks (and editors that insert tabs) routinely
+ * indent the `fill=` line and the flattened lattice grid with a tab or 2–4
+ * spaces. Requiring exactly ≥5 spaces silently split those rows off into bogus
+ * "cards", so the lattice `fill` array never assembled and the whole assembly
+ * collapsed to the bare-pin fallback (the classic "renders as one cylinder"
+ * bug). Since no legitimate MCNP card begins with leading whitespace, treating
+ * every indented line as a continuation is safe and strictly more forgiving.
  */
 function logicalCards(text: string): string[] {
     const lines = text.split(/\r?\n/);
@@ -351,8 +362,8 @@ function logicalCards(text: string): string[] {
     for (let raw of lines) {
         raw = raw.replace(/\$.*$/, ''); // inline comment
         if (raw.trim() === '') { flush(); continue; }
-        if (/^\s{0,4}c(\s|$)/i.test(raw)) continue; // comment card
-        const isCont = /^\s{5,}\S/.test(raw) || /&\s*$/.test(buf);
+        if (/^\s{0,4}c(\s|$)/i.test(raw)) continue; // comment card (c in cols 1–5)
+        const isCont = /^\s+\S/.test(raw) || /&\s*$/.test(buf);
         if (isCont && buf !== '') {
             buf = buf.replace(/&\s*$/, '') + ' ' + raw.trim();
         } else {
@@ -502,12 +513,15 @@ function parseCell(card: string): MCNPCell | null {
     let pStart = tokens.findIndex((t, i) => i >= gStart && t.includes('='));
     if (pStart < 0) pStart = tokens.length;
 
-    const geomTokens = tokens.slice(gStart, pStart);
+    // Surface list for the geometry portion. Cell-complement operators (`#n`
+    // and `#(...)`) reference *cells*, not surfaces, so strip them before
+    // pulling signed surface ids — otherwise a `#5` would be mistaken for
+    // surface 5 and could inject a phantom bounding cylinder.
+    const geomStr = tokens.slice(gStart, pStart).join(' ')
+        .replace(/#\s*\([^)]*\)/g, ' ')
+        .replace(/#\d+/g, ' ');
     const surfaces: number[] = [];
-    for (const g of geomTokens) {
-        const m = g.match(/-?\d+/g);
-        if (m) for (const n of m) surfaces.push(parseInt(n, 10));
-    }
+    for (const n of geomStr.match(/-?\d+/g) ?? []) surfaces.push(parseInt(n, 10));
 
     const paramTokens = tokens.slice(pStart);
     let u: number | null = null;
@@ -605,9 +619,19 @@ function parseFill(tokens: string[]): FillSpec | null {
     return null;
 }
 
-/** Expands MCNP `nR` repeat shorthand in a fill value list. */
+/**
+ * Expands the MCNP data-array shorthand used inside a `fill` universe list:
+ *   - `nR` — repeat the previous entry n more times.
+ *   - `nI` — linearly interpolate n entries between the previous entry and the
+ *            next explicit entry (rounded to integers, since these are universe
+ *            ids); the bracketing entry that follows is emitted as normal.
+ *   - `nJ` / `j` — "jump" n default entries (emitted as 0 = background/no pin).
+ * Anything else that parses as an integer is taken literally; unknown tokens
+ * are ignored so stray text never aborts the array.
+ */
 function expandRepeats(tokens: string[]): number[] {
     const out: number[] = [];
+    let pendingInterp = 0; // count of interpolated entries owed before the next value
     for (const tok of tokens) {
         const rep = tok.match(/^(\d+)[rR]$/);
         if (rep) {
@@ -616,8 +640,28 @@ function expandRepeats(tokens: string[]): number[] {
             for (let k = 0; k < n; k++) out.push(last);
             continue;
         }
+        const interp = tok.match(/^(\d+)[iI]$/);
+        if (interp) {
+            pendingInterp = parseInt(interp[1], 10);
+            continue;
+        }
+        const jump = tok.match(/^(\d+)?[jJ]$/);
+        if (jump) {
+            const n = jump[1] ? parseInt(jump[1], 10) : 1;
+            for (let k = 0; k < n; k++) out.push(0);
+            continue;
+        }
         const n = parseInt(tok, 10);
-        if (!Number.isNaN(n)) out.push(n);
+        if (Number.isNaN(n)) continue;
+        if (pendingInterp > 0 && out.length) {
+            const start = out[out.length - 1];
+            const steps = pendingInterp + 1;
+            for (let k = 1; k <= pendingInterp; k++) {
+                out.push(Math.round(start + ((n - start) * k) / steps));
+            }
+            pendingInterp = 0;
+        }
+        out.push(n);
     }
     return out;
 }

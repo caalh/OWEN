@@ -5,6 +5,25 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-06-22
+
+### Fixed
+
+- **3D preview: hand-written MCNP lattices that were indented with tabs (or fewer than 5 spaces)
+  now render as the full assembly instead of collapsing to a single pin.** A real 17×17 PWR
+  assembly deck whose `fill=` line and 289-entry universe grid were tab-indented rendered as just
+  one cylinder, because the MCNP card-continuation rule only recognized continuation lines with
+  ≥5 leading spaces. Any indented continuation line (tab or spaces) is now joined correctly, so the
+  lattice `fill` array assembles, the `fill=`-into-lattice chain resolves, and the whole 17×17
+  (264 fuel pins + 25 guide/instrument positions) renders. Multi-line material (`m`) cards indented
+  with fewer than 5 spaces also assemble now.
+
+### Added
+
+- MCNP `fill`-array shorthand now also expands `nI` (interpolate) and `nJ`/`j` (jump) in addition
+  to `nR` (repeat); cell-complement operators (`#n`, `#(...)`) are tolerated without affecting the
+  rendered pin geometry.
+
 ## [0.2.0] — 2026-06-22
 
 **Major 3D visualization milestone — full cross-code geometry parity.** The 3D preview now

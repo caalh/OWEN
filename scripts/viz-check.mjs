@@ -7,6 +7,7 @@ import { buildScene } from '../out-test/preview/extractor.js';
 
 const DECKS = 'C:/Users/me/reactor-test-decks';
 const cases = [
+    ['basic_mcnp_test.inp', 'mcnp'],
     ['assembly_17x17_mcnp.i', 'mcnp'],
     ['assembly_17x17_serpent.sss', 'serpent'],
     ['beavrs_core_mcnp.i', 'mcnp'],

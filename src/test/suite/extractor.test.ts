@@ -550,6 +550,130 @@ geometry {
         assert.ok(/nested/i.test(scene.notes.join(' ')), 'expected a nested-core note');
     });
 
+    // --- v0.2.1: real-world hand-written MCNP formatting (the basic_mcnp_test.inp bug) ---
+
+    // The user's hand-written 17x17 assembly rendered as a single cylinder. Root
+    // cause: the `fill=` line and the 289-entry universe grid were indented with
+    // a TAB (or <5 spaces), so the old continuation rule (≥5 leading spaces)
+    // never joined them into the lattice cell — the fill array never assembled,
+    // the lattice could not expand, and the parser fell back to drawing the bare
+    // pin cylinders at the origin (≈ "one cylinder"). These tests pin the deck's
+    // structure: container `fill=3` → `lat=1 u=3` lattice → 289 u=1/u=2 pins,
+    // with pitch derived from the cell's own px/py planes.
+
+    // Standard Westinghouse 17x17 map: 264 fuel (u=1) + 25 guide/instrument (u=2).
+    const w17rows = [
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 1 1 1 2 1 1 2 1 1 2 1 1 1 1 1',
+        '1 1 1 2 1 1 1 1 1 1 1 1 1 2 1 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 2 1 1 2 1 1 2 1 1 2 1 1 2 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 2 1 1 2 1 1 2 1 1 2 1 1 2 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 2 1 1 2 1 1 2 1 1 2 1 1 2 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 1 2 1 1 1 1 1 1 1 1 1 2 1 1 1',
+        '1 1 1 1 1 2 1 1 2 1 1 2 1 1 1 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+        '1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1',
+    ];
+    const make17x17 = (indent: string): string => [
+        'c PWR 17x17 (hand-written-style fixture)',
+        '1   1  -10.4   -1        imp:n=1  u=1   $ UO2 fuel',
+        '2   2  -0.0001  1 -2     imp:n=1  u=1   $ He gap',
+        '3   3  -6.56    2 -3     imp:n=1  u=1   $ Zircaloy-4 clad',
+        '4   4  -0.998   3        imp:n=1  u=1   $ water to lattice edge',
+        '11  4  -0.998  -5        imp:n=1  u=2',
+        '12  4  -0.998   5        imp:n=1  u=2   $ guide-tube water column',
+        '21  0  -21 22 -23 24  lat=1 u=3 imp:n=1',
+        `${indent}fill=-8:8 -8:8 0:0`,
+        ...w17rows.map((r) => indent + r),
+        '31  0          -31 32 -33 34      fill=3 imp:n=1',
+        '32  4  -0.998  (31:-32:33:-34) -35 36 -37 38   imp:n=1   $ reflector',
+        '33  0           35:-36:37:-38     imp:n=0   $ void',
+        '',
+        '1  cz 0.4096',
+        '2  cz 0.418',
+        '3  cz 0.475',
+        '5  cz 0.561',
+        '21 px  0.63', '22 px -0.63', '23 py  0.63', '24 py -0.63',
+        '31 px  10.71', '32 px -10.71', '33 py  10.71', '34 py -10.71',
+        '35 px  12.71', '36 px -12.71', '37 py  12.71', '38 py -12.71',
+        '',
+        'mode n',
+        'm1  92235.80c 0.031 92238.80c 0.969 8016.80c 2.0',
+        'm2  2004.80c 1.0',
+        'm3  40090.80c 1.0',
+        'm4  1001.80c 2.0 8016.80c 1.0',
+        'kcode 5000 1.0 30 130',
+        'ksrc 0 0 0',
+    ].join('\n');
+
+    test('expands a TAB-indented 17x17 fill grid into 289 pins (not one cylinder)', () => {
+        // This is the exact failure: a tab before `fill=` and every grid row.
+        const scene = buildScene(make17x17('\t'), 'mcnp', { detail: 'layers', axial: false });
+        assert.strictEqual(scene.fidelity.totalPins, 289,
+            `expected 289 placed lattice positions, got ${scene.fidelity.totalPins}`);
+        assert.strictEqual(scene.warnings.length, 0,
+            `expected no fallback warning, got: ${scene.warnings.join(' | ')}`);
+        const fuel = scene.components.find((c) => c.id === 'fuel');
+        const mod = scene.components.find((c) => c.id === 'moderator');
+        assert.strictEqual(fuel?.count, 264, `expected 264 fuel layers, got ${fuel?.count}`);
+        assert.strictEqual(mod?.count, 25, `expected 25 guide/instrument water columns, got ${mod?.count}`);
+        // 264 fuel × 3 shells (fuel/gap/clad) + 25 water columns = 817 cylinders.
+        assert.strictEqual(scene.primitiveCount, 817, `expected 817 cylinders, got ${scene.primitiveCount}`);
+        assert.strictEqual(distinctX(scene.cylinders), 17, `expected 17 lattice columns, got ${distinctX(scene.cylinders)}`);
+    });
+
+    test('expands a 2-space-indented 17x17 fill grid identically (lenient continuation)', () => {
+        const scene = buildScene(make17x17('  '), 'mcnp', { detail: 'disc', axial: false });
+        // disc mode = one cylinder per position.
+        assert.strictEqual(scene.primitiveCount, 289, `expected 289 discs, got ${scene.primitiveCount}`);
+        assert.strictEqual(distinctX(scene.cylinders), 17, `expected 17 columns, got ${distinctX(scene.cylinders)}`);
+    });
+
+    test('derives the lattice pitch from the cell px/py planes (±0.63 → 1.26 cm)', () => {
+        const cyls = extractCylinders(make17x17('\t'), 'mcnp', { detail: 'disc' });
+        const xs = [...new Set(cyls.map((c) => Math.round(c.x * 1000) / 1000))].sort((a, b) => a - b);
+        // 17 columns, pitch 1.26 → span 16 × 1.26 = 20.16, i.e. ±10.08.
+        assert.ok(Math.abs(xs[0] + 10.08) < 1e-3, `expected leftmost column at -10.08, got ${xs[0]}`);
+        assert.ok(Math.abs(xs[xs.length - 1] - 10.08) < 1e-3, `expected rightmost column at 10.08, got ${xs[xs.length - 1]}`);
+        const pitch = (xs[xs.length - 1] - xs[0]) / (xs.length - 1);
+        assert.ok(Math.abs(pitch - 1.26) < 1e-6, `expected pitch 1.26 from planes, got ${pitch}`);
+    });
+
+    test('resolves the container fill=3 → lat=1 u=3 → u=1/u=2 chain (no bare fallback)', () => {
+        const scene = buildScene(make17x17('\t'), 'mcnp', { detail: 'layers', axial: false });
+        assert.ok(/Expanded the MCNP universe hierarchy/.test(scene.notes.join(' ')),
+            'expected the universe hierarchy to expand, not the bare-surface fallback');
+        assert.ok(scene.cylinders.some((c) => c.component === 'fuel'), 'expected fuel pins');
+    });
+
+    test('expands nR repeat shorthand in a tab-continued fill array', () => {
+        const deck = [
+            'c nR repeat lattice',
+            '1 1 -10.4 -1 u=1 imp:n=1',
+            '2 3 -0.7   1 u=1 imp:n=1',
+            '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+            '\tfill=0:2 0:2 0:0',
+            '\t1 8r',                 // 1 then 8 repeats = 9 ones
+            '20 0 -60 fill=10 imp:n=1',
+            '21 0  60 imp:n=0',
+            '',
+            '1 cz 0.40',
+            '50 px -0.63', '51 px 0.63', '52 py -0.63', '53 py 0.63',
+            '60 rpp -1.89 1.89 -1.89 1.89 -10 10',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+            'm3 1001.80c 2.0 8016.80c 1.0',
+        ].join('\n');
+        const cyls = extractCylinders(deck, 'mcnp', { detail: 'disc' });
+        assert.strictEqual(cyls.length, 9, `expected 9 pins from "1 8r", got ${cyls.length}`);
+    });
+
     test('builds a component legend in buildScene', () => {
         const deck = `
 geometry { universes {
