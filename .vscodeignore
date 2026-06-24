@@ -17,3 +17,4 @@ out-test/**
 owen-*.vsix
 .vsixmanifest
 assets/belvoirdynamics-b.png
+media/**

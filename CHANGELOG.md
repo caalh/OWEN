@@ -5,6 +5,22 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-06-24
+
+Documentation release — no code changes.
+
+### Added
+
+- **Demo recordings in the Marketplace/README overview.** A new **"See it in action"** section
+  near the top of the README shows two looping screen-capture GIFs: the visual **Lattice Builder**
+  generating an MCNP 17×17 PWR assembly with live syntax highlighting, and the **3D geometry
+  preview** of a full Serpent core (component toggles, Disc/Layers fidelity, X/Y/Z slice planes).
+  Each GIF links to a full-quality MP4 attached to the GitHub release. (GIFs are hosted via
+  absolute raw URLs because the VS Code Marketplace strips `<video>` tags; they are excluded from
+  the VSIX so the package stays small.)
+- **Author attribution.** The README now credits **Aaron W. Calhoun** under the title, and
+  `package.json` gains an `author` field (publisher remains `belvoirdynamics`).
+
 ## [0.2.1] — 2026-06-22
 
 ### Fixed

@@ -1,5 +1,6 @@
 <h1 align="center">OWEN</h1>
 <p align="center"><strong>Open Workspace for Engineered Neutronics</strong></p>
+<p align="center">Created by <strong>Aaron W. Calhoun</strong></p>
 <p align="center">The nuclear reactor modeling toolkit for VS Code &amp; Cursor — syntax highlighting, a visual lattice builder, geometry preview, deep input validation, and workflow automation for <strong>MCNP</strong>, <strong>OpenMC</strong>, <strong>Serpent</strong>, and <strong>SCONE</strong>.</p>
 
 <p align="center">
@@ -18,6 +19,27 @@ OWEN brings first-class editor support for the four major Monte Carlo neutron-tr
 codes to VS Code and Cursor. Write decks faster with smart snippets, catch mistakes before
 you run with language-aware validation, build lattices visually, and launch solvers without
 leaving your editor.
+
+## See it in action
+
+**Visual Lattice Builder → MCNP 17×17 assembly, with live syntax highlighting.** Pick fuel,
+guide-tube, and instrument-tube positions on a grid and OWEN writes the lattice deck for you.
+
+<p align="center">
+  <img alt="OWEN Lattice Builder generating an MCNP 17×17 PWR assembly deck with live syntax highlighting" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-lattice-builder.gif" width="900">
+</p>
+
+<p align="center"><a href="https://github.com/caalh/owen/releases/download/v0.2.2/demo-lattice-builder.mp4">▶ Watch full-quality MP4</a></p>
+
+**3D geometry preview of a full Serpent core — component toggles, Disc/Layers fidelity, and
+X / Y / Z slice planes.** Inspect ~56,900 pins interactively: peel away vessel and guide tubes,
+switch to concentric pin layers, and slice through the core.
+
+<p align="center">
+  <img alt="OWEN 3D geometry preview of a full Serpent core with component toggles and slice planes" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-3d-preview.gif" width="820">
+</p>
+
+<p align="center"><a href="https://github.com/caalh/owen/releases/download/v0.2.2/demo-3d-preview.mp4">▶ Watch full-quality MP4</a></p>
 
 ## Features
 

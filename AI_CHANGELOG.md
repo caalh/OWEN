@@ -12,6 +12,51 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-24 — v0.2.2 — Docs: demo screen recordings + author attribution
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.1` → `0.2.2` in `package.json` and `package-lock.json`. Documentation-only
+release — no extension code changed.
+
+### What changed
+
+- **Demo GIFs in the README overview.** Added a **"See it in action"** section near the top of
+  `README.md` with two looping GIFs converted from screen recordings:
+  - `media/demo-lattice-builder.gif` (900×599, ~3.3 MB) — the Lattice Builder generating an MCNP
+    17×17 PWR assembly, with live MCNP syntax highlighting in the editor. Source: a 27.4 s,
+    2222×1478 capture.
+  - `media/demo-3d-preview.gif` (720×397, ~5.7 MB) — the 3D geometry preview of a full Serpent
+    core (~56,900 pins): component toggles (Fuel / Guide Tubes / Instrument Tubes / Vessel), the
+    Disc/Layers fidelity control, and the X/Y/Z slice planes. Source: a 61.7 s, 2538×1398 capture.
+- **Why GIFs, hosted by absolute URL.** The VS Code Marketplace sanitizes README HTML and strips
+  `<video>` tags, so raw `.mp4` will not play in the overview. The GIFs are referenced via absolute
+  raw URLs (`https://raw.githubusercontent.com/caalh/owen/main/media/<name>.gif`) because relative
+  paths don't reliably render on the Marketplace. Full-quality MP4s are attached to the
+  `v0.2.2` GitHub release and linked under each GIF.
+- **VSIX hygiene.** `media/**` was added to `.vscodeignore` so the GIFs do **not** ship inside the
+  package (the Marketplace fetches them from the absolute URL). `out/` still ships only
+  `out/extension.js`.
+- **Author attribution.** Added **"Created by Aaron W. Calhoun"** under the OWEN title in the
+  README and an `"author": "Aaron W. Calhoun"` field in `package.json`; `publisher` stays
+  `belvoirdynamics`.
+
+### Conversion notes (ffmpeg, two-pass palette)
+
+- Lattice GIF: `fps=12,scale=900` two-pass palette (palettegen → paletteuse).
+- 3D-preview GIF: the dense green wireframe over a dark background compressed poorly at the
+  defaults (11.7 MB at fps=10/scale=820), so it was re-encoded at `fps=8,scale=720` with
+  `palettegen=max_colors=128:stats_mode=diff` + `paletteuse=dither=bayer:bayer_scale=5`, landing at
+  ~5.7 MB — under the ~8 MB target.
+
+### Build / verification
+
+- `tsc --noEmit` clean; `node esbuild.js --production` clean.
+- Packaged `owen-neutronics-0.2.2.vsix`; verified `out/` ships only `extension.js` and the GIFs are
+  not in the VSIX.
+
+---
+
 ## 2026-06-22 — v0.2.1 — Fix: MCNP lattice fill grid dropped on tab / short-indent continuation lines
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
