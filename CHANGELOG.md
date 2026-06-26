@@ -5,6 +5,33 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-06-26
+
+Lattice Builder enhancements: editable identifiers and a SCONE generator.
+
+### Added
+
+- **Editable universe identifiers in the Lattice Builder.** A new **Identifiers & numbers** panel
+  lets you set, per pin type, the **MCNP universe number**, **OpenMC universe variable name**,
+  **Serpent universe name**, and **SCONE universe name + id** — and the **structural** identifiers
+  (MCNP lattice cell number, lattice universe, and the four unit-cell surface numbers; Serpent
+  `lat` id; OpenMC lattice variable; SCONE lattice name + id). Values flow straight into the live
+  preview and the **Insert at Cursor** output, so generated code drops into an existing deck
+  without renumbering or universe-id collisions. Defaults match the previous hardcoded values.
+- **SCONE output in the Lattice Builder.** `SCONE` is now a Format option. It emits a square
+  `latUniverse` whose `map` references each painted pin type's SCONE universe id, plus a
+  `pinUniverse` stub (with `radii`/`fills`) for every pin type actually used — enforcing the SCONE
+  rule that `radii` length equals `fills` length with an outermost `0.0` radius. The output is
+  ASCII with UNIX newlines and is commented so you know to wire the lattice universe into your
+  geometry root and define the referenced materials. Radii/fills default to canonical PWR pin-cell
+  values and are clearly marked as placeholders to confirm.
+
+### Changed
+
+- The four lattice generators (MCNP/OpenMC/Serpent/SCONE) were extracted into a pure, vscode-free
+  module (`src/panels/latticeCodegen.ts`) that the webview injects verbatim, so the live preview
+  runs the exact same logic now covered by headless unit tests.
+
 ## [0.2.3] — 2026-06-26
 
 Two-feature release: axial-layer 3D visualization and an MCNP cross-reference tracker.

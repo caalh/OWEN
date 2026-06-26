@@ -12,6 +12,65 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-26 — v0.2.4 — Lattice Builder: editable identifiers + SCONE generator
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.3` → `0.2.4` in `package.json` and `package-lock.json`. Two Lattice Builder
+features plus a testability refactor.
+
+### Refactor — `src/panels/latticeCodegen.ts` (new, pure, vscode-free)
+
+- The four `gen*` functions previously lived as inline JS strings inside the webview HTML in
+  `latticeBuilder.ts` (untestable). They now live in `latticeCodegen.ts` as standalone TypeScript
+  functions over a single `LatticeSpec` (`{ gridSize, pitch, grid, pins[], structural }`), with
+  `defaultPinTypes()` / `defaultStructuralIds()` exposing the old hardcoded values as editable
+  defaults.
+- **Single source of truth for the webview.** `latticeBuilder.ts` injects each generator into the
+  webview `<script>` via `Function.prototype.toString()` (plus `JSON.stringify` of the defaults),
+  so the live preview runs the *exact* functions the tests assert against — no duplicated codegen.
+  Each generator is deliberately self-contained (references only its `spec` argument + JS
+  built-ins) so the injected copy survives esbuild's production minification. This was verified:
+  a minified bundle's `genSCONE.toString()`, re-created with `new Function`, reproduces the direct
+  call byte-for-byte.
+
+### Feature 1 — Editable identifiers / numbers
+
+- New **Identifiers & numbers** `<details>` panel in the webview:
+  - **Per-pin-type table:** editable label, **MCNP universe number**, **OpenMC name**,
+    **Serpent name**, **SCONE name**, **SCONE id** (swatch shows the paint color).
+  - **Structural grid:** MCNP lattice **cell #**, lattice **universe**, the four unit-cell
+    **surface numbers** (`+x -x +y -y`); Serpent **lat id**; OpenMC **lattice variable**; SCONE
+    **lattice name** + **id**.
+  - **SCONE pin shells table:** editable `radii` / `fills` per pin type.
+- State lives in `pins` / `struct` JS objects (deep copies of the injected defaults); every input
+  mutates them and calls `refreshCode()`. `buildSpec()` assembles the `LatticeSpec` the generators
+  consume, so identifiers flow into both the live preview and **Insert at Cursor**.
+
+### Feature 2 — SCONE generator
+
+- `SCONE` added to the Format dropdown; `genSCONE(spec)` emits:
+  - a square `latUniverse` block (`shape (n n 1)`, `pitch`, `origin`, `padMat Water`) whose `map`
+    references each painted pin type's **SCONE id** (SCONE maps reference numeric universe ids —
+    confirmed against the `latUniverse` parser in `preview/codes/scone.ts`);
+  - a `pinUniverse` stub **only for pin types actually painted**, each with `radii`/`fills`.
+- **SCONE rules enforced:** `radii.length == fills.length`, outermost radius `0.0` (fills to the
+  cell edge), `key value;` / `block { … }` syntax, ASCII only, UNIX newlines. Defaults use the
+  project's canonical PWR pin-cell values (fuel `0.392 0.400 0.457 0.0` / `UO2 Helium Zircaloy
+  Water`; thimble `0.561 0.602 0.0` / `Water Zircaloy Water`; water rod `0.0` / `Water`) and are
+  commented as placeholders. Header comment tells the user to wire `fill u<latId>;` into their
+  geometry root and define the referenced materials.
+
+### Tests — `src/test/suite/latticeCodegen.test.ts` (pure-logic, headless via mocha `--ui tdd`)
+
+- 7 new tests: editable ids appear in MCNP/OpenMC/Serpent/SCONE output; SCONE
+  `radii.length == fills.length` with outermost `0.0`; SCONE ASCII + UNIX newlines; SCONE emits
+  stubs only for painted types and the root-wiring comment; a painted guide tube is referenced with
+  the user's chosen id in every format.
+- **Results:** `tsc --outDir out-test` + `mocha` on the four pure-logic suites = **51 passing**
+  (44 prior + 7 new). `tsc --noEmit` clean; `esbuild --production` clean; `out/` ships only
+  `extension.js`.
+
 ## 2026-06-26 — v0.2.3 — Axial-layer 3D viz + MCNP cross-reference tracker
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
