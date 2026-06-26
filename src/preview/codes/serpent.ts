@@ -55,6 +55,12 @@ interface LatDef {
     grid: string[][]; // [row][col] of universe names
 }
 
+interface AxialSegment {
+    zmin: number;
+    zmax: number;
+    universe: string;
+}
+
 export function extractSerpentCylinders(text: string): CylinderSpec[] {
     return parseSerpent(text).cylinders;
 }
@@ -88,12 +94,42 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         }
     }
 
+    // z-plane elevations from `surf <id> pz <z>` cards (for axial stacks).
+    const planeZ = new Map<string, number>();
+    for (const s of surfs.values()) {
+        if (s.type === 'pz' && s.params.length >= 1) planeZ.set(s.id, s.params[0]);
+    }
+
     // Cell-defined (CSG) universes: group cells by universe id.
     const cellsByUniverse = new Map<string, CellDef[]>();
     for (const c of cells) {
         if (!cellsByUniverse.has(c.universe)) cellsByUniverse.set(c.universe, []);
         cellsByUniverse.get(c.universe)!.push(c);
     }
+
+    // Axial stacks: a universe whose cells each `fill` a sub-universe and are
+    // bounded by pz planes (active fuel / plenum / grids / dashpot / nozzles).
+    const axialStacks = new Map<string, AxialSegment[]>();
+    for (const [uni, cs] of cellsByUniverse) {
+        const segs: AxialSegment[] = [];
+        for (const c of cs) {
+            if (!c.fill) continue;
+            const zs: number[] = [];
+            for (const sref of c.surfaces) {
+                const z = planeZ.get(sref.id);
+                if (z !== undefined) zs.push(z);
+            }
+            if (zs.length < 2) continue;
+            const zmin = Math.min(...zs);
+            const zmax = Math.max(...zs);
+            if (zmax > zmin) segs.push({ zmin, zmax, universe: c.fill });
+        }
+        if (segs.length >= 2) {
+            segs.sort((a, b) => a.zmin - b.zmin);
+            axialStacks.set(uni, segs);
+        }
+    }
+    const hasAxial = axialStacks.size > 0;
 
     // Resolve a universe name to drawable geometry.
     const isLat = (u: string) => lats.has(u);
@@ -157,10 +193,19 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         }
     }
 
-    const totalPins = countPins(coreLat, lats, resolveFill, (u) => pinLayers(u) !== null);
+    const totalPins = countPins(coreLat, lats, resolveFill, (u) => pinLayers(u) !== null || axialStacks.has(u));
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
     const discMode = detail === 'disc';
-    const height = discMode ? 200 : 40;
+    const axialOn = !!opts?.axial && hasAxial;
+
+    // Global axial extent from pz planes drives both the collapsed pin height
+    // and the vessel/barrel context shells; falls back to a nominal height.
+    const planeVals = [...planeZ.values()];
+    const zLo = planeVals.length ? Math.min(...planeVals) : 0;
+    const zHi = planeVals.length ? Math.max(...planeVals) : 0;
+    const fullHeight = planeVals.length ? Math.max(1, zHi - zLo) : (discMode ? 200 : 40);
+    const fullZmid = planeVals.length ? (zLo + zHi) / 2 : 0;
+    const height = fullHeight;
 
     let subPitch = 1.26;
     for (const lat of lats.values()) if (lat.pitch > 0) subPitch = Math.min(subPitch, lat.pitch);
@@ -180,7 +225,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         return 'other';
     };
 
-    const placePin = (name: string, cx: number, cy: number, label: string): void => {
+    const placePin = (name: string, cx: number, cy: number, label: string, zCenter: number = fullZmid, segHeight: number = fullHeight): void => {
         if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
         const layers = pinLayers(name);
         if (!layers) return;
@@ -202,10 +247,10 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             cylinders.push({
                 label,
                 radius: Math.min(subPitch * 0.47, Math.max(...positive.map((l) => l.r))),
-                height,
+                height: segHeight,
                 x: cx,
                 y: cy,
-                z: 0,
+                z: zCenter,
                 color,
                 opacity: 1.0,
                 component: comp,
@@ -216,7 +261,32 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
 
         const colors = positive.map((l) => materialColor(l.mat));
         const mats = positive.map((l) => l.mat);
-        cylinders.push(...emitLayers(positive.map((l) => l.r), comps, cx, cy, 0, height, label, colors, mats));
+        cylinders.push(...emitLayers(positive.map((l) => l.r), comps, cx, cy, zCenter, segHeight, label, colors, mats));
+    };
+
+    // Place a lattice entry: an axial stack (when axial detail is on) expands
+    // into its z-segments; otherwise it collapses to its tallest segment over
+    // the full model height. Non-stack entries resolve to a lattice or a pin.
+    const placeEntry = (name: string, cx: number, cy: number, label: string, depth: number): void => {
+        const segs = axialStacks.get(name);
+        if (segs) {
+            if (axialOn) {
+                for (let i = 0; i < segs.length; i++) {
+                    const seg = segs[i];
+                    const pin = resolveFill(seg.universe);
+                    const h = Math.max(0.01, seg.zmax - seg.zmin);
+                    placePin(pin, cx, cy, `${label}_z${i}`, (seg.zmin + seg.zmax) / 2, h);
+                }
+            } else {
+                let rep = segs[0];
+                for (const s of segs) if ((s.zmax - s.zmin) > (rep.zmax - rep.zmin)) rep = s;
+                placePin(resolveFill(rep.universe), cx, cy, label, fullZmid, fullHeight);
+            }
+            return;
+        }
+        const resolved = resolveFill(name);
+        if (lats.has(resolved)) placeUniverse(resolved, cx, cy, label, depth + 1);
+        else placePin(resolved, cx, cy, label);
     };
 
     const placeUniverse = (name: string, cx: number, cy: number, label: string, depth: number): void => {
@@ -251,9 +321,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                         px = x0 + col * lat.pitch;
                         py = yTop - row * lat.pitch;
                     }
-                    const r = resolveFill(entry);
-                    if (lats.has(r)) placeUniverse(r, px, py, `${label}_r${row}c${col}`, depth + 1);
-                    else placePin(r, px, py, `${label}_r${row}c${col}`);
+                    placeEntry(entry, px, py, `${label}_r${row}c${col}`, depth);
                 }
             }
             return;
@@ -294,10 +362,10 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             cylinders.push({
                 label: `vessel_${s.id}`,
                 radius: surfRadius(s),
-                height,
+                height: fullHeight,
                 x: 0,
                 y: 0,
-                z: 0,
+                z: fullZmid,
                 color: componentColor(Component.Vessel),
                 opacity: 0.12,
                 component: Component.Vessel,
@@ -312,6 +380,11 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     if ([...lats.values()].some((l) => l.type === 2 || l.type === 3)) {
         notes.push('Hex lattice (type 2/3) placed on real hexagonal coordinates.');
     }
+    if (axialOn) {
+        notes.push('Axial detail: each pin expanded into its real z-segments (active fuel / plenum / grids / dashpot / end plugs). Use the Axial Layers toggles and the Axial slice to inspect levels.');
+    } else if (hasAxial) {
+        notes.push('This deck defines axial structure (pz-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
+    }
     if (capped) {
         warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
     }
@@ -323,7 +396,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         }
     }
 
-    const fidelity: FidelityState = { detail, axial: false, autoDetail, totalPins, hasAxial: false };
+    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
     return { cylinders, warnings, notes, fidelity };
 }
 

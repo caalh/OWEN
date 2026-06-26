@@ -11,6 +11,8 @@ import { registerGeometryPreview } from './preview/webview';
 import { registerSnippetCompletions } from './completions/snippets';
 import { registerHighlightPalettes } from './highlight';
 import { registerDecorations } from './decorations';
+import { registerMcnpReferenceProviders } from './references/providers';
+import { registerMcnpReferencesView } from './references/referencesView';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('OWEN extension activated');
@@ -18,6 +20,8 @@ export function activate(context: vscode.ExtensionContext) {
     registerSnippetCompletions(context);
     registerHighlightPalettes(context);
     registerDecorations(context);
+    registerMcnpReferenceProviders(context);
+    registerMcnpReferencesView(context);
 
     context.subscriptions.push(
         vscode.commands.registerCommand('owen.openLatticeBuilder', () => {

@@ -37,6 +37,14 @@ export interface CylinderSpec {
      * half-width of a square prism (square grid sleeves / structural panels).
      */
     shape?: 'cylinder' | 'box';
+    /**
+     * Axial layer (z-band) this cylinder belongs to when the scene is expanded
+     * with axial detail. Drives the per-axial-layer show/hide toggle and the
+     * axial slice slider in the webview. Undefined for single-height scenes.
+     */
+    axialLayer?: string;
+    /** Ordered index of the axial layer (0 = bottom-most), for the slider. */
+    axialIndex?: number;
 }
 
 /** A logical layer the webview can show/hide, with a representative color. */
@@ -55,6 +63,25 @@ export interface MaterialSummary {
 }
 
 /**
+ * An axial layer (a z-band) the webview can show/hide individually and slice
+ * by height. Built from the placed geometry when axial detail is on: every
+ * cylinder sharing a z-range (bottom/top) collapses into one layer, ordered
+ * bottom-to-top. The full-core BEAVRS stacks (active fuel / plenum / grids /
+ * dashpot / nozzles / end plugs) become ~25 of these.
+ */
+export interface AxialLayerSummary {
+    /** Stable key (also the legend label), e.g. "0.0–20.0 cm". */
+    id: string;
+    label: string;
+    color: string;
+    count: number;
+    zmin: number;
+    zmax: number;
+    /** Bottom-to-top order index (0 = bottom-most). */
+    index: number;
+}
+
+/**
  * Everything the webview needs to render and offer toggles. `extractCylinders`
  * still returns the flat list for back-compat; `buildScene` wraps it with the
  * legend summaries and any parser warnings (so the UI can say *why* a deck only
@@ -65,6 +92,9 @@ export interface GeometryScene {
     cylinders: CylinderSpec[];
     components: ComponentSummary[];
     materials: MaterialSummary[];
+    /** Axial layers (z-bands) for the per-layer toggle + slice slider. Empty
+     * unless the scene was expanded with axial detail. */
+    axialLayers: AxialLayerSummary[];
     warnings: string[];
     notes: string[];
     primitiveCount: number;

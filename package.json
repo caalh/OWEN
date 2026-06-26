@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit: syntax highlighting, lattice builder, geometry preview, validation, and workflow automation for MCNP, OpenMC, Serpent, and SCONE.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -56,6 +56,8 @@
     "onCommand:owen.runSweep",
     "onCommand:owen.chooseHighlightPalette",
     "onCommand:owen.toggleInvisibleCharacters",
+    "onCommand:owen.showMcnpReferences",
+    "onView:owenMcnpReferences",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
@@ -176,8 +178,33 @@
         "command": "owen.toggleInvisibleCharacters",
         "title": "OWEN: Toggle Invisible Characters",
         "category": "OWEN"
+      },
+      {
+        "command": "owen.showMcnpReferences",
+        "title": "OWEN: Show MCNP References (Cross-Reference Tracker)",
+        "category": "OWEN",
+        "icon": "$(references)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "owen",
+          "title": "OWEN",
+          "icon": "assets/owen-icon.png"
+        }
+      ]
+    },
+    "views": {
+      "owen": [
+        {
+          "id": "owenMcnpReferences",
+          "name": "MCNP References",
+          "icon": "$(references)",
+          "contextualTitle": "OWEN MCNP References"
+        }
+      ]
+    },
     "submenus": [
       {
         "id": "owen.contextMenu",
@@ -209,6 +236,11 @@
         {
           "command": "owen.openPrebuiltModel",
           "group": "1_analyze@3"
+        },
+        {
+          "command": "owen.showMcnpReferences",
+          "group": "1_analyze@4",
+          "when": "editorLangId == mcnp"
         },
         {
           "command": "owen.openLatticeBuilder",
@@ -264,6 +296,11 @@
           "group": "1_analyze@3"
         },
         {
+          "command": "owen.showMcnpReferences",
+          "group": "1_analyze@4",
+          "when": "editorLangId == mcnp"
+        },
+        {
           "command": "owen.openLatticeBuilder",
           "group": "2_build@1"
         },
@@ -294,6 +331,19 @@
         {
           "command": "owen.toggleInvisibleCharacters",
           "group": "5_appearance@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "owen.showMcnpReferences",
+          "when": "editorLangId == mcnp"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "owen.showMcnpReferences",
+          "when": "view == owenMcnpReferences",
+          "group": "navigation"
         }
       ]
     },

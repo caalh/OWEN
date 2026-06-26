@@ -5,6 +5,41 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-06-26
+
+Two-feature release: axial-layer 3D visualization and an MCNP cross-reference tracker.
+
+### Added
+
+- **Axial-layer 3D visualization for full-core decks.** The 3D geometry preview now renders the
+  *axial build* of a deck — stacked axial segments with their own materials — instead of treating
+  the axial direction as one tall extruded height. An axially-built full core shows its vertical
+  structure (active fuel split by spacer grids, plenum, nozzles, end plugs, reflectors). The
+  geometry IR and every per-code parser were extended to capture axial segments:
+  - **SCONE** `cellUniverse` axial stacks (the verified BEAVRS prebuilt renders **36 distinct
+    axial z-bands** — the ~25-cell fuel stacks plus the guide-tube / instrument-tube / burnable-
+    absorber / control-rod stacks).
+  - **MCNP** `pz`-plane-bounded cell stacks (a universe whose cells `fill` sub-universes between
+    `pz` planes).
+  - **Serpent** `pz`-bounded cell stacks.
+  - **OpenMC** `ZPlane`-bounded `Cell` stacks (best-effort, since OpenMC decks are arbitrary
+    Python).
+  - **New webview controls:** an **Axial Layers** section with a per-layer show/hide toggle (click
+    a layer to toggle it) plus **Axial slice (Z)** min/max sliders that reveal a height window —
+    alongside the existing component / material / slice-plane toggles and Auto/Disc/Layers fidelity.
+- **MCNP reference / cross-reference tracker.** Surfaces where MCNP entities — cell IDs, surface
+  IDs, material IDs, universe IDs — are *defined* vs. *referenced*, with special handling for
+  lattices:
+  - **Hover** a number to resolve it (e.g. "Universe 2 — guide tube (defined at cell 4, line N)",
+    "Surface 51 — px 0.63 (line N)", "Material 1 — UO2 (m1, line N)").
+  - **Go-to-Definition** and **Find-All-References** on cell / surface / material / universe numbers.
+  - An **MCNP References** tree view (in the OWEN activity-bar container) with a **lattice focus**:
+    each `lat`/`fill` cell decodes its fill array into the universes it places (with counts and a
+    jump to each universe's definition) and lists the surfaces that bound the unit cell — directly
+    answering "what input is used for this lattice structure".
+  - Discoverable via the right-click editor menu, the editor-title OWEN menu, and the command
+    palette (gated to MCNP files).
+
 ## [0.2.2] — 2026-06-24
 
 Documentation release — no code changes.

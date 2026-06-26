@@ -674,6 +674,83 @@ geometry {
         assert.strictEqual(cyls.length, 9, `expected 9 pins from "1 8r", got ${cyls.length}`);
     });
 
+    // --- v0.2.3 axial-layer expansion (MCNP / Serpent pz stacks) ---
+
+    const mcnpAxial = [
+        'c MCNP axial stack: end plug / active fuel / plenum',
+        '1 1 -10.4 -1    u=1 imp:n=1   $ fuel',
+        '2 3 -6.5   1 -2 u=1 imp:n=1   $ clad',
+        '3 4 -1.0   2    u=1 imp:n=1   $ water',
+        '4 5 -8.0  -2    u=2 imp:n=1   $ plenum',
+        '5 4 -1.0   2    u=2 imp:n=1',
+        '6 3 -6.5  -2    u=3 imp:n=1   $ end plug',
+        '7 4 -1.0   2    u=3 imp:n=1',
+        '30 0 100 -101 fill=3 u=30 imp:n=1',
+        '31 0 101 -102 fill=1 u=30 imp:n=1',
+        '32 0 102 -103 fill=2 u=30 imp:n=1',
+        '40 0 50 -51 52 -53 lat=1 u=40 imp:n=1',
+        '     fill=0:1 0:1 0:0',
+        '     30 30 30 30',
+        '50 0 -60 fill=40 imp:n=1',
+        '51 0  60 imp:n=0',
+        '',
+        '1 cz 0.40', '2 cz 0.46',
+        '50 px -0.63', '51 px 0.63', '52 py -0.63', '53 py 0.63',
+        '100 pz 0', '101 pz 5', '102 pz 45', '103 pz 55',
+        '60 rpp -1.26 1.26 -1.26 1.26 0 55',
+        '',
+        'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+        'm3 40090.80c 1.0',
+        'm4 1001.80c 2.0 8016.80c 1.0',
+        'm5 28058.80c 0.7 24052.80c 0.2 26056.80c 0.1',
+        'mode n',
+    ].join('\n');
+
+    test('MCNP expands a pz-bounded axial stack into distinct z-layers', () => {
+        const collapsed = buildScene(mcnpAxial, 'mcnp', { detail: 'layers', axial: false });
+        assert.ok(collapsed.fidelity.hasAxial, 'expected the deck to be detected as having axial structure');
+        assert.strictEqual(collapsed.axialLayers.length, 0, 'collapsed view exposes no axial layers');
+        const zCollapsed = new Set(collapsed.cylinders.filter((c) => c.component !== 'vessel').map((c) => Math.round(c.z)));
+        assert.strictEqual(zCollapsed.size, 1, 'collapsed view uses one representative axial height');
+
+        const axial = buildScene(mcnpAxial, 'mcnp', { detail: 'layers', axial: true });
+        assert.ok(axial.fidelity.axial, 'expected axial detail to be on');
+        assert.strictEqual(axial.axialLayers.length, 3, `expected 3 axial layers, got ${axial.axialLayers.length}`);
+        const zAxial = new Set(axial.cylinders.map((c) => Math.round(c.z)));
+        assert.strictEqual(zAxial.size, 3, `expected 3 distinct axial elevations, got ${[...zAxial].join(', ')}`);
+        // 4 lattice positions × (fuel 2 shells + endplug 1 + plenum 1) = 16 cylinders.
+        assert.strictEqual(axial.primitiveCount, 16, `expected 16 cylinders, got ${axial.primitiveCount}`);
+        assert.ok(axial.cylinders.some((c) => typeof c.axialIndex === 'number' && c.axialLayer), 'cylinders are tagged with an axial layer');
+    });
+
+    const serpentAxial = [
+        'pin pf', 'UO2 0.40', 'Zr 0.46', 'water',
+        'pin pp', 'steel 0.46', 'water',
+        'pin pe', 'Zr 0.46', 'water',
+        'surf z0 pz 0', 'surf z1 pz 5', 'surf z2 pz 45', 'surf z3 pz 55',
+        'cell s0 30 fill pe z0 -z1',
+        'cell s1 30 fill pf z1 -z2',
+        'cell s2 30 fill pp z2 -z3',
+        'lat 40 1 0.0 0.0 2 2 1.26',
+        '30 30',
+        '30 30',
+        'surf box sqc 0.0 0.0 1.26',
+        'cell c1 0 fill 40 -box',
+        'cell c2 0 outside box',
+    ].join('\n');
+
+    test('Serpent expands a pz-bounded axial stack into distinct z-layers', () => {
+        const collapsed = buildScene(serpentAxial, 'serpent', { detail: 'layers', axial: false });
+        assert.ok(collapsed.fidelity.hasAxial, 'expected axial structure to be detected');
+        assert.strictEqual(collapsed.axialLayers.length, 0);
+
+        const axial = buildScene(serpentAxial, 'serpent', { detail: 'layers', axial: true });
+        assert.strictEqual(axial.axialLayers.length, 3, `expected 3 axial layers, got ${axial.axialLayers.length}`);
+        const zAxial = new Set(axial.cylinders.filter((c) => c.component !== 'vessel').map((c) => Math.round(c.z)));
+        assert.strictEqual(zAxial.size, 3, `expected 3 distinct axial elevations, got ${[...zAxial].join(', ')}`);
+        assert.ok(axial.cylinders.some((c) => c.component === 'fuel'), 'expected fuel segments');
+    });
+
     test('builds a component legend in buildScene', () => {
         const deck = `
 geometry { universes {

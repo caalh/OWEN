@@ -12,6 +12,7 @@ import {
     ParseResult,
     ComponentSummary,
     MaterialSummary,
+    AxialLayerSummary,
     COMPONENT_LABELS,
     Component,
     FidelityOptions,
@@ -60,17 +61,70 @@ export function buildScene(text: string, language: string, opts?: FidelityOption
 
     const components = summarizeComponents(cylinders);
     const materials = summarizeMaterials(cylinders);
+    const fidelity = result.fidelity ?? DEFAULT_FIDELITY;
+    const axialLayers = summarizeAxialLayers(cylinders, fidelity.axial);
 
     return {
         language,
         cylinders,
         components,
         materials,
+        axialLayers,
         warnings: result.warnings ?? [],
         notes: result.notes ?? [],
         primitiveCount: cylinders.length,
-        fidelity: result.fidelity ?? DEFAULT_FIDELITY,
+        fidelity,
     };
+}
+
+/**
+ * Buckets the placed geometry into axial layers (z-bands) when axial detail is
+ * on, tags every cylinder with its layer (id + bottom-to-top index), and
+ * returns the legend summaries. Cylinders sharing a (zmin, zmax) range — every
+ * pin's segment at a given elevation — collapse into one layer, so a BEAVRS
+ * stack reads as its ~25 real axial levels rather than thousands of segments.
+ * Vessel/barrel shells span the full height and are left out of the banding (so
+ * the slice slider and per-layer toggles don't fight the context geometry).
+ */
+function summarizeAxialLayers(cylinders: CylinderSpec[], axialOn: boolean): AxialLayerSummary[] {
+    if (!axialOn) return [];
+    interface Band { zmin: number; zmax: number; count: number; colors: Map<string, number>; }
+    const bands = new Map<string, Band>();
+    for (const c of cylinders) {
+        if (c.component === Component.Vessel) continue;
+        const h = c.height || 0;
+        const zmin = (c.z ?? 0) - h / 2;
+        const zmax = (c.z ?? 0) + h / 2;
+        const key = `${zmin.toFixed(1)}|${zmax.toFixed(1)}`;
+        let band = bands.get(key);
+        if (!band) { band = { zmin, zmax, count: 0, colors: new Map() }; bands.set(key, band); }
+        band.count++;
+        const col = c.color ?? '#888888';
+        band.colors.set(col, (band.colors.get(col) ?? 0) + 1);
+    }
+    if (bands.size < 2) return [];
+
+    const ordered = [...bands.values()].sort((a, b) => a.zmin - b.zmin);
+    const summaries: AxialLayerSummary[] = ordered.map((band, index) => {
+        let bestColor = '#888888';
+        let bestN = -1;
+        for (const [col, n] of band.colors) if (n > bestN) { bestN = n; bestColor = col; }
+        const label = `${band.zmin.toFixed(1)}–${band.zmax.toFixed(1)} cm`;
+        return { id: label, label, color: bestColor, count: band.count, zmin: band.zmin, zmax: band.zmax, index };
+    });
+
+    // Tag each cylinder with its axial layer for the webview's toggles/slider.
+    const byKey = new Map<string, AxialLayerSummary>();
+    summaries.forEach((s) => byKey.set(`${s.zmin.toFixed(1)}|${s.zmax.toFixed(1)}`, s));
+    for (const c of cylinders) {
+        if (c.component === Component.Vessel) continue;
+        const h = c.height || 0;
+        const zmin = (c.z ?? 0) - h / 2;
+        const zmax = (c.z ?? 0) + h / 2;
+        const s = byKey.get(`${zmin.toFixed(1)}|${zmax.toFixed(1)}`);
+        if (s) { c.axialLayer = s.id; c.axialIndex = s.index; }
+    }
+    return summaries;
 }
 
 function summarizeComponents(cylinders: CylinderSpec[]): ComponentSummary[] {

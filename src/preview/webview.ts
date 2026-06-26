@@ -155,6 +155,20 @@ function buildHtml(webview: vscode.Webview): string {
         <div id="materials" style="display:none"></div>
       </div>
 
+      <div class="section" id="axialSection" style="display:none">
+        <div class="title"><span>Axial Layers</span><span id="axCount"></span></div>
+        <div class="btnrow">
+          <button id="axAll">All</button>
+          <button id="axNone">None</button>
+        </div>
+        <div class="ctrl">
+          <label><span>Axial slice (Z)</span><span id="axRangeVal"></span></label>
+          <input type="range" id="axMin" min="0" max="1" step="0.01" value="0" />
+          <input type="range" id="axMax" min="0" max="1" step="0.01" value="1" />
+        </div>
+        <div id="axialLayers"></div>
+      </div>
+
       <div class="section" id="fidelitySection">
         <div class="title"><span>Fidelity</span><span id="fidBusy" style="display:none">…</span></div>
         <div class="ctrl">
@@ -235,9 +249,11 @@ function buildHtml(webview: vscode.Webview): string {
     const clipZ = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0); // world Y = deck z (axial)
     let lastFidelity = null;
 
-    let groups = [];          // { mesh, instances: [{matrix, comp, mat}] }
+    let groups = [];          // { mesh, instances: [{matrix, comp, mat, ax, zc}] }
     let compEnabled = {};     // component id -> bool
     let matEnabled = {};      // material name -> bool
+    let axEnabled = {};       // axial layer id -> bool
+    let axWindow = { min: -Infinity, max: Infinity }; // visible axial z-window
     let shellOpacity = 0.45;
     let sceneBounds = null;
     let translucentMats = []; // materials whose opacity we scale live
@@ -257,9 +273,11 @@ function buildHtml(webview: vscode.Webview): string {
       document.getElementById('empty').style.display = cyls.length ? 'none' : 'flex';
 
       // Reset toggle state from summaries.
-      compEnabled = {}; matEnabled = {};
+      compEnabled = {}; matEnabled = {}; axEnabled = {};
       for (const c of (sc.components || [])) compEnabled[c.id] = true;
       for (const m of (sc.materials || [])) matEnabled[m.name] = true;
+      for (const a of (sc.axialLayers || [])) axEnabled[a.id] = true;
+      axWindow = { min: -Infinity, max: Infinity };
 
       // Bucket cylinders into instanced groups by geometry signature.
       const byKey = new Map();
@@ -313,7 +331,7 @@ function buildHtml(webview: vscode.Webview): string {
           mesh.setMatrixAt(i, dummy.matrix);
           color.set(c.color || '#cccccc');
           mesh.setColorAt(i, color);
-          instances.push({ matrix: dummy.matrix.clone(), comp: c.component || 'other', mat: c.material || '' });
+          instances.push({ matrix: dummy.matrix.clone(), comp: c.component || 'other', mat: c.material || '', ax: c.axialLayer || '', zc: (typeof c.z === 'number' ? c.z : 0) });
         });
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -331,7 +349,13 @@ function buildHtml(webview: vscode.Webview): string {
       for (const g of groups) {
         let changed = false;
         g.instances.forEach((inst, i) => {
-          const vis = (compEnabled[inst.comp] !== false) && (inst.mat === '' || matEnabled[inst.mat] !== false);
+          let vis = (compEnabled[inst.comp] !== false) && (inst.mat === '' || matEnabled[inst.mat] !== false);
+          // Axial filters only apply to cylinders that belong to an axial layer
+          // (vessel/context shells have no ax and stay visible).
+          if (vis && inst.ax) {
+            if (axEnabled[inst.ax] === false) vis = false;
+            else if (inst.zc < axWindow.min - 1e-6 || inst.zc > axWindow.max + 1e-6) vis = false;
+          }
           g.mesh.setMatrixAt(i, vis ? inst.matrix : zero);
           changed = true;
         });
@@ -366,7 +390,24 @@ function buildHtml(webview: vscode.Webview): string {
 
       renderRows('components', (sc.components || []), (item) => item.id, compEnabled, true);
       renderRows('materials', (sc.materials || []), (item) => item.name, matEnabled, false);
+      buildAxialPanel(sc.axialLayers || []);
       reflectFidelity(sc.fidelity || {});
+    }
+
+    function buildAxialPanel(layers) {
+      const section = document.getElementById('axialSection');
+      section.style.display = layers.length ? 'block' : 'none';
+      document.getElementById('axCount').textContent = layers.length ? (layers.length + ' levels') : '';
+      renderRows('axialLayers', layers.map((a) => ({ id: a.id, label: a.label, color: a.color, count: a.count })), (item) => item.id, axEnabled, false);
+      if (!layers.length) return;
+      let zmin = Infinity, zmax = -Infinity;
+      for (const a of layers) { zmin = Math.min(zmin, a.zmin); zmax = Math.max(zmax, a.zmax); }
+      const lo = document.getElementById('axMin'), hi = document.getElementById('axMax');
+      const span = Math.max(1e-6, zmax - zmin), step = span / 200;
+      for (const el of [lo, hi]) { el.min = zmin; el.max = zmax; el.step = step; }
+      lo.value = zmin; hi.value = zmax;
+      axWindow = { min: zmin, max: zmax };
+      document.getElementById('axRangeVal').textContent = zmin.toFixed(1) + '–' + zmax.toFixed(1);
     }
 
     function reflectFidelity(f) {
@@ -426,6 +467,18 @@ function buildHtml(webview: vscode.Webview): string {
     document.getElementById('toggle').addEventListener('click', () => document.getElementById('panel').classList.toggle('collapsed'));
     document.getElementById('compAll').addEventListener('click', () => setAll(compEnabled, 'components', true));
     document.getElementById('compNone').addEventListener('click', () => setAll(compEnabled, 'components', false));
+    document.getElementById('axAll').addEventListener('click', () => setAll(axEnabled, 'axialLayers', true));
+    document.getElementById('axNone').addEventListener('click', () => setAll(axEnabled, 'axialLayers', false));
+    const axMin = document.getElementById('axMin'), axMax = document.getElementById('axMax');
+    function syncAxWindow() {
+      let lo = parseFloat(axMin.value), hi = parseFloat(axMax.value);
+      if (lo > hi) { const t = lo; lo = hi; hi = t; }
+      axWindow = { min: lo, max: hi };
+      document.getElementById('axRangeVal').textContent = lo.toFixed(1) + '–' + hi.toFixed(1);
+      applyVisibility();
+    }
+    axMin.addEventListener('input', syncAxWindow);
+    axMax.addEventListener('input', syncAxWindow);
     function setAll(map, containerId, val) {
       for (const k of Object.keys(map)) map[k] = val;
       document.querySelectorAll('#' + containerId + ' input').forEach((cb) => cb.checked = val);

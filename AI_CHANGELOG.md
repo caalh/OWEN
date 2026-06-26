@@ -12,6 +12,74 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-26 — v0.2.3 — Axial-layer 3D viz + MCNP cross-reference tracker
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.2` → `0.2.3` in `package.json` and `package-lock.json`. Two independent
+features shipped together.
+
+### Feature 1 — Axial-layer 3D visualization
+
+- **Geometry IR (`src/preview/types.ts`).** Added `CylinderSpec.axialLayer` + `axialIndex` and a
+  new `AxialLayerSummary` (`{ id, label, color, count, zmin, zmax, index }`) plus
+  `GeometryScene.axialLayers`. Axial banding is computed centrally in `extractor.ts`
+  (`summarizeAxialLayers`): when a scene is expanded with axial detail, every cylinder sharing a
+  `(zmin, zmax)` range collapses into one bottom-to-top-ordered z-band, and each cylinder is tagged
+  with its band. Vessel/context shells (full-height) are excluded from banding.
+- **MCNP (`codes/mcnp.ts`).** New `buildAxialStack`: a universe whose cells single-`fill`
+  sub-universes and are bounded by `pz` planes becomes an axial stack. `placeEntry` expands a stack
+  into its z-segments when axial is on, else collapses to the tallest (active-fuel) segment. Wired
+  through `countPins`, `placeUniverse`, and the top-universe selection.
+- **Serpent (`codes/serpent.ts`).** `surf … pz <z>` → `planeZ`; cells with `fill` bounded by ≥2 pz
+  planes form axial stacks. Global z-extent from the planes drives the collapsed pin height and the
+  vessel shells.
+- **OpenMC (`codes/openmc.ts`).** Best-effort `findAxialBands`: `ZPlane(z0=…)` surfaces bounding
+  `Cell(region=+a & -b, fill=…)` stacks. `placePin` refactored to `placePinAt`; when axial is on,
+  each placed pin is sliced into the deck's z-bands, with the fuel layer relabelled per band fill.
+- **Webview (`preview/webview.ts`).** New **Axial Layers** panel section (per-layer checkboxes,
+  All/None, click-to-toggle) + **Axial slice (Z)** min/max sliders defining a visible z-window.
+  Instance metadata carries `ax` (layer id) and `zc` (z-center); `applyVisibility` ANDs in the
+  axial-layer toggle and the z-window (vessel/context shells, which have no `ax`, are unaffected).
+- **Verification (`scripts/viz-check.mjs`).** Rewrote the harness with inline MCNP + Serpent axial
+  fixtures (3-segment end-plug/fuel/plenum stacks → 3 bands each) and pointed the SCONE case at the
+  bundled BEAVRS prebuilt (**36 axial bands** with axial on; collapses to 1 when off). Disk decks
+  are now optional. Tests added in `extractor.test.ts` for MCNP/Serpent axial expansion.
+
+### Feature 2 — MCNP reference / cross-reference tracker
+
+- **`src/references/mcnpReferences.ts`** (pure, no `vscode` import → headless-testable). A
+  position-aware companion to the geometry MCNP parser. Builds logical cards with a per-character
+  source-position map (handles tab/space continuations and `key = value` spacing), classifies
+  cell/surface/material cards, and emits `Occurrence`s (kind + id + span + isDefinition +
+  cellContext) for cell ids, the cell material field, geometry surface refs (with `#n`/`#(...)`
+  complements blanked out), `u=` (first = universe definition, rest = references), single `fill=`,
+  and decoded `fill` arrays. Lattice cells decode their fill array into per-universe counts +
+  unit-cell bounding surfaces. Helpers: `resolveAt`, `getDefinition`, `getReferences`,
+  `describeEntity`, `describeLattice`. Material names and universe roles (fuel / guide / instrument
+  / absorber) are classified from ZAIDs.
+- **`src/references/providers.ts`.** Hover, Definition, and Reference providers for `mcnp`, backed
+  by a per-document (version-keyed) index cache.
+- **`src/references/referencesView.ts`.** `owenMcnpReferences` tree view: a **Lattices** group
+  (expanded; each lattice → unit-cell surfaces + universes-by-count, all clickable) plus
+  Universes / Materials / Surfaces / Cells groups (each entity → its definition + every reference).
+  Commands `owen.showMcnpReferences` and `owen.revealMcnpReference`.
+- **`package.json`.** New command, activation events (`onCommand:owen.showMcnpReferences`,
+  `onView:owenMcnpReferences`), an OWEN activity-bar `viewsContainers` + the `owenMcnpReferences`
+  view, and menu entries in the editor-title submenu, the editor-context submenu, the command
+  palette (gated `editorLangId == mcnp`), and the view title.
+- **Tests (`test/suite/mcnpReferences.test.ts`).** 8 assertions covering the lattice fill→universe
+  decode (5 fuel / 4 guide), unit-cell bounding surfaces, universe→definition-line mapping +
+  role, fill-entry resolution, ZAID material classification, surface-ref resolution, and
+  reference counting.
+
+### Build / verify
+
+- `node ./node_modules/typescript/bin/tsc --noEmit` clean; `node esbuild.js --production` clean
+  (`out/` ships only `extension.js`). 39 headless tests pass (31 extractor + 8 reference).
+
+---
+
 ## 2026-06-24 — v0.2.2 — Docs: demo screen recordings + author attribution
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

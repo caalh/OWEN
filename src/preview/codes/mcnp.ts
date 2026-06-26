@@ -89,6 +89,12 @@ interface LatUniverse {
     fill: FillSpec;
 }
 
+interface AxialSegment {
+    zmin: number;
+    zmax: number;
+    universe: number;
+}
+
 const SURFACE_MNEMONICS = new Set([
     'cz', 'cx', 'cy', 'c/z', 'c/x', 'c/y', 'pz', 'px', 'py', 'p',
     'rpp', 'rcc', 'rhp', 'hex', 'so', 's', 'sx', 'sy', 'sz', 'sph',
@@ -159,6 +165,19 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         if (pin) pinUniverses.set(uid, pin);
     }
 
+    // Axial stacks: a universe whose cells are single-`fill`ed sub-universes
+    // bounded by pz planes (active fuel / plenum / grids / dashpot / nozzles /
+    // end plugs). Mirrors the SCONE cellUniverse axial path so an axially-built
+    // MCNP pin renders its real vertical structure instead of one tall pin.
+    const axialStacks = new Map<number, AxialSegment[]>();
+    for (const [uid, group] of byUniverse) {
+        if (uid === 0 || latUniverses.has(uid)) continue;
+        const segs = buildAxialStack(group, surfaces);
+        if (segs) axialStacks.set(uid, segs);
+    }
+    const hasAxial = axialStacks.size > 0;
+    const axialOn = !!opts?.axial && hasAxial;
+
     // Determine the top universe to place: a universe-0 cell with fill=,
     // preferring one that resolves to a lattice; else the largest lattice.
     let topUid: number | null = null;
@@ -166,7 +185,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     for (const c of byUniverse.get(0) ?? []) {
         if (c.fill && c.fill.uniform !== null) {
             const f = c.fill.uniform;
-            if (latUniverses.has(f) || pinUniverses.has(f)) {
+            if (latUniverses.has(f) || pinUniverses.has(f) || axialStacks.has(f)) {
                 if (topUid === null || latUniverses.has(f)) { topUid = f; rootTransform = c.trcl; }
             }
         }
@@ -179,13 +198,18 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         }
     }
 
+    // A lone axially-built pin (no lattice) is still worth rendering as a stack.
+    if (topUid === null && latUniverses.size === 0 && axialStacks.size > 0) {
+        topUid = [...axialStacks.keys()][0];
+    }
+
     // No hierarchy at all → fall back to drawing standalone z-axis cylinders.
     if (topUid === null && latUniverses.size === 0) {
         return renderBareSurfaces(surfaces, zBounds, warnings, notes, text);
     }
 
     // Count pins to choose fidelity (layer mode vs. disc mode).
-    const totalPins = countPins(topUid, latUniverses, pinUniverses);
+    const totalPins = countPins(topUid, latUniverses, pinUniverses, axialStacks);
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
     const discMode = detail === 'disc';
 
@@ -202,7 +226,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     const cylinders: CylinderSpec[] = [];
     let capped = false;
 
-    const placePin = (uid: number, cx: number, cy: number, label: string): void => {
+    const placePin = (uid: number, cx: number, cy: number, label: string, zCenter: number = zmid, segHeight: number = height): void => {
         if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
         const pin = pinUniverses.get(uid);
         if (!pin || pin.layers.length === 0) return;
@@ -218,10 +242,10 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
             cylinders.push({
                 label,
                 radius: Math.min(subPitch * 0.47, Math.max(...pin.layers.map((l) => l.radius))),
-                height,
+                height: segHeight,
                 x: cx,
                 y: cy,
-                z: zmid,
+                z: zCenter,
                 color,
                 opacity: 1.0,
                 component: comp,
@@ -234,7 +258,29 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         const components = pin.layers.map((l) => l.component);
         const colors = pin.layers.map((l) => l.color);
         const mats = pin.layers.map((l) => l.material);
-        cylinders.push(...emitLayers(radii, components, cx, cy, zmid, height, label, colors, mats));
+        cylinders.push(...emitLayers(radii, components, cx, cy, zCenter, segHeight, label, colors, mats));
+    };
+
+    // Place a lattice entry: an axial stack (when axial detail is on) expands
+    // into its z-segments; otherwise it collapses to its tallest (active-fuel)
+    // segment over the full model height. A plain pin universe places directly.
+    const placeEntry = (uid: number, cx: number, cy: number, label: string): void => {
+        const segs = axialStacks.get(uid);
+        if (segs) {
+            if (axialOn) {
+                for (let i = 0; i < segs.length; i++) {
+                    const seg = segs[i];
+                    const h = Math.max(0.01, seg.zmax - seg.zmin);
+                    placePin(seg.universe, cx, cy, `${label}_z${i}`, (seg.zmin + seg.zmax) / 2, h);
+                }
+            } else {
+                let rep = segs[0];
+                for (const s of segs) if ((s.zmax - s.zmin) > (rep.zmax - rep.zmin)) rep = s;
+                placePin(rep.universe, cx, cy, label, zmid, height);
+            }
+            return;
+        }
+        placePin(uid, cx, cy, label, zmid, height);
     };
 
     const placeUniverse = (uid: number, cx: number, cy: number, label: string, depth: number): void => {
@@ -264,12 +310,12 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                         py = y0sq + j * lat.pitchY;
                     }
                     if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1);
-                    else placePin(sub, px, py, `${label}_r${j}c${i}`);
+                    else placeEntry(sub, px, py, `${label}_r${j}c${i}`);
                 }
             }
             return;
         }
-        placePin(uid, cx, cy, label);
+        placeEntry(uid, cx, cy, label);
     };
 
     if (topUid !== null) placeUniverse(topUid, 0, 0, 'core', 0);
@@ -323,9 +369,45 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     if (capped) {
         warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
     }
+    if (axialOn) {
+        notes.push('Axial detail: each pin expanded into its real z-segments (active fuel / plenum / grids / dashpot / end plugs). Use the Axial Layers toggles and the Axial slice to inspect levels.');
+    } else if (hasAxial) {
+        notes.push('This deck defines axial structure (pz-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
+    }
 
-    const fidelity: FidelityState = { detail, axial: false, autoDetail, totalPins, hasAxial: false };
+    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
     return { cylinders, warnings, notes, fidelity };
+}
+
+// ---------------------------------------------------------------------------
+// Axial stacks (pz-bounded cell stacks within a universe)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a sorted axial segment list from a universe's cells when they are
+ * single-`fill`ed sub-universes each bounded by pz planes. Returns null unless
+ * there are ≥2 such segments (a real stack), so ordinary radial pin universes
+ * are untouched.
+ */
+function buildAxialStack(cells: MCNPCell[], surfaces: Map<number, MCNPSurface>): AxialSegment[] | null {
+    const segs: AxialSegment[] = [];
+    for (const cell of cells) {
+        if (cell.lat !== null) continue;
+        if (!cell.fill || cell.fill.uniform === null) continue;
+        const zs: number[] = [];
+        for (const s of cell.surfaces) {
+            const surf = surfaces.get(Math.abs(s));
+            if (surf && surf.type === 'pz') zs.push(surf.params[0]);
+        }
+        if (zs.length < 2) continue;
+        const zmin = Math.min(...zs);
+        const zmax = Math.max(...zs);
+        if (!(zmax > zmin)) continue;
+        segs.push({ zmin, zmax, universe: cell.fill.uniform });
+    }
+    if (segs.length < 2) return null;
+    segs.sort((a, b) => a.zmin - b.zmin);
+    return segs;
 }
 
 // ---------------------------------------------------------------------------
@@ -768,17 +850,18 @@ function countPins(
     topUid: number | null,
     latUniverses: Map<number, LatUniverse>,
     pinUniverses: Map<number, PinUniverse>,
+    axialStacks: Map<number, AxialSegment[]>,
     depth = 0,
 ): number {
     if (topUid === null || depth > 12) return 0;
     const lat = latUniverses.get(topUid);
-    if (!lat) return pinUniverses.has(topUid) ? 1 : 0;
+    if (!lat) return (pinUniverses.has(topUid) || axialStacks.has(topUid)) ? 1 : 0;
     let total = 0;
     for (const row of lat.fill.grid) {
         for (const sub of row) {
             if (sub === 0) continue;
-            if (latUniverses.has(sub)) total += countPins(sub, latUniverses, pinUniverses, depth + 1);
-            else if (pinUniverses.has(sub)) total += 1;
+            if (latUniverses.has(sub)) total += countPins(sub, latUniverses, pinUniverses, axialStacks, depth + 1);
+            else if (pinUniverses.has(sub) || axialStacks.has(sub)) total += 1;
         }
     }
     return total;

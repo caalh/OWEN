@@ -38,6 +38,13 @@ interface PinTemplate {
     render: boolean;
 }
 
+interface AxialBand {
+    zmin: number;
+    zmax: number;
+    /** Cell fill variable name for this z-band (drives the fuel-layer material). */
+    fill: string | null;
+}
+
 export function extractOpenmcCylinders(text: string): CylinderSpec[] {
     return parseOpenmc(text).cylinders;
 }
@@ -90,6 +97,13 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
     const discMode = detail === 'disc';
 
+    // Axial structure from stacked ZPlane-bounded cells (active fuel / plenum /
+    // end plugs). Best-effort: OpenMC decks are arbitrary Python, so we only
+    // expand the z-bands a deck makes explicit via `ZPlane` + `Cell(region=...)`.
+    const axialBands = findAxialBands(text);
+    const hasAxial = axialBands.length >= 2;
+    const axialOn = !!opts?.axial && hasAxial;
+
     const cylinders: CylinderSpec[] = [];
     let capped = false;
 
@@ -105,27 +119,44 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
 
     const subPitch = nested ? smallestPitch(named) : Math.min(pitch[0], pitch[1]);
 
-    const placePin = (token: string, x: number, y: number, label: string): void => {
+    const placePinAt = (template: PinTemplate, x: number, y: number, z: number, h: number, label: string, fuelMat?: string | null): void => {
         if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
-        const template = templateFor(token);
-        if (!template || !template.render) return;
+        // When a z-band names its own fill, relabel the fuel layer so distinct
+        // axial fuel materials read as separate, separately-coloured bands.
+        const mats = (fuelMat && fuelMat.length)
+            ? template.materials.map((m, i) => (template.components[i] === Component.Fuel ? fuelMat : m))
+            : template.materials;
         if (discMode) {
             const solidIdx = Math.max(0, template.components.findIndex((c) => c !== Component.Gap && c !== Component.Moderator));
             cylinders.push({
                 label,
                 radius: Math.min(subPitch * 0.47, Math.max(...template.radii)),
-                height,
-                x, y, z: 0,
-                color: materialColor(template.materials[solidIdx] ?? template.materials[0] ?? 'UO2'),
+                height: h,
+                x, y, z,
+                color: materialColor(mats[solidIdx] ?? mats[0] ?? 'UO2'),
                 opacity: 1.0,
                 component: template.components[solidIdx] ?? Component.Fuel,
-                material: template.materials[solidIdx] ?? template.materials[0],
+                material: mats[solidIdx] ?? mats[0],
             });
             return;
         }
         cylinders.push(
-            ...emitLayers(template.radii, template.components, x, y, 0, height, label, undefined, template.materials),
+            ...emitLayers(template.radii, template.components, x, y, z, h, label, undefined, mats),
         );
+    };
+
+    const placePin = (token: string, x: number, y: number, label: string): void => {
+        const template = templateFor(token);
+        if (!template || !template.render) return;
+        if (axialOn) {
+            for (let i = 0; i < axialBands.length; i++) {
+                const b = axialBands[i];
+                const fuelMat = b.fill ? bandFuelName(b.fill, text) : null;
+                placePinAt(template, x, y, (b.zmin + b.zmax) / 2, Math.max(0.01, b.zmax - b.zmin), `${label}_z${i}`, fuelMat);
+            }
+            return;
+        }
+        placePinAt(template, x, y, 0, height, label);
     };
 
     const placeGrid = (lat: NamedLattice | { grid: string[][]; pitch: [number, number]; lowerLeft: [number, number] | null }, cx: number, cy: number, label: string, depth: number): void => {
@@ -177,9 +208,62 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         notes.push('Hex lattice laid out on a rectangular approximation (OpenMC HexLattice index order is not reconstructed).');
         for (const cyl of cylinders) cyl.label = `hexapprox_${cyl.label}`;
     }
+    if (axialOn) {
+        notes.push(`Axial detail: pins expanded into ${axialBands.length} z-bands from the deck's ZPlane stack. Use the Axial Layers toggles and the Axial slice to inspect levels.`);
+    } else if (hasAxial) {
+        notes.push('This deck defines axial structure (ZPlane-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
+    }
 
-    const fidelity: FidelityState = { detail, axial: false, autoDetail, totalPins, hasAxial: false };
+    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
     return { cylinders, warnings, notes, fidelity };
+}
+
+// ---------------------------------------------------------------------------
+// Axial bands (ZPlane-bounded cell stacks)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recovers axial z-bands from an OpenMC script: `ZPlane(z0=…)` surfaces bounding
+ * `Cell(region=+a & -b, fill=…)` stacks. Returns the sorted band list (≥2 bands
+ * means a real stack). Best-effort — only what the deck makes explicit.
+ */
+function findAxialBands(text: string): AxialBand[] {
+    const zplanes = new Map<string, number>();
+    const zRe = /([A-Za-z_]\w*)\s*=\s*openmc\.ZPlane\s*\(([^)]*)\)/g;
+    for (const m of text.matchAll(zRe)) {
+        const zm = m[2].match(/z0\s*=\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/);
+        if (zm) zplanes.set(m[1], Number(zm[1]));
+    }
+    if (zplanes.size < 2) return [];
+
+    const bands: AxialBand[] = [];
+    const cellRe = /openmc\.Cell\s*\(([^)]*)\)/g;
+    for (const m of text.matchAll(cellRe)) {
+        const args = m[1];
+        if (!/region\s*=/.test(args)) continue;
+        const zs: number[] = [];
+        for (const vm of args.matchAll(/[+\-]\s*([A-Za-z_]\w*)/g)) {
+            const z = zplanes.get(vm[1]);
+            if (z !== undefined) zs.push(z);
+        }
+        if (zs.length < 2) continue;
+        const fm = args.match(/fill\s*=\s*([A-Za-z_]\w*)/);
+        const zmin = Math.min(...zs);
+        const zmax = Math.max(...zs);
+        if (zmax > zmin) bands.push({ zmin, zmax, fill: fm ? fm[1] : null });
+    }
+    bands.sort((a, b) => a.zmin - b.zmin);
+    return bands;
+}
+
+/**
+ * Maps a band's fill variable to a fuel material name (with enrichment) when it
+ * is a fuel universe, so the legend distinguishes axial fuel zones. Falls back
+ * to the variable name itself.
+ */
+function bandFuelName(fill: string, text: string): string | null {
+    if (!/fuel|pellet|uo2|mox/i.test(fill)) return null;
+    return findFuelName(text) ?? fill;
 }
 
 // ---------------------------------------------------------------------------
