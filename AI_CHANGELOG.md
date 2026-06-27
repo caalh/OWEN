@@ -12,6 +12,94 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-27 — v0.2.9 — OpenMC 3D preview: per-pin axial column reconstruction (BEAVRS fidelity)
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.8` → `0.2.9` in `package.json` / `package-lock.json`. Fixes a user-reported 3D
+preview defect: the OpenMC BEAVRS full core rendered much shorter than the MCNP/Serpent/SCONE cores
+and was missing components. 113 headless tests pass (106 prior + 7 new). OWEN never executes Python.
+
+### Diagnosis (headless, all four prebuilt BEAVRS decks)
+
+Ran `buildScene` on each deck at `detail:disc` with axial off/on and compared drawn z-extent, band
+count, and per-band materials/components:
+
+| code | axial-off extent | axial-on extent | bands | axial-on components |
+|---|---|---|---|---|
+| MCNP | 0→460 | 0→431.9 | 36 | fuel, moderator, guide, instrument |
+| Serpent | 0→460 | 0→431.9 | 36 | fuel, guide, instrument |
+| SCONE | 0→460 | 20→431.9 | 36 | fuel, clad, guide, instrument, absorber, structure, plenum, end_plug |
+| **OpenMC (before)** | **−20→20 (40 cm slab)** | **−20→20 (axial never engaged)** | **0** | fuel, guide, instrument (default 2-shell pin) |
+
+Two root causes:
+1. **Radii unreadable.** The radial shells live in the `_SHELLS = { key: [(mat, r), …] }` dict
+   literal (and `make_pin` builds `ZCylinder(r=r)` inline from it), so `collectRadii`'s
+   `name = number` / `name = ZCylinder(r=…)` scan found nothing → OpenMC fell back to
+   `defaultTemplate('fuel')` (a 2-shell `[0.41, 0.475]` pin at the 40 cm `findHeight` default,
+   centred at z=0).
+2. **Axial silently dropped.** v0.2.8 recovered only the *union* of z-boundaries (~36 bands) and
+   applied it uniformly to every pin. The budget estimate `totalPins × axialSegments`
+   (55 777 × 36 ≈ 2.0 M) exceeded the 1.5 M ceiling, so `planRender` turned axial off — the deck has
+   `hasAxial=true` but rendered collapsed. (MCNP/Serpent build per-pin stacks with the real,
+   smaller per-pin cell counts, so they fit.)
+
+### Fix — `codes/openmc.ts`: `buildColumnModel()` + column-aware placement
+
+- New static resolver reconstructs each pin's **axial column** without executing Python:
+  - `parseMaterialNames` — `var = openmc.Material(name="…")` → friendly material names (UO2-16,
+    Inconel, StainlessSteel304, …).
+  - `parseShellsDict` — the `_SHELLS` dict → `key → [(material, r|None)]` (the `None` outer fill is
+    the infinite coolant, dropped from drawn radii).
+  - `parseStackFns` + `parseStacksDict` + `resolveKeyExpr` — the `STACKS` dict, expanding
+    `_fuel_stack(e)`-style builder calls (substituting the param into `e` / `e + "g"`) and literal
+    `(z_bottom, z_top, key)` tables into concrete per-column segment lists.
+  - `templateFromShells` + `shellComponent` — each segment's `R[key]` → concentric shells with
+    components classified by material **and** column context (fuel/gap/clad; guide vs instrument
+    thimble; Inconel→plenum spring; `…g` grid suffix→Inconel grid sleeve; `zr`→end plug; `ss` top
+    nozzle→end plug; support steel→structure; pyrex→absorber).
+- The programmatic-core resolver now threads the universe key onto each pin
+  (`ResolvedPin.colKey = keyOf(cellExpr)` — e.g. `f31`, `gt`, `ba`, `it`), so placement maps a pin to
+  its own column (correct per-pin **enrichment zone**: f16/f24/f31). Falls back to a role-matched
+  column, then to the legacy role template, for non-BEAVRS decks.
+- `placeColumnPin` / `emitSegment`: axial-on draws every band at its real `(zmin, zmax)`; disc mode
+  picks the band's signature shell (fuel/absorber first, else innermost solid; grid bands as an
+  Inconel sleeve); layers mode draws full concentric shells plus the grid ring. Axial-off draws one
+  representative band over the **full** column extent (collapsed height/centre = real 0→460 cm, not
+  the 40 cm default). Vessel/barrel shells span and centre on the full extent.
+- Budget now uses the column model's `maxSegments` (~26) and mean shell count, so axial detail engages
+  within the 1.5 M ceiling exactly like the other codes (~1.22 M instances). The generic ZP/stack-
+  table band path (`findAxialBands`) is retained for decks without `_SHELLS`.
+
+### Result (after, prebuilt OpenMC BEAVRS)
+
+- axial-off: drawn z **0→460 cm** (was −20→20); materials UO2-16/24/31, Zircaloy, BorosilicateGlass.
+- axial-on: drawn z **0→431.876 cm** (matches MCNP/Serpent to the cm), **36** axial bands; components
+  fuel, guide_tube, instrument_tube, absorber, **structure, grid, plenum, end_plug**; materials add
+  Inconel, StainlessSteel304, SupportPlateSS/BW. The richest of the four (only OpenMC surfaces a
+  distinct grid-spacer component). No change to MCNP/Serpent/SCONE extents or band counts.
+
+### Tests (+7)
+
+- `extractor.test.ts` (+2): a compact `_SHELLS`/`STACKS`/`COL`/`_assembly` deck — asserts collapsed
+  pins span 0→460, axial drawn top ≈ 431.876, and bands carry UO2-31 / Inconel (grid+plenum) /
+  Zircaloy (clad+end plug) / StainlessSteel304 (nozzle) with fuel/grid/plenum/end_plug/guide_tube
+  components.
+- `beavrsAxial.test.ts` (new, +5): real-deck cross-code parity on the four bundled BEAVRS decks —
+  OpenMC collapsed 0→460; OpenMC axial extent within 1 cm of MCNP/Serpent (and span > 400 cm, not a
+  40 cm slab); ≥20 axial bands; distinct grid/plenum/nozzle/end-plug materials + all three enrichment
+  zones; and a regression guard that MCNP/Serpent/SCONE extents are unchanged (0→460 collapsed,
+  ≈431.876 axial).
+
+### Build / test
+
+- `node node_modules/typescript/bin/tsc --noEmit` clean; `node esbuild.js --production` clean; `out/`
+  ships only `extension.js` (verified `vsce ls`); webview-injected functions remain minification-safe
+  (no webview changes this release — the fix is entirely in the parser). 113 headless tests pass.
+  Packaged `owen-neutronics-0.2.9.vsix`.
+
+---
+
 ## 2026-06-27 — v0.2.8 — BEAVRS prebuilts for all codes + role-aware MCNP references + OpenMC axial recovery
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

@@ -101,11 +101,19 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     const totalPins = coreTree ? countTreePins(coreTree) : countOpenmcPins(grid!, latByName, universeMap);
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
 
-    // Axial structure from stacked ZPlane-bounded cells (active fuel / plenum /
-    // end plugs). Best-effort: OpenMC decks are arbitrary Python, so we only
-    // expand the z-bands a deck makes explicit via `ZPlane` + `Cell(region=...)`.
-    const axialBands = findAxialBands(text);
-    const hasAxial = axialBands.length >= 2;
+    // Per-pin axial COLUMNS (the BEAVRS `_SHELLS` / `STACKS` / `R[key]` idiom):
+    // each pin is a real z-stack of cells, every band with its own concentric
+    // shells/materials (fuel/gap/clad, grid sleeve, plenum spring, end plug,
+    // nozzle, support plate, …). When present this drives axial structure so the
+    // OpenMC core matches the MCNP/Serpent/SCONE decks instead of collapsing to
+    // a short, radially-uniform slab.
+    const columnModel = buildColumnModel(text);
+
+    // Fallback axial structure for non-column decks: stacked ZPlane-bounded
+    // cells (active fuel / plenum / end plugs), best-effort from the z-bands a
+    // deck makes explicit via `ZPlane` + `Cell(region=...)` or `ZP[z]` tables.
+    const axialBands = columnModel ? [] : findAxialBands(text);
+    const hasAxial = columnModel ? true : axialBands.length >= 2;
 
     // Budget the instance count: degrade detail before hiding pins.
     const maxInstances = opts?.maxInstances && opts.maxInstances > 0 ? opts.maxInstances : DEFAULT_MAX_INSTANCES;
@@ -114,13 +122,21 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         guideTemplate ?? defaultTemplate('guide'),
         instrTemplate ?? defaultTemplate('instrument'),
     ];
-    const avgLayers = tmpls.reduce((s, t) => s + Math.max(1, t.radii.length), 0) / tmpls.length;
+    const avgLayers = columnModel
+        ? columnModel.avgLayers
+        : tmpls.reduce((s, t) => s + Math.max(1, t.radii.length), 0) / tmpls.length;
+    const axialSegments = columnModel ? Math.max(1, columnModel.maxSegments) : Math.max(1, axialBands.length);
     const plan = planRender({
-        totalPins, avgLayers, axialSegments: Math.max(1, axialBands.length),
+        totalPins, avgLayers, axialSegments,
         detail, axial: !!opts?.axial && hasAxial, maxInstances,
     });
     const discMode = plan.detail === 'disc';
     const axialOn = plan.axial;
+
+    // Collapsed (axial-off) height + centre: use the real column extent so the
+    // core stands at its true 0→460 cm height, not the 40 cm fuel-only default.
+    const collapsedHeight = columnModel ? (columnModel.extent[1] - columnModel.extent[0]) : height;
+    const collapsedZ = columnModel ? (columnModel.extent[0] + columnModel.extent[1]) / 2 : 0;
 
     const cylinders: CylinderSpec[] = [];
     let capped = false;
@@ -163,7 +179,84 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         );
     };
 
+    // --- Per-pin axial column placement (BEAVRS `_SHELLS`/`STACKS` model) -----
+
+    /** Picks the column for a pin: its own key, else a role-representative. */
+    const columnSegsFor = (colKey: string | undefined, role: Role | ResolvedRole): ColumnSegment[] | null => {
+        if (!columnModel) return null;
+        const cols = columnModel.columns;
+        if (colKey && cols.has(colKey)) return cols.get(colKey)!;
+        const find = (pred: (k: string) => boolean): ColumnSegment[] | null => {
+            for (const [k, v] of cols) if (pred(k)) return v;
+            return null;
+        };
+        if (role === 'guide') return find((k) => k === 'gt') ?? find((k) => /^gt/.test(k));
+        if (role === 'instrument') return find((k) => k === 'it') ?? find((k) => /^it/.test(k));
+        return find((k) => /^f\d/.test(k)) ?? find((k) => /^f/.test(k)) ?? cols.values().next().value ?? null;
+    };
+
+    /** Emits one axial band (a column segment) at a given z / height. */
+    const emitSegment = (s: ColumnSegment, x: number, y: number, z: number, h: number, label: string): void => {
+        if (cylinders.length >= maxInstances) { capped = true; return; }
+        const hh = Math.max(0.01, h);
+        if (discMode) {
+            if (s.grid) {
+                cylinders.push({
+                    label, radius: Math.min(subPitch * 0.5, columnModel!.gridOuter), height: hh,
+                    x, y, z, color: materialColor('Inconel'), opacity: 1.0,
+                    component: Component.Grid, material: 'Inconel',
+                });
+                return;
+            }
+            // Pick the band's signature shell: fuel/absorber first (so a fuel
+            // band reads as fuel, a BA band as absorber), else the innermost
+            // solid (tube / plenum spring / end plug), mirroring the other codes.
+            let idx = s.components.findIndex((c) => c === Component.Fuel);
+            if (idx < 0) idx = s.components.findIndex((c) => c === Component.Absorber);
+            if (idx < 0) idx = s.components.findIndex((c) => c !== Component.Gap && c !== Component.Moderator);
+            if (idx < 0) idx = s.radii.length - 1;
+            if (idx < 0) return; // pure-coolant band: nothing to draw
+            cylinders.push({
+                label, radius: Math.min(subPitch * 0.47, s.radii[idx]), height: hh,
+                x, y, z, color: materialColor(s.materials[idx] ?? 'UO2'), opacity: 1.0,
+                component: s.components[idx], material: s.materials[idx],
+            });
+            return;
+        }
+        cylinders.push(...emitLayers(s.radii, s.components, x, y, z, hh, label, undefined, s.materials));
+        if (s.grid) {
+            cylinders.push({
+                label: `${label}_grid`, radius: columnModel!.gridOuter, innerRadius: columnModel!.gridInner,
+                height: hh, x, y, z, color: materialColor('Inconel'), opacity: 1.0,
+                component: Component.Grid, material: 'Inconel',
+            });
+        }
+    };
+
+    /** Places a full per-pin column: every band when axial on, else one rep. */
+    const placeColumnPin = (segs: ColumnSegment[], x: number, y: number, label: string): void => {
+        if (cylinders.length >= maxInstances) { capped = true; return; }
+        if (axialOn) {
+            for (let i = 0; i < segs.length; i++) {
+                const s = segs[i];
+                emitSegment(s, x, y, (s.zmin + s.zmax) / 2, s.zmax - s.zmin, `${label}_z${i}`);
+            }
+            return;
+        }
+        // Collapsed: one representative band (the tallest, usually active fuel)
+        // drawn over the full column height so the pin reads at its true extent.
+        let rep = segs[0];
+        for (const s of segs) if ((s.zmax - s.zmin) > (rep.zmax - rep.zmin)) rep = s;
+        emitSegment(rep, x, y, collapsedZ, collapsedHeight, label);
+    };
+
     const placePin = (token: string, x: number, y: number, label: string): void => {
+        const role = classifyToken(token, universeMap);
+        if (role === 'empty') return;
+        if (columnModel) {
+            const segs = columnSegsFor(undefined, role);
+            if (segs) { placeColumnPin(segs, x, y, label); return; }
+        }
         const template = templateFor(token);
         if (!template || !template.render) return;
         if (axialOn) {
@@ -212,6 +305,11 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         if (depth > 10 || cylinders.length >= maxInstances) return;
         if (node.kind === 'skip') return;
         if (node.kind === 'pin') {
+            if (node.role === 'empty') return;
+            if (columnModel) {
+                const segs = columnSegsFor(node.colKey, node.role);
+                if (segs) { placeColumnPin(segs, cx, cy, label); return; }
+            }
             const template = templateFor(roleToken(node.role));
             if (!template || !template.render) return;
             if (axialOn) {
@@ -263,8 +361,9 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         notes.push(`Expanded a ${rows}×${cols} lattice (${cylinders.length} ${discMode ? 'pins' : 'pin layers'}).`);
     }
 
-    // Vessel / barrel shells from large bounding ZCylinders.
-    addVesselShells(text, cylinders, height);
+    // Vessel / barrel shells from large bounding ZCylinders (span the full
+    // axial extent so they enclose the whole stack, not just the active fuel).
+    addVesselShells(text, cylinders, collapsedHeight, collapsedZ);
 
     if (discMode) {
         notes.push(`Disc mode: one disc per pin. Switch "Pin detail" to Detailed layers for concentric fuel/gap/clad/coolant shells.`);
@@ -273,7 +372,14 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         notes.push('Hex lattice laid out on a rectangular approximation (OpenMC HexLattice index order is not reconstructed).');
         for (const cyl of cylinders) cyl.label = `hexapprox_${cyl.label}`;
     }
-    if (axialOn) {
+    if (columnModel) {
+        const span = `${columnModel.extent[0].toFixed(1)}–${columnModel.extent[1].toFixed(1)} cm`;
+        if (axialOn) {
+            notes.push(`Axial detail: each pin reconstructed as its real z-stack (up to ${columnModel.maxSegments} bands over ${span}) from the deck's _SHELLS/STACKS tables — grid spacers, plena, end plugs and nozzles render with their own shells/materials. Use the Axial Layers toggles and the Axial slice to inspect levels.`);
+        } else {
+            notes.push(`This deck builds per-pin axial columns (active fuel, grid spacers, plena, end plugs, nozzles over ${span}). Enable "Axial segments" to expand them; the Axial slice control then cuts the stack by height.`);
+        }
+    } else if (axialOn) {
         notes.push(`Axial detail: pins expanded into ${axialBands.length} z-bands from the deck's ZPlane stack. Use the Axial Layers toggles and the Axial slice to inspect levels.`);
     } else if (hasAxial) {
         notes.push('This deck defines axial structure (ZPlane-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
@@ -382,6 +488,294 @@ function bandFuelName(fill: string, text: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Per-pin axial columns (BEAVRS `_SHELLS` / `STACKS` / `R[key]` reconstruction)
+// ---------------------------------------------------------------------------
+//
+// The BEAVRS OpenMC full-core deck builds each pin as an axial STACK of cells:
+// a `STACKS[key]` table of `(z_bottom, z_top, radial_key)` tuples, where each
+// `radial_key` indexes `R` (= `make_pin(_SHELLS[key])`) — a concentric shell
+// set (fuel/gap/clad/coolant, grid sleeve, plenum spring, end plug, nozzle …).
+// The v0.2.7/0.2.8 parser recovered only the union of z-boundaries and applied
+// one role-based radial template uniformly to every band, so the OpenMC core
+// rendered as a short, radially-flat slab (active fuel only, default 2-shell
+// pin). This resolver statically reconstructs each column so a pin renders its
+// real per-z shells and materials — matching the MCNP/Serpent/SCONE decks.
+
+interface ColumnSegment {
+    zmin: number;
+    zmax: number;
+    radii: number[];
+    components: ComponentId[];
+    materials: string[];
+    /** Inconel grid-spacer sleeve overlays this band's coolant channel. */
+    grid: boolean;
+    /** Radial `_SHELLS` key this band resolved from (sans grid suffix). */
+    segKey: string;
+}
+
+interface ColumnModel {
+    /** Column key (`f16`/`gt`/`ba`/…) → bottom-to-top axial segments. */
+    columns: Map<string, ColumnSegment[]>;
+    /** Full axial extent across all columns (cm). */
+    extent: [number, number];
+    /** Largest per-column segment count (drives the instance budget). */
+    maxSegments: number;
+    /** Mean concentric-shell count per segment (drives the layers budget). */
+    avgLayers: number;
+    /** Grid-sleeve inner / outer half-width (cm). */
+    gridInner: number;
+    gridOuter: number;
+}
+
+interface Shell { material: string; r: number | null; }
+
+/** Maps `var = openmc.Material(name="…")` to a var → friendly-name table. */
+function parseMaterialNames(text: string): Map<string, string> {
+    const out = new Map<string, string>();
+    const re = /([A-Za-z_]\w*)\s*=\s*openmc\.Material\s*\(([^)]*)\)/g;
+    for (const m of text.matchAll(re)) {
+        const nm = m[2].match(/name\s*=\s*['"]([^'"]+)['"]/);
+        out.set(m[1], nm ? nm[1] : m[1]);
+    }
+    return out;
+}
+
+/**
+ * Parses the `_SHELLS = { key: [(mat, r), …, (mat, None)] }` dict into a
+ * key → shell-list table. The final `None` radius is the infinite outer fill
+ * (coolant) and is preserved so callers can drop it from the drawn radii.
+ */
+function parseShellsDict(text: string, matNames: Map<string, string>): Map<string, Shell[]> {
+    const out = new Map<string, Shell[]>();
+    const m = text.match(/_SHELLS\s*=\s*\{/);
+    if (!m || m.index === undefined) return out;
+    const open = text.indexOf('{', m.index);
+    const close = findMatching(text, open);
+    if (close < 0) return out;
+    for (const part of splitTopLevel(text.slice(open + 1, close))) {
+        const colon = topLevelColon(part);
+        if (colon < 0) continue;
+        const km = part.slice(0, colon).trim().match(/^['"]([^'"]+)['"]$/);
+        if (!km) continue;
+        const listExpr = part.slice(colon + 1).trim();
+        const lo = listExpr.indexOf('[');
+        if (lo < 0) continue;
+        const lc = findMatching(listExpr, lo);
+        if (lc < 0) continue;
+        const shells: Shell[] = [];
+        for (const tup of splitTopLevel(listExpr.slice(lo + 1, lc))) {
+            const t = tup.trim();
+            if (!t.startsWith('(')) continue;
+            const tc = findMatching(t, 0);
+            if (tc < 0) continue;
+            const fields = splitTopLevel(t.slice(1, tc)).map((s) => s.trim());
+            if (fields.length < 2) continue;
+            const matVar = fields[0];
+            const rRaw = fields[1];
+            const material = matNames.get(matVar) ?? matVar;
+            const r = /none/i.test(rRaw) ? null : Number(rRaw);
+            shells.push({ material, r: r !== null && Number.isFinite(r) ? r : null });
+        }
+        if (shells.length) out.set(km[1], shells);
+    }
+    return out;
+}
+
+/** A stack-builder function (`_fuel_stack(e)`): its parameter + tuple template. */
+interface StackFn { param: string; tuples: { zmin: number; zmax: number; keyExpr: string }[]; }
+
+/** Finds `def NAME(param): return [ (num, num, keyExpr), … ]` stack builders. */
+function parseStackFns(text: string): Map<string, StackFn> {
+    const out = new Map<string, StackFn>();
+    const defRe = /(^|\n)def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/g;
+    for (const dm of text.matchAll(defRe)) {
+        const name = dm[2];
+        const param = dm[3].split(',')[0].split(/[:=]/)[0].trim();
+        if (!param) continue;
+        const bodyStart = (dm.index ?? 0) + dm[0].length;
+        const rest = text.slice(bodyStart);
+        const nextDef = rest.search(/\n[A-Za-z_#@]/);
+        const body = nextDef >= 0 ? rest.slice(0, nextDef) : rest;
+        const tuples = parseStackTuples(body);
+        if (tuples.length >= 2) out.set(name, { param, tuples });
+    }
+    return out;
+}
+
+/** Parses `(z_bottom, z_top, key_expr)` tuples from a block of text. */
+function parseStackTuples(body: string): { zmin: number; zmax: number; keyExpr: string }[] {
+    const open = body.indexOf('[');
+    if (open < 0) return [];
+    const close = findMatching(body, open);
+    if (close < 0) return [];
+    const out: { zmin: number; zmax: number; keyExpr: string }[] = [];
+    for (const part of splitTopLevel(body.slice(open + 1, close))) {
+        const t = part.trim();
+        if (!t.startsWith('(')) continue;
+        const tc = findMatching(t, 0);
+        if (tc < 0) continue;
+        const fields = splitTopLevel(t.slice(1, tc)).map((s) => s.trim());
+        if (fields.length < 3) continue;
+        const zmin = Number(fields[0]);
+        const zmax = Number(fields[1]);
+        if (!Number.isFinite(zmin) || !Number.isFinite(zmax) || !(zmax > zmin)) continue;
+        out.push({ zmin, zmax, keyExpr: fields.slice(2).join(',').trim() });
+    }
+    return out;
+}
+
+/** Resolves a stack-table key expression (`e`, `e + "g"`, `"w"`) to a key. */
+function resolveKeyExpr(expr: string, param: string, argVal: string): string {
+    const arg = argVal.replace(/^['"]|['"]$/g, '');
+    const lit = expr.match(/^['"]([^'"]+)['"]$/);
+    if (lit) return lit[1];
+    // `e + "g"` / `e+'g'` → arg + suffix.
+    const plus = expr.match(/^([A-Za-z_]\w*)\s*\+\s*['"]([^'"]*)['"]$/);
+    if (plus && plus[1] === param) return arg + plus[2];
+    if (expr === param) return arg;
+    return expr.replace(/^['"]|['"]$/g, '');
+}
+
+/**
+ * Parses `STACKS = { "f16": _fuel_stack("f16"), "gt": [ (…) , … ], … }` into a
+ * column key → `(zb, zt, radial_key)` table, expanding stack-builder calls.
+ */
+function parseStacksDict(text: string, stackFns: Map<string, StackFn>): Map<string, { zmin: number; zmax: number; key: string }[]> {
+    const out = new Map<string, { zmin: number; zmax: number; key: string }[]>();
+    const m = text.match(/\bSTACKS\s*=\s*\{/);
+    if (!m || m.index === undefined) return out;
+    const open = text.indexOf('{', m.index);
+    const close = findMatching(text, open);
+    if (close < 0) return out;
+    for (const part of splitTopLevel(text.slice(open + 1, close))) {
+        const colon = topLevelColon(part);
+        if (colon < 0) continue;
+        const km = part.slice(0, colon).trim().match(/^['"]([^'"]+)['"]$/);
+        if (!km) continue;
+        const colKey = km[1];
+        const valExpr = part.slice(colon + 1).trim();
+        let table: { zmin: number; zmax: number; key: string }[] = [];
+        const call = valExpr.match(/^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/);
+        if (call && stackFns.has(call[1])) {
+            const fn = stackFns.get(call[1])!;
+            const arg = splitTopLevel(call[2])[0]?.trim() ?? '';
+            table = fn.tuples.map((t) => ({ zmin: t.zmin, zmax: t.zmax, key: resolveKeyExpr(t.keyExpr, fn.param, arg) }));
+        } else if (valExpr.startsWith('[')) {
+            table = parseStackTuples(valExpr).map((t) => ({ zmin: t.zmin, zmax: t.zmax, key: t.keyExpr.replace(/^['"]|['"]$/g, '') }));
+        }
+        if (table.length >= 2) out.set(colKey, table);
+    }
+    return out;
+}
+
+/** Classifies a shell material (in the context of its column key) to a component. */
+function shellComponent(material: string, segKey: string): ComponentId {
+    const low = material.toLowerCase();
+    const tube = /^(gt|gtd|it|itb|ssgt|ssdp|ba|bap)/.test(segKey);
+    if (/uo2|fuel|pellet|mox/.test(low)) return Component.Fuel;
+    if (/helium|\bhe\b|\bair\b/.test(low)) return Component.Gap;
+    if (/pyrex|glass|borosil/.test(low)) return Component.Absorber;
+    if (/inconel/.test(low)) return Component.Plenum;
+    if (/(borated|\bbw\b)/.test(low)) return Component.Moderator;
+    if (/water|h2o|coolant|moderat/.test(low)) return Component.Moderator;
+    if (/zirc|\bzr\b/.test(low)) {
+        if (segKey === 'zr') return Component.EndPlug;
+        if (/^(it|itb)/.test(segKey)) return Component.InstrumentTube;
+        if (tube) return Component.GuideTube;
+        return Component.Clad;
+    }
+    if (/steel|stainless|\bss\b|support/.test(low)) {
+        if (segKey === 'ss') return Component.EndPlug; // top nozzle (End Plugs / Nozzles)
+        return Component.Structure;
+    }
+    return Component.Other;
+}
+
+/** Builds a radial template (drawn shells only) from a shell list. */
+function templateFromShells(shells: Shell[], segKey: string): { radii: number[]; components: ComponentId[]; materials: string[] } {
+    const radii: number[] = [];
+    const components: ComponentId[] = [];
+    const materials: string[] = [];
+    for (const sh of shells) {
+        if (sh.r === null || !(sh.r > 0)) continue; // infinite outer coolant fill
+        radii.push(sh.r);
+        materials.push(sh.material);
+        components.push(shellComponent(sh.material, segKey));
+    }
+    return { radii, components, materials };
+}
+
+/**
+ * Reconstructs the per-pin axial columns from a BEAVRS-style OpenMC deck.
+ * Returns null when the deck doesn't use the `_SHELLS` + `STACKS` idiom (so the
+ * generic axial-band path stays in charge for simpler decks).
+ */
+function buildColumnModel(text: string): ColumnModel | null {
+    const matNames = parseMaterialNames(text);
+    const shells = parseShellsDict(text, matNames);
+    if (shells.size === 0) return null;
+    const stackFns = parseStackFns(text);
+    const stacks = parseStacksDict(text, stackFns);
+    if (stacks.size === 0) return null;
+
+    const gm = text.match(/GRID_OUT\s*=\s*2\s*\*\s*([\d.]+)/);
+    const gim = text.match(/GRID_IN\s*=\s*2\s*\*\s*([\d.]+)/);
+    const gridOuter = gm ? Number(gm[1]) : 0.62992;
+    const gridInner = gim ? Number(gim[1]) : 0.61015;
+
+    const columns = new Map<string, ColumnSegment[]>();
+    let zmin = Infinity;
+    let zmax = -Infinity;
+    let maxSegments = 0;
+    let layerSum = 0;
+    let layerCount = 0;
+
+    for (const [colKey, table] of stacks) {
+        const segs: ColumnSegment[] = [];
+        for (const t of table) {
+            let key = t.key;
+            let grid = false;
+            let sh = shells.get(key);
+            if (!sh && key.endsWith('g') && shells.get(key.slice(0, -1))) {
+                grid = true;
+                key = key.slice(0, -1);
+                sh = shells.get(key);
+            }
+            let radii: number[];
+            let components: ComponentId[];
+            let materials: string[];
+            if (sh) {
+                ({ radii, components, materials } = templateFromShells(sh, key));
+            } else {
+                // Unknown radial key: fall back to a role-classified default pin.
+                const tmpl = defaultTemplate(classifyKey(key) === 'guide' ? 'guide' : classifyKey(key) === 'instrument' ? 'instrument' : 'fuel');
+                radii = tmpl.radii; components = tmpl.components; materials = tmpl.materials;
+            }
+            segs.push({ zmin: t.zmin, zmax: t.zmax, radii, components, materials, grid, segKey: key });
+            zmin = Math.min(zmin, t.zmin);
+            zmax = Math.max(zmax, t.zmax);
+            layerSum += Math.max(1, radii.length) + (grid ? 1 : 0);
+            layerCount++;
+        }
+        if (segs.length >= 2) {
+            segs.sort((a, b) => a.zmin - b.zmin);
+            columns.set(colKey, segs);
+            maxSegments = Math.max(maxSegments, segs.length);
+        }
+    }
+
+    if (columns.size === 0 || !Number.isFinite(zmin) || !Number.isFinite(zmax)) return null;
+    return {
+        columns,
+        extent: [zmin, zmax],
+        maxSegments,
+        avgLayers: layerCount > 0 ? layerSum / layerCount : 2,
+        gridInner,
+        gridOuter,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Nested-lattice / core helpers
 // ---------------------------------------------------------------------------
 
@@ -468,7 +862,7 @@ function findFuelName(text: string): string | null {
     return null;
 }
 
-function addVesselShells(text: string, cylinders: CylinderSpec[], height: number): void {
+function addVesselShells(text: string, cylinders: CylinderSpec[], height: number, zCenter = 0): void {
     if (cylinders.length === 0) return;
     let footprint = 0;
     for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
@@ -484,7 +878,7 @@ function addVesselShells(text: string, cylinders: CylinderSpec[], height: number
     radii.sort((a, b) => b - a);
     for (const r of radii.slice(0, 4)) {
         cylinders.push({
-            label: `vessel_${r}`, radius: r, height, x: 0, y: 0, z: 0,
+            label: `vessel_${r}`, radius: r, height, x: 0, y: 0, z: zCenter,
             color: componentColor(Component.Vessel), opacity: 0.12,
             component: Component.Vessel, material: 'Structure',
         });
@@ -797,7 +1191,16 @@ function escapeRe(s: string): string {
 // opaque entry never aborts the whole expansion.
 
 type ResolvedRole = 'fuel' | 'guide' | 'instrument' | 'empty';
-interface ResolvedPin { kind: 'pin'; role: ResolvedRole; }
+interface ResolvedPin {
+    kind: 'pin';
+    role: ResolvedRole;
+    /**
+     * The universe key the pin resolved from (e.g. `f31`, `gt`, `ba`, `it` for
+     * the BEAVRS `COL[...]` columns). Lets the placement step pick the matching
+     * axial column stack so each band renders its real per-z shells/materials.
+     */
+    colKey?: string;
+}
 interface ResolvedLattice {
     kind: 'lattice';
     grid: ResolvedNode[][];
@@ -1122,7 +1525,8 @@ function buildGridFromTemplate(
         const out: ResolvedNode[] = [];
         for (const ch of row) {
             const cellExpr = pick.has(ch) ? pick.get(ch)! : defExpr;
-            out.push({ kind: 'pin', role: classifyKey(keyOf(cellExpr)) });
+            const key = keyOf(cellExpr);
+            out.push({ kind: 'pin', role: classifyKey(key), colKey: key });
         }
         grid.push(out);
     }

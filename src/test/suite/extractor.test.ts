@@ -923,6 +923,129 @@ geometry {
         assert.ok(scene.cylinders.some((c) => c.component === 'fuel'), 'expected fuel pins');
     });
 
+    // --- v0.2.9: OpenMC per-pin axial columns (_SHELLS / STACKS / R[key]) ---
+
+    // The BEAVRS OpenMC idiom in miniature: radial shell sets in `_SHELLS`, a
+    // `(zb, zt, key)` stack table (active fuel + grid spacer + plenum spring +
+    // end plug + SS nozzle), `R[key]`/`COL` columns, and an assembly built from
+    // a char template. Before v0.2.9 OWEN recovered only the union of z-bounds
+    // and applied one role template uniformly, so the core rendered as a short,
+    // radially-flat slab. Now each pin reconstructs its real per-z shells.
+    const omcColumnDeck = [
+        'import openmc',
+        'fuel31 = openmc.Material(name="UO2-31")',
+        'helium = openmc.Material(name="Helium")',
+        'zirc = openmc.Material(name="Zircaloy")',
+        'water = openmc.Material(name="Water")',
+        'inconel = openmc.Material(name="Inconel")',
+        'ss304 = openmc.Material(name="StainlessSteel304")',
+        'GRID_IN = 2 * 0.61015',
+        'GRID_OUT = 2 * 0.62992',
+        '_SHELLS = {',
+        '    "f31": [(fuel31, 0.39218), (helium, 0.40005), (zirc, 0.45720), (water, None)],',
+        '    "gt":  [(water, 0.56134), (zirc, 0.60198), (water, None)],',
+        '    "plen": [(inconel, 0.06459), (helium, 0.40005), (zirc, 0.45720), (water, None)],',
+        '    "zr":  [(zirc, 0.45720), (water, None)],',
+        '    "ss":  [(ss304, 0.45720), (water, None)],',
+        '    "w":   [(water, None)],',
+        '}',
+        '_GRID_VARIANTS = ["f31", "gt"]',
+        'R = {}',
+        '_zvals = sorted({0.0, 20.0, 35.0, 36.748, 40.52, 98.025, 402.508, 417.164, 419.704, 423.049, 431.876, 460.0})',
+        'ZP = {}',
+        'for z in _zvals:',
+        '    ZP[z] = openmc.ZPlane(z0=z)',
+        'def _fuel_stack(e):',
+        '    return [',
+        '        (0.0, 20.0, "w"), (20.0, 35.0, "ss"), (35.0, 36.748, "zr"),',
+        '        (36.748, 40.52, e), (40.52, 98.025, e + "g"), (98.025, 402.508, e),',
+        '        (402.508, 417.164, "plen"), (417.164, 419.704, "zr"),',
+        '        (419.704, 423.049, "w"), (423.049, 431.876, "ss"), (431.876, 460.0, "w"),',
+        '    ]',
+        'STACKS = {',
+        '    "f31": _fuel_stack("f31"),',
+        '    "gt": [',
+        '        (0.0, 20.0, "w"), (20.0, 36.748, "gt"), (36.748, 40.52, "gtg"),',
+        '        (40.52, 423.049, "gt"), (423.049, 460.0, "w"),',
+        '    ],',
+        '}',
+        'def column(name, table):',
+        '    cells = []',
+        '    for zb, zt, key in table:',
+        '        c = openmc.Cell(fill=R[key], region=+ZP[zb] & -ZP[zt])',
+        '        cells.append(c)',
+        '    return openmc.Universe(name=name, cells=cells)',
+        'COL = {k: column(f"col_{k}", t) for k, t in STACKS.items()}',
+        'u_water = openmc.Universe(name="water_col")',
+        'ASM_TEMPLATES = {"A31": ["FGF", "GFG", "FGF"]}',
+        'def _assembly(name, fuel_key, template):',
+        '    F = COL[fuel_key]',
+        '    pick = {"G": COL["gt"]}',
+        '    lat = openmc.RectLattice(name=name)',
+        '    lat.lower_left = (-1.89, -1.89)',
+        '    lat.pitch = (1.26, 1.26)',
+        '    lat.universes = [[pick.get(ch, F) for ch in row] for row in template]',
+        '    return openmc.Universe(name=name + "_u", cells=[openmc.Cell(fill=lat)])',
+        'asm_a31_u = _assembly("asm_a31", "f31", ASM_TEMPLATES["A31"])',
+        'ASM_U = {"A31": asm_a31_u}',
+        'W = u_water',
+        'core_lat = openmc.RectLattice()',
+        'core_lat.lower_left = (-1.89, -1.89)',
+        'core_lat.pitch = (3.78, 3.78)',
+        'core_lat.universes = [',
+        '    [ASM_U["A31"], W],',
+        '    [W, ASM_U["A31"]],',
+        ']',
+    ].join('\n');
+
+    function drawnZExtent(cyls: { z: number; height: number; component?: string }[]): [number, number] {
+        let zmin = Infinity, zmax = -Infinity;
+        for (const c of cyls) {
+            if (c.component === 'vessel') continue;
+            const h = c.height || 0;
+            zmin = Math.min(zmin, c.z - h / 2);
+            zmax = Math.max(zmax, c.z + h / 2);
+        }
+        return [zmin, zmax];
+    }
+
+    test('OpenMC reconstructs per-pin axial columns from _SHELLS/STACKS (full extent)', () => {
+        const collapsed = buildScene(omcColumnDeck, 'openmc', { detail: 'disc', axial: false });
+        assert.ok(collapsed.fidelity.hasAxial, 'expected the _SHELLS/STACKS deck to be detected as axial');
+        // Collapsed pins stand at the FULL column height (0 -> 460 cm), not the
+        // old 40 cm fuel-only default centred at z=0.
+        const [czmin, czmax] = drawnZExtent(collapsed.cylinders);
+        assert.ok(Math.abs(czmin - 0) < 1e-3, `expected collapsed bottom ≈ 0, got ${czmin}`);
+        assert.ok(Math.abs(czmax - 460) < 1e-3, `expected collapsed top ≈ 460, got ${czmax}`);
+
+        const axial = buildScene(omcColumnDeck, 'openmc', { detail: 'layers', axial: true });
+        assert.ok(axial.fidelity.axial, 'expected axial detail to be on');
+        assert.ok(axial.axialLayers.length >= 6, `expected several axial bands, got ${axial.axialLayers.length}`);
+        // Drawn structure spans the full assembly height (top ends at the SS
+        // nozzle 431.876; pure-water caps above are not drawn — like the others).
+        const [zmin, zmax] = drawnZExtent(axial.cylinders);
+        assert.ok(zmin <= 20 + 1e-3, `expected drawn bottom near the support region, got ${zmin}`);
+        assert.ok(Math.abs(zmax - 431.876) < 1e-3, `expected drawn top ≈ 431.876, got ${zmax}`);
+    });
+
+    test('OpenMC axial bands carry their real per-z materials/components', () => {
+        const axial = buildScene(omcColumnDeck, 'openmc', { detail: 'layers', axial: true });
+        const mats = new Set(axial.cylinders.map((c) => c.material));
+        const comps = new Set(axial.cylinders.map((c) => c.component));
+        // Fuel band keeps its enrichment-tagged material; the grid spacer is an
+        // Inconel sleeve; the plenum spring is Inconel; the end plug is Zircaloy;
+        // the nozzle is stainless steel — each a distinct band, not uniform water.
+        assert.ok(mats.has('UO2-31'), `expected a UO2-31 fuel band, got ${[...mats].join(', ')}`);
+        assert.ok(mats.has('Inconel'), 'expected Inconel (grid spacer + plenum spring)');
+        assert.ok(mats.has('Zircaloy'), 'expected a Zircaloy clad / end-plug band');
+        assert.ok(mats.has('StainlessSteel304'), 'expected a stainless-steel nozzle band');
+        assert.ok(comps.has('fuel'), 'expected fuel');
+        assert.ok(comps.has('grid'), 'expected a grid-spacer component');
+        assert.ok(comps.has('plenum'), 'expected a plenum component');
+        assert.ok(comps.has('end_plug'), 'expected an end-plug / nozzle component');
+        assert.ok(comps.has('guide_tube'), 'expected guide tubes');
+    });
+
     test('builds a component legend in buildScene', () => {
         const deck = `
 geometry { universes {

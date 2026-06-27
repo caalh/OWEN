@@ -5,6 +5,26 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9] — 2026-06-27
+
+Fix the OpenMC 3D-preview axial fidelity so the BEAVRS full core renders at its true height with the
+correct per-band structure, matching the MCNP / Serpent / SCONE cores.
+
+### Fixed
+
+- **OpenMC BEAVRS rendered much shorter than the other codes, missing components.** The OpenMC core
+  collapsed to a ~40 cm fuel-only slab centred at z=0 (a default 2-shell pin) instead of the full
+  0→460 cm assembly. Two causes: (1) the deck's radial shells live in a `_SHELLS` dict literal the
+  parser couldn't read, so it fell back to a generic pin; (2) the v0.2.8 axial recovery applied one
+  global band grid uniformly to every pin, so its instance estimate overflowed the budget and axial
+  detail silently switched off. OWEN now statically reconstructs each pin's **real axial column** from
+  the deck's `_SHELLS` / `STACKS` / `R[key]` / `make_pin` tables: every band renders its own
+  concentric shells and materials — active fuel (per 1.6 / 2.4 / 3.1 % enrichment zone), Inconel grid
+  spacers, the plenum spring, Zircaloy end plugs and the SS304 top nozzle now appear as distinct
+  components, and the core stands at its true 0→460 cm height. This matches (and slightly exceeds, via
+  grid-spacer bands) the MCNP / Serpent / SCONE renders. MCNP / Serpent / SCONE and the literal /
+  NumPy OpenMC paths are unchanged.
+
 ## [0.2.8] — 2026-06-27
 
 Bundle the complete BEAVRS full core for every code, make the MCNP reference tracker role-aware,
