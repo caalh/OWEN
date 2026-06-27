@@ -12,6 +12,64 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-27 — v0.2.5 — 3D preview: precise layer inspection + measurement tools
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.4` → `0.2.5` in `package.json` and `package-lock.json`. Adds hover-pick
+inspection, layer solo/isolate, and interactive distance/angle/radius measurement to the 3D
+geometry preview webview. No geometry IR or per-code parser changes — everything rides on metadata
+the `CylinderSpec` already carries (`label`, `radius`, `innerRadius`, `z`, `height`, `component`,
+`material`, `axialIndex`), so all existing parsers/tests are untouched and GROVES parity is
+unaffected. The extension↔webview message protocol is unchanged (still just `ready` / `scene` /
+`setFidelity`); the new features are entirely webview-side.
+
+### New module — `src/preview/measure.ts` (pure, vscode-free)
+
+- `distance3(a,b)`, `deltas(a,b)` (absolute |Δx|,|Δy|,|Δz|), `angleDeg(a,vertex,b)` (clamped,
+  NaN-safe), `diameter(r)`, and `fmtLen(n,digits)`. Points are deck-space `{x,y,z}` (cm).
+- **Injected into the webview verbatim** via `Function.prototype.toString()` (same pattern as
+  `panels/latticeCodegen.ts`): `webview.ts` `injectMeasure()` emits `const distance3 = …;` etc. into
+  the module `<script>`, so the live preview runs the EXACT functions the tests assert against. Each
+  function is self-contained (only its args + `Math`/`Number`), so the injected copy survives
+  esbuild `--production` minification — verified `Math.acos` and the `fmtLen` regex appear in the
+  minified `out/extension.js`.
+
+### Webview (`src/preview/webview.ts`)
+
+- **Per-instance metadata** expanded so a raycast pick can describe a part: each instance record now
+  carries `r` (radius), `ri` (innerRadius), `h` (height), `shape`, `label`, and `axIndex` alongside
+  the existing `comp`/`mat`/`ax`/`zc`. Each `InstancedMesh` is tagged with `userData.groupIndex` for
+  O(1) group lookup from a hit.
+- **Picking.** `THREE.Raycaster` against the instanced meshes; `isInstanceVisible(inst)` was factored
+  out of `applyVisibility` and is the single source of truth shared by culling and picking, so a
+  hidden layer is never hovered/measured. Continuous hover is skipped above 40 k instances (clicks
+  still pick) to keep huge cores responsive.
+- **Hover readout** (bottom-right HUD): component label (from `sc.components`), material, axial
+  index + band id, radius/diameter (or half-width for boxes), inner radius, height, z-range; the
+  hovered instance is outlined with an `EdgesGeometry` wireframe.
+- **Solo/isolate.** `renderRows` gained a per-row `solo` button (rows tagged `data-key`);
+  `soloItem()` sets only that key true (toggles back to all-on when re-clicked) and re-syncs
+  checkboxes + active state. Works for Components, Materials, and Axial Layers; `setAll` clears the
+  highlight.
+- **Measurement tools.** A new **Measure** panel section (Distance / Angle / Radius mode buttons +
+  Clear). Pointer handling distinguishes a *click* (≤4 px travel) from an *orbit-drag*, so
+  OrbitControls is untouched. Picked points snap to the raycast hit; results render into an
+  unclipped `overlay` group (lines via `THREE.Line`, point markers via small spheres, all
+  `depthTest:false`) with HTML labels in a `#labels` layer projected to screen each frame
+  (`updateLabels`). Distance shows length + Δx/Δy/Δz; angle uses point #2 as the vertex; radius reads
+  `inst.r` exactly and draws a radial segment. Measurements are listed (individually removable) and
+  cleared automatically when a new scene arrives. World↔deck axis mapping (`deckOf`: world XYZ →
+  deck x,z,y) keeps deltas in deck axes.
+
+### Tests — `src/test/suite/measure.test.ts` (headless, mocha `--ui tdd`)
+
+- 10 new tests: 3-4-5 and 2-3-6 distances, symmetry, absolute deltas (pitch read), right/straight/
+  equilateral angles, degenerate-ray = 0 (no NaN), diameter, and `fmtLen` trimming.
+- **Results:** `tsc --noEmit` clean; `esbuild --production` clean; `out/` ships only `extension.js`;
+  **69 passing** across the pure-logic suites (measure + extractor + lattice-codegen + references +
+  sweep). Packaged `owen-neutronics-0.2.5.vsix` (~230 KB).
+
 ## 2026-06-26 — v0.2.4 — Lattice Builder: editable identifiers + SCONE generator
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

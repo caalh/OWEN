@@ -2,6 +2,25 @@ import * as vscode from 'vscode';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
 import { buildScene, CylinderSpec } from './extractor';
 import { GeometryScene, FidelityOptions } from './types';
+import { distance3, deltas, angleDeg, diameter, fmtLen } from './measure';
+
+/**
+ * Measurement math (`measure.ts`) is pure + unit-tested. We inject its source
+ * straight into the webview module via `toString()` so the live preview runs
+ * the EXACT functions the tests assert against — no duplicated math. Each
+ * function is self-contained (only args + JS built-ins), so the injected copy
+ * survives esbuild's production minification (same pattern as the lattice
+ * codegen in `panels/latticeBuilder.ts`).
+ */
+function injectMeasure(): string {
+    return [
+        'const distance3 = ' + distance3.toString() + ';',
+        'const deltas = ' + deltas.toString() + ';',
+        'const angleDeg = ' + angleDeg.toString() + ';',
+        'const diameter = ' + diameter.toString() + ';',
+        'const fmtLen = ' + fmtLen.toString() + ';',
+    ].join('\n');
+}
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let webviewReady = false;
@@ -126,12 +145,46 @@ function buildHtml(webview: vscode.Webview): string {
   #toggle { position: absolute; top: 8px; left: 8px; z-index: 30; }
   #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 40px; text-align: center; z-index: 5; }
   #empty .big { font-size: 15px; color: #f38ba8; max-width: 480px; }
+  /* Hover readout (which layer is under the cursor). */
+  #readout {
+    position: absolute; bottom: 10px; right: 12px; z-index: 15; max-width: 280px;
+    background: var(--panel-bg); border: 1px solid #2b3a5c; border-radius: 6px;
+    padding: 8px 10px; font-size: 11px; line-height: 1.5; pointer-events: none;
+    display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
+  #readout .rtitle { font-weight: 600; font-size: 12px; margin-bottom: 2px; display: flex; align-items: center; gap: 6px; }
+  #readout .rk { opacity: 0.55; }
+  #readout .rv { font-variant-numeric: tabular-nums; }
+  /* Per-row "solo" (isolate) affordance. */
+  .row .solo { opacity: 0; font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px solid #2b3a5c; background: #16203a; color: #cdd6f4; cursor: pointer; flex: 0 0 auto; }
+  .row:hover .solo { opacity: 0.75; }
+  .row .solo:hover { opacity: 1; background: var(--accent); color: #0b1018; border-color: var(--accent); }
+  .row .solo.active { opacity: 1; background: var(--accent); color: #0b1018; border-color: var(--accent); }
+  /* Measurement tools. */
+  #measHint { font-size: 11px; opacity: 0.7; margin: 4px 0; min-height: 14px; }
+  #measList { margin-top: 6px; }
+  .meas { display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; border-top: 1px solid #1f2940; font-size: 11px; }
+  .meas .mtxt { flex: 1; line-height: 1.45; }
+  .meas .mtag { font-weight: 600; color: var(--accent); }
+  .meas .mdel { cursor: pointer; opacity: 0.6; padding: 0 4px; }
+  .meas .mdel:hover { opacity: 1; color: #f38ba8; }
+  #measBtns button.active { background: var(--accent); color: #0b1018; border-color: var(--accent); font-weight: 600; }
+  /* On-canvas measurement labels (projected from 3D). */
+  #labels { position: absolute; inset: 0; z-index: 12; pointer-events: none; overflow: hidden; }
+  #labels .lbl {
+    position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+    background: rgba(11,16,24,0.82); border: 1px solid var(--accent); color: #e8eefc;
+    border-radius: 4px; padding: 1px 5px; font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  #labels .lbl.pt { border-color: #f9e2af; color: #f9e2af; padding: 0 4px; }
 </style>
 </head>
 <body>
   <div id="stage"></div>
+  <div id="labels"></div>
   <button id="toggle" title="Show/hide panel">☰ Layers</button>
-  <div id="hud">drag: orbit • scroll: zoom • right-drag: pan</div>
+  <div id="hud">drag: orbit • scroll: zoom • right-drag: pan • hover: inspect</div>
+  <div id="readout"></div>
   <div id="empty"><div class="big" id="emptyMsg"></div></div>
 
   <div id="panel">
@@ -206,6 +259,18 @@ function buildHtml(webview: vscode.Webview): string {
         </div>
         <div class="btnrow"><button id="resetView">Reset view</button></div>
       </div>
+
+      <div class="section" id="measureSection">
+        <div class="title"><span>Measure</span><span id="measCount"></span></div>
+        <div class="btnrow" id="measBtns">
+          <button data-mode="distance" id="measDist" title="Click two points to read distance + Δx Δy Δz">Distance</button>
+          <button data-mode="angle" id="measAngle" title="Click three points; the 2nd is the corner">Angle</button>
+          <button data-mode="radius" id="measRadius" title="Click a pin/shell to read its radius + diameter">Radius</button>
+        </div>
+        <div id="measHint">Pick a tool, then click on the geometry.</div>
+        <div class="btnrow"><button id="measClear">Clear measurements</button></div>
+        <div id="measList"></div>
+      </div>
     </div>
   </div>
 
@@ -218,6 +283,9 @@ function buildHtml(webview: vscode.Webview): string {
   <script type="module" nonce="${nonce}">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // Injected pure measurement math (single source of truth — see measure.ts).
+    ${injectMeasure()}
 
     const vscode = acquireVsCodeApi();
     const stage = document.getElementById('stage');
@@ -257,6 +325,8 @@ function buildHtml(webview: vscode.Webview): string {
     let shellOpacity = 0.45;
     let sceneBounds = null;
     let translucentMats = []; // materials whose opacity we scale live
+    let compLabels = {};      // component id -> friendly label (for the readout)
+    let totalInstances = 0;   // for hover-pick throttling on huge cores
 
     const zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -331,32 +401,51 @@ function buildHtml(webview: vscode.Webview): string {
           mesh.setMatrixAt(i, dummy.matrix);
           color.set(c.color || '#cccccc');
           mesh.setColorAt(i, color);
-          instances.push({ matrix: dummy.matrix.clone(), comp: c.component || 'other', mat: c.material || '', ax: c.axialLayer || '', zc: (typeof c.z === 'number' ? c.z : 0) });
+          instances.push({
+            matrix: dummy.matrix.clone(),
+            comp: c.component || 'other', mat: c.material || '', ax: c.axialLayer || '',
+            zc: (typeof c.z === 'number' ? c.z : 0),
+            r: c.radius, ri: c.innerRadius || 0, h: grp.h,
+            shape: grp.shape, label: c.label || '',
+            axIndex: (typeof c.axialIndex === 'number' ? c.axialIndex : null),
+          });
         });
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        mesh.userData.groupIndex = groups.length;
         root.add(mesh);
         groups.push({ mesh, instances });
       }
 
+      totalInstances = groups.reduce((n, g) => n + g.instances.length, 0);
+      clearMeasurements();   // stale geometry — drop any prior measurements/labels
+      setHover(null);
       applyVisibility();
       applyClipping();
       buildPanel(sc);
       resetView();
     }
 
+    // Single source of truth for "is this instance currently shown" — used by
+    // both the instanced-matrix culling and the raycast pick (so hidden layers
+    // are never selected/measured).
+    function isInstanceVisible(inst) {
+      if (compEnabled[inst.comp] === false) return false;
+      if (inst.mat !== '' && matEnabled[inst.mat] === false) return false;
+      // Axial filters only apply to cylinders in an axial layer (vessel/context
+      // shells have no ax and stay visible).
+      if (inst.ax) {
+        if (axEnabled[inst.ax] === false) return false;
+        if (inst.zc < axWindow.min - 1e-6 || inst.zc > axWindow.max + 1e-6) return false;
+      }
+      return true;
+    }
+
     function applyVisibility() {
       for (const g of groups) {
         let changed = false;
         g.instances.forEach((inst, i) => {
-          let vis = (compEnabled[inst.comp] !== false) && (inst.mat === '' || matEnabled[inst.mat] !== false);
-          // Axial filters only apply to cylinders that belong to an axial layer
-          // (vessel/context shells have no ax and stay visible).
-          if (vis && inst.ax) {
-            if (axEnabled[inst.ax] === false) vis = false;
-            else if (inst.zc < axWindow.min - 1e-6 || inst.zc > axWindow.max + 1e-6) vis = false;
-          }
-          g.mesh.setMatrixAt(i, vis ? inst.matrix : zero);
+          g.mesh.setMatrixAt(i, isInstanceVisible(inst) ? inst.matrix : zero);
           changed = true;
         });
         if (changed) g.mesh.instanceMatrix.needsUpdate = true;
@@ -388,6 +477,8 @@ function buildHtml(webview: vscode.Webview): string {
       const emptyMsg = document.getElementById('emptyMsg');
       emptyMsg.textContent = (sc.warnings && sc.warnings[0]) ? sc.warnings[0] : 'No geometry to display.';
 
+      compLabels = {};
+      for (const c of (sc.components || [])) compLabels[c.id] = c.label || c.id;
       renderRows('components', (sc.components || []), (item) => item.id, compEnabled, true);
       renderRows('materials', (sc.materials || []), (item) => item.name, matEnabled, false);
       buildAxialPanel(sc.axialLayers || []);
@@ -435,15 +526,36 @@ function buildHtml(webview: vscode.Webview): string {
       box.innerHTML = '';
       for (const it of items) {
         const key = keyOf(it);
-        const row = document.createElement('label'); row.className = 'row';
+        const row = document.createElement('label'); row.className = 'row'; row.dataset.key = key;
         const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = enabledMap[key] !== false;
         cb.addEventListener('change', () => { enabledMap[key] = cb.checked; applyVisibility(); });
         const sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = it.color || '#888';
         const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = it.label || it.name || key;
         const ct = document.createElement('span'); ct.className = 'count'; ct.textContent = it.count.toLocaleString();
-        row.appendChild(cb); row.appendChild(sw); row.appendChild(nm); row.appendChild(ct);
+        // "Solo" = isolate: show only this item; clicking solo on the already-
+        // isolated item restores the whole group (so it acts as a toggle).
+        const solo = document.createElement('span'); solo.className = 'solo'; solo.textContent = 'solo'; solo.title = 'Show only this layer';
+        solo.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          soloItem(enabledMap, containerId, key);
+        });
+        row.appendChild(cb); row.appendChild(sw); row.appendChild(nm); row.appendChild(ct); row.appendChild(solo);
         box.appendChild(row);
       }
+    }
+
+    function soloItem(enabledMap, containerId, key) {
+      const keys = Object.keys(enabledMap);
+      const alreadySolo = enabledMap[key] !== false && keys.every((k) => k === key || enabledMap[k] === false);
+      for (const k of keys) enabledMap[k] = alreadySolo ? true : (k === key);
+      document.querySelectorAll('#' + containerId + ' .row').forEach((row) => {
+        const rk = row.dataset.key;
+        const cb = row.querySelector('input');
+        const solo = row.querySelector('.solo');
+        if (cb) cb.checked = enabledMap[rk] !== false;
+        if (solo) solo.classList.toggle('active', !alreadySolo && rk === key);
+      });
+      applyVisibility();
     }
 
     function resetView() {
@@ -482,6 +594,7 @@ function buildHtml(webview: vscode.Webview): string {
     function setAll(map, containerId, val) {
       for (const k of Object.keys(map)) map[k] = val;
       document.querySelectorAll('#' + containerId + ' input').forEach((cb) => cb.checked = val);
+      document.querySelectorAll('#' + containerId + ' .solo').forEach((s) => s.classList.remove('active'));
       applyVisibility();
     }
     document.getElementById('matTitle').addEventListener('click', () => {
@@ -515,11 +628,261 @@ function buildHtml(webview: vscode.Webview): string {
     });
     document.getElementById('axialOn').addEventListener('change', () => requestFidelity(null));
 
+    // --- Picking, hover readout & measurement tools ---
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    const overlay = new THREE.Group();         // measurement lines/markers (unclipped)
+    scene.add(overlay);
+    const labelsBox = document.getElementById('labels');
+
+    let hoverHelper = null;                     // wireframe of the hovered instance
+    let hoverKey = '';
+    let measureMode = null;                     // null | 'distance' | 'angle' | 'radius'
+    let pending = [];                           // accumulated click points (world+deck)
+    let pendingMarkers = [];
+    let measurements = [];                       // completed measurements
+    let measSeq = 0;
+
+    // World axes map to deck axes as X=deck.x, Y=deck.z (axial), Z=deck.y.
+    function deckOf(world) { return { x: world.x, y: world.z, z: world.y }; }
+    function meshList() { return groups.map((g) => g.mesh); }
+    function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function markerRadius() {
+      if (!sceneBounds) return 0.3;
+      const b = sceneBounds;
+      return Math.max(0.02, Math.max(b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ, 1) * 0.006);
+    }
+    function markerMesh(world, color) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(markerRadius(), 12, 12),
+        new THREE.MeshBasicMaterial({ color, depthTest: false }));
+      m.position.copy(world); m.renderOrder = 1000; return m;
+    }
+    function lineSeg(points, color) {
+      const l = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+      l.renderOrder = 998; return l;
+    }
+
+    function pickAt(clientX, clientY) {
+      if (!groups.length) return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, camera);
+      const hits = raycaster.intersectObjects(meshList(), false);
+      for (const h of hits) {
+        const g = groups[h.object.userData.groupIndex];
+        if (!g || h.instanceId == null) continue;
+        const inst = g.instances[h.instanceId];
+        if (!inst || !isInstanceVisible(inst)) continue;   // never pick a hidden layer
+        return { inst, point: h.point, gi: h.object.userData.groupIndex, id: h.instanceId };
+      }
+      return null;
+    }
+
+    function setHover(pick) {
+      const key = pick ? (pick.gi + ':' + pick.id) : '';
+      if (key === hoverKey) { if (pick) showReadout(pick.inst); return; }
+      hoverKey = key;
+      if (hoverHelper) { overlay.remove(hoverHelper); hoverHelper.geometry.dispose(); hoverHelper.material.dispose(); hoverHelper = null; }
+      if (!pick) { document.getElementById('readout').style.display = 'none'; return; }
+      const g = groups[pick.gi];
+      hoverHelper = new THREE.LineSegments(
+        new THREE.EdgesGeometry(g.mesh.geometry),
+        new THREE.LineBasicMaterial({ color: 0xf9e2af, depthTest: false, transparent: true, opacity: 0.9 }));
+      hoverHelper.renderOrder = 999;
+      const m = new THREE.Matrix4(); g.mesh.getMatrixAt(pick.id, m);
+      hoverHelper.applyMatrix4(m);
+      overlay.add(hoverHelper);
+      showReadout(pick.inst);
+    }
+
+    function showReadout(inst) {
+      const ro = document.getElementById('readout');
+      const compLabel = compLabels[inst.comp] || inst.comp;
+      const zmin = inst.zc - inst.h / 2, zmax = inst.zc + inst.h / 2;
+      const rows = ['<div class="rtitle">' + escHtml(inst.label || compLabel) + '</div>'];
+      const line = (k, v) => '<div><span class="rk">' + k + ':</span> <span class="rv">' + escHtml(v) + '</span></div>';
+      rows.push(line('Component', compLabel));
+      if (inst.mat) rows.push(line('Material', inst.mat));
+      if (inst.axIndex != null) rows.push(line('Axial layer', '#' + inst.axIndex + (inst.ax ? ' · ' + inst.ax : '')));
+      if (inst.shape === 'box') {
+        rows.push(line('Half-width', fmtLen(inst.r) + ' cm'));
+      } else {
+        rows.push(line('Radius', fmtLen(inst.r) + ' cm'));
+        rows.push(line('Diameter', fmtLen(diameter(inst.r)) + ' cm'));
+        if (inst.ri > 0.0001) rows.push(line('Inner radius', fmtLen(inst.ri) + ' cm'));
+      }
+      rows.push(line('Height', fmtLen(inst.h) + ' cm'));
+      rows.push(line('Z range', fmtLen(zmin) + ' → ' + fmtLen(zmax) + ' cm'));
+      ro.innerHTML = rows.join('');
+      ro.style.display = 'block';
+    }
+
+    function setMeasHint(t) { document.getElementById('measHint').textContent = t; }
+
+    function addPointMarker(world) { const s = markerMesh(world, 0xf9e2af); overlay.add(s); pendingMarkers.push(s); }
+    function clearPending() {
+      for (const m of pendingMarkers) { overlay.remove(m); m.geometry.dispose(); m.material.dispose(); }
+      pendingMarkers = []; pending = [];
+    }
+
+    function handleMeasureClick(pick) {
+      if (measureMode === 'radius') { addRadiusMeasurement(pick); return; }
+      pending.push({ p: pick.point.clone(), deck: deckOf(pick.point) });
+      addPointMarker(pick.point);
+      const need = measureMode === 'distance' ? 2 : 3;
+      if (pending.length >= need) {
+        if (measureMode === 'distance') addDistanceMeasurement(pending[0], pending[1]);
+        else addAngleMeasurement(pending[0], pending[1], pending[2]);
+        clearPending();
+        setMeasHint(measureMode === 'distance' ? 'Click two points to measure distance.' : 'Click three points (2nd = corner).');
+      } else {
+        setMeasHint(measureMode === 'distance'
+          ? ('Click point 2 of 2…')
+          : ('Click point ' + (pending.length + 1) + ' of 3 (2nd = corner)…'));
+      }
+    }
+
+    function addDistanceMeasurement(a, b) {
+      const parts = [lineSeg([a.p, b.p], 0x89dceb), markerMesh(a.p, 0x89dceb), markerMesh(b.p, 0x89dceb)];
+      for (const o of parts) overlay.add(o);
+      const dist = distance3(a.deck, b.deck), d = deltas(a.deck, b.deck);
+      const mid = a.p.clone().add(b.p).multiplyScalar(0.5);
+      measurements.push({
+        id: ++measSeq, type: 'distance', parts,
+        labels: [{ pos: mid, text: fmtLen(dist) + ' cm', cls: '' }],
+        listText: '<span class="mtag">Distance</span> ' + fmtLen(dist) + ' cm<br>Δx ' + fmtLen(d.dx) + ' · Δy ' + fmtLen(d.dy) + ' · Δz ' + fmtLen(d.dz) + ' cm',
+      });
+      refreshMeasList();
+    }
+
+    function addAngleMeasurement(a, vtx, b) {
+      const parts = [
+        lineSeg([a.p, vtx.p], 0xcba6f7), lineSeg([vtx.p, b.p], 0xcba6f7),
+        markerMesh(a.p, 0xcba6f7), markerMesh(vtx.p, 0xcba6f7), markerMesh(b.p, 0xcba6f7),
+      ];
+      for (const o of parts) overlay.add(o);
+      const ang = angleDeg(a.deck, vtx.deck, b.deck);
+      measurements.push({
+        id: ++measSeq, type: 'angle', parts,
+        labels: [{ pos: vtx.p.clone(), text: ang.toFixed(1) + '°', cls: '' }],
+        listText: '<span class="mtag">Angle</span> ' + ang.toFixed(1) + '°',
+      });
+      refreshMeasList();
+    }
+
+    function addRadiusMeasurement(pick) {
+      const inst = pick.inst;
+      if (inst.shape === 'box') { setMeasHint('That part is a box — radius applies to cylindrical shells.'); return; }
+      const m = new THREE.Matrix4(); groups[pick.gi].mesh.getMatrixAt(pick.id, m);
+      const center = new THREE.Vector3().setFromMatrixPosition(m);
+      center.y = pick.point.y;                          // draw the radial line at the clicked elevation
+      const dir = new THREE.Vector3(pick.point.x - center.x, 0, pick.point.z - center.z);
+      if (dir.lengthSq() < 1e-9) dir.set(1, 0, 0);
+      const edge = center.clone().add(dir.normalize().multiplyScalar(inst.r));
+      const parts = [lineSeg([center, edge], 0xa6e3a1), markerMesh(edge, 0xa6e3a1)];
+      for (const o of parts) overlay.add(o);
+      const mid = center.clone().add(edge).multiplyScalar(0.5);
+      measurements.push({
+        id: ++measSeq, type: 'radius', parts,
+        labels: [{ pos: mid, text: 'r ' + fmtLen(inst.r) + ' cm', cls: '' }],
+        listText: '<span class="mtag">Radius</span> ' + fmtLen(inst.r) + ' cm · ⌀ ' + fmtLen(diameter(inst.r)) + ' cm' + (inst.label ? '<br>' + escHtml(inst.label) : ''),
+      });
+      refreshMeasList();
+    }
+
+    function removeMeasurement(id) {
+      const i = measurements.findIndex((m) => m.id === id);
+      if (i < 0) return;
+      for (const o of measurements[i].parts) { overlay.remove(o); o.geometry.dispose(); o.material.dispose(); }
+      measurements.splice(i, 1); refreshMeasList();
+    }
+    function clearMeasurements() {
+      for (const meas of measurements) for (const o of meas.parts) { overlay.remove(o); o.geometry.dispose(); o.material.dispose(); }
+      measurements = []; clearPending(); refreshMeasList();
+    }
+
+    function refreshMeasList() {
+      const list = document.getElementById('measList'); list.innerHTML = '';
+      for (const meas of measurements) {
+        const row = document.createElement('div'); row.className = 'meas';
+        const txt = document.createElement('div'); txt.className = 'mtxt'; txt.innerHTML = meas.listText;
+        const del = document.createElement('span'); del.className = 'mdel'; del.textContent = '✕'; del.title = 'Remove';
+        del.addEventListener('click', () => removeMeasurement(meas.id));
+        row.appendChild(txt); row.appendChild(del); list.appendChild(row);
+      }
+      document.getElementById('measCount').textContent = measurements.length ? String(measurements.length) : '';
+      rebuildLabelEls();
+    }
+
+    function rebuildLabelEls() {
+      labelsBox.innerHTML = '';
+      for (const meas of measurements) {
+        for (const lb of meas.labels) {
+          const el = document.createElement('div'); el.className = 'lbl' + (lb.cls ? ' ' + lb.cls : '');
+          el.textContent = lb.text; labelsBox.appendChild(el); lb.el = el;
+        }
+      }
+      updateLabels();
+    }
+
+    function updateLabels() {
+      const w = stage.clientWidth, h = stage.clientHeight;
+      for (const meas of measurements) {
+        for (const lb of meas.labels) {
+          if (!lb.el) continue;
+          const v = lb.pos.clone().project(camera);
+          if (v.z > 1) { lb.el.style.display = 'none'; continue; }
+          lb.el.style.display = 'block';
+          lb.el.style.left = ((v.x * 0.5 + 0.5) * w) + 'px';
+          lb.el.style.top = ((-v.y * 0.5 + 0.5) * h) + 'px';
+        }
+      }
+    }
+
+    function setMeasMode(mode) {
+      measureMode = (measureMode === mode) ? null : mode;
+      clearPending();
+      for (const b of document.querySelectorAll('#measBtns button')) b.classList.toggle('active', b.getAttribute('data-mode') === measureMode);
+      if (!measureMode) setMeasHint('Pick a tool, then click on the geometry.');
+      else if (measureMode === 'distance') setMeasHint('Click two points to measure distance + Δx Δy Δz.');
+      else if (measureMode === 'angle') setMeasHint('Click three points; the 2nd is the corner.');
+      else setMeasHint('Click a pin/shell to read its radius + diameter.');
+      renderer.domElement.style.cursor = measureMode ? 'crosshair' : '';
+    }
+    document.querySelectorAll('#measBtns button').forEach((b) => b.addEventListener('click', () => setMeasMode(b.getAttribute('data-mode'))));
+    document.getElementById('measClear').addEventListener('click', clearMeasurements);
+
+    // Pointer handling: hover inspects; a click (vs. an orbit-drag) places a
+    // measurement point. We distinguish the two by total pointer travel so
+    // OrbitControls keeps working unchanged.
+    let downPos = null;
+    renderer.domElement.addEventListener('pointerdown', (e) => { downPos = { x: e.clientX, y: e.clientY }; });
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      if (e.buttons !== 0) return;                       // mid-drag: let OrbitControls own it
+      if (totalInstances > 40000) return;                // huge cores: skip continuous hover
+      setHover(pickAt(e.clientX, e.clientY));
+    });
+    renderer.domElement.addEventListener('pointerleave', () => setHover(null));
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      if (!downPos) return;
+      const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
+      downPos = null;
+      if (e.button !== 0 || moved > 4) return;           // right/middle or a drag → orbit, not a click
+      if (!measureMode) return;
+      const pick = pickAt(e.clientX, e.clientY);
+      if (!pick) { setMeasHint('No geometry under the cursor — click on a surface.'); return; }
+      handleMeasureClick(pick);
+    });
+
     window.addEventListener('resize', () => {
       camera.aspect = stage.clientWidth / stage.clientHeight; camera.updateProjectionMatrix();
       renderer.setSize(stage.clientWidth, stage.clientHeight);
     });
-    function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
+    function animate() { requestAnimationFrame(animate); controls.update(); updateLabels(); renderer.render(scene, camera); }
     animate();
 
     window.addEventListener('message', (event) => {

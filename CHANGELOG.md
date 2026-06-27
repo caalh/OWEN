@@ -5,6 +5,28 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] — 2026-06-27
+
+Precise layer inspection and interactive measurement tools in the 3D geometry preview.
+
+### Added
+
+- **Hover-to-inspect readout.** Move the cursor over any part of the 3D preview to see exactly
+  what you're looking at — the layer/component name, material, axial layer index, radius and
+  diameter (inner radius for annular shells), height, and z-range — with the hovered part outlined
+  in the view. Answers "which layer / shell am I looking at?" precisely, beyond the on/off toggles.
+- **Solo (isolate) a layer.** Every Components / Materials / Axial-layer row now has a **solo**
+  button that hides everything else so you can focus on a single shell, material, or axial level.
+  Click solo again on the isolated item to restore the full view.
+- **Measurement tools.** A new **Measure** panel with three interactive tools whose results are
+  drawn in the scene (lines + labels) and listed in the panel (clear individually or all at once):
+  - **Distance / width** — click two points on the geometry to read the straight-line distance plus
+    the axis-aligned **Δx, Δy, Δz** components, so you can read pin pitches, gaps and widths.
+  - **Angle** — click three points (the 2nd is the corner) to read the included angle in degrees.
+  - **Radius / diameter** — click a pin or cylindrical shell to read its exact radius and diameter.
+
+  Orbit/zoom/pan are unchanged — a click measures, a drag still rotates the view.
+
 ## [0.2.4] — 2026-06-26
 
 Lattice Builder enhancements: editable identifiers and a SCONE generator.
