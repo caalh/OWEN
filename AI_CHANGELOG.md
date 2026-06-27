@@ -12,6 +12,85 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-27 — v0.2.7 — 3D preview: expand the full BEAVRS decks (OpenMC programmatic core)
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.6` → `0.2.7` in `package.json` / `package-lock.json`. Makes the 3D preview
+expand and render the now-complex, axially+radially-complete BEAVRS decks across all four codes.
+No geometry IR change; 95 prior tests untouched, 98 total (3 new). OWEN never executes Python.
+
+### Root cause (per code)
+
+- **OpenMC — single representative pin.** The BEAVRS OpenMC deck builds its lattices
+  programmatically, so neither the literal-nested-list finder nor the NumPy `np.full` finder could
+  read a grid:
+  - Assemblies come from a comprehension `lat.universes = [[pick.get(ch, F) for ch in row] for row
+    in template]` — not a literal list. The old `parseRows` produced junk (`["pick.get(ch", "F) for
+    ch in row"]`).
+  - The core lattice is a literal nested list, but its entries are Python *references*
+    (`ASM_U["A31"]`, `BAF["sq_br"]`, `W`). Each row contains `[` from the dict subscripts, which the
+    old row parser rejected outright.
+  Result: `grid` was null → single-pin fallback + *"universe map could not be expanded"*.
+- **MCNP — already correct.** Investigated the reported "expands ZERO cylinders": on current `main`
+  the MCNP parser already resolves the full chain (radial pin `cz` → pz-bounded axial **column**
+  universe → 17×17 assembly `lat=1` → core `lat=1`, `fill=-8:8 -8:8 0:0`) and skips the
+  general-plane / `#`-complement baffle/RPV cells without aborting. Measured **55,777 pins** (193 ×
+  289) at distinct positions on the current deck. The original report predates the v0.2.x
+  column-universe + lenient-continuation work now on `main`. Locked in with a new four-level test.
+
+### Fix (OpenMC)
+
+New static resolver in `codes/openmc.ts` (no Python execution): builds a small symbol table —
+dict literals, list literals (incl. multi-line char templates), simple `name = …` assignments,
+`RectLattice` vars + their `.universes`, and assembly-builder `def`s — then resolves the core
+lattice into a tree of nested lattices / pin roles:
+
+- `parseComprehension` + `buildGridFromTemplate` expand `[[pick.get(ch, F) for ch in row] for row
+  in template]` to a 2D grid by mapping each template char through `pick` (char → universe-expr)
+  with the `F` default; `classifyKey`/`keyOf` turn `COL["gt"]`/`"f31"` into fuel/guide/instrument
+  roles.
+- `resolveExpr` follows dict subscripts (`ASM_U["A31"]`), variables (`asm_a31_u`), and
+  assembly-builder calls (`_assembly("asm_a31","f31",ASM_TEMPLATES["A31"])`); unmodelled calls
+  (`_baffle(...)`) and water universes resolve to `skip` (rendered as nothing, like a baffle).
+- `resolveCoreTree` picks the bracketed-`.universes` RectLattice with the most pins as the root
+  (a core of assemblies outweighs any single assembly), so the per-call inner `lat` (which
+  references unresolvable params → 0 pins) self-eliminates.
+- Only attempted on the existing single-pin fallback path, so the literal / nested-literal /
+  NumPy single-assembly paths (and their tests) are untouched.
+- Also fixed nested placement: a sub-lattice's absolute `lower_left` is now offset by the parent
+  cell centre `(cx, cy)` in both `placeTree` and `placeGrid` (previously every assembly stacked on
+  the origin → `distinctXY` collapsed to 289).
+
+### Before → after (BEAVRS, `detail: layers`, default ceiling)
+
+| Code    | before pins | after pins | distinct positions | assemblies |
+|---------|------------:|-----------:|-------------------:|-----------:|
+| MCNP    | 55,777      | 55,777     | 55,777             | 193 (16 lat) |
+| OpenMC  | **1**       | **55,777** | **55,777**         | **193**    |
+| Serpent | 55,777      | 55,777     | 55,777             | 193        |
+| SCONE   | 55,777      | 55,777     | 55,777             | 193        |
+
+OpenMC components after: fuel 52,204 / clad 52,204 / guide_tube 3,380 / instrument_tube 193 /
+moderator 3,573 (Pyrex BA rods render as pins via the fuel template — a documented approximation;
+their `absorber` material tag is not reconstructed for OpenMC).
+
+### Caveats
+
+- OpenMC axial recovery is unchanged (best-effort): the BEAVRS columns use `ZP[z]` (subscript) +
+  `R[key]` fills, which `findAxialBands` (name-based `ZPlane`/`Cell` scan) does not pick up, so
+  OpenMC renders full-height pins. MCNP/Serpent/SCONE still expand their pz/ZPlane axial stacks.
+- Needs a human eye in the live webview: actual on-screen rendering, hover-inspect, measurement
+  tools, and the layer/axial/fidelity toggles (verified only programmatically here).
+
+### Build/test
+
+`tsc --noEmit` clean; `esbuild --production` clean; `.vscodeignore` ships only `out/extension.js`
+(verified via `vsce ls`); webview-injected functions remain minification-safe (`toString()` +
+esbuild production). 98 headless tests pass. Packaged `owen-neutronics-0.2.7.vsix`.
+
+---
+
 ## 2026-06-27 — v0.2.6 — 3D preview: render a full BEAVRS core (instance budget + auto-LOD)
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

@@ -5,6 +5,38 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] — 2026-06-27
+
+Expand and render the full axially- and radially-complete BEAVRS decks across codes.
+
+### Fixed
+
+- **OpenMC: full multi-assembly cores now expand instead of collapsing to a single pin.** Decks
+  that build their lattices programmatically — the BEAVRS full-core port included — were falling
+  back to one representative pin with *"its universe map could not be expanded"*. OWEN now
+  statically resolves (without executing any Python) the two idioms these decks use:
+  the assembly comprehension `lat.universes = [[pick.get(ch, F) for ch in row] for row in template]`
+  (a literal char `template`, a `{char: universe}` `pick` dict, and a default `F`), and the core
+  lattice literal whose entries are *references* (`ASM_U["A31"]`, `BAF["sq_br"]`, `W`) to universes
+  built by an assembly-builder function. The BEAVRS OpenMC deck now renders all **193 assemblies /
+  55,777 pins** (was 1), at distinct positions, with fuel / guide-tube / instrument-tube layers.
+  Genuinely opaque runtime construction still degrades gracefully to the representative-pin fallback.
+- **OpenMC: nested sub-lattices are now offset by their parent core cell.** A sub-lattice's absolute
+  `lower_left` was applied without adding the core-cell centre, so every assembly stacked on the
+  origin; assemblies now land in their correct core positions.
+
+### Verified
+
+- **MCNP** already resolves the deep BEAVRS chain (radial pin → pz-bounded axial column universe →
+  17×17 assembly lattice → core lattice); confirmed it expands the full **55,777-pin** core and
+  added a regression test pinning the four-level resolution. **Serpent** and **SCONE** BEAVRS decks
+  are unchanged (both expand the full 193-assembly core as before).
+
+### Added
+
+- Headless unit tests: an OpenMC comprehension-expansion test (literal template + `pick` dict +
+  default), an OpenMC core-literal-of-references test, and an MCNP multi-level universe-chain test.
+
 ## [0.2.6] — 2026-06-27
 
 Render a full BEAVRS core without truncating pins.

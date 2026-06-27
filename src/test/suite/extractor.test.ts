@@ -751,6 +751,129 @@ geometry {
         assert.ok(axial.cylinders.some((c) => c.component === 'fuel'), 'expected fuel segments');
     });
 
+    // --- v0.2.7: programmatic OpenMC core (BEAVRS-style comprehension/dict) ---
+
+    test('OpenMC expands a comprehension assembly (literal template + pick dict + default)', () => {
+        // The BEAVRS idiom in miniature: a char template, a {char: universe}
+        // pick dict, and a default fuel universe `F`, combined by a nested list
+        // comprehension. OWEN must expand this statically (no Python execution).
+        const deck = [
+            'import openmc',
+            'fuel_pin = openmc.Universe()',
+            'guide_tube = openmc.Universe()',
+            'instr_tube = openmc.Universe()',
+            'template = [',
+            '    "FGF",',
+            '    "GIG",',
+            '    "FGF",',
+            ']',
+            'pick = {"G": guide_tube, "I": instr_tube}',
+            'F = fuel_pin',
+            'asm = openmc.RectLattice()',
+            'asm.pitch = (1.26, 1.26)',
+            'asm.universes = [[pick.get(ch, F) for ch in row] for row in template]',
+        ].join('\n');
+        const scene = buildScene(deck, 'openmc', { detail: 'disc' });
+        assert.strictEqual(scene.fidelity.totalPins, 9, `expected a 3x3 = 9-pin assembly, got ${scene.fidelity.totalPins}`);
+        assert.strictEqual(distinctX(scene.cylinders), 3, `expected 3 columns, got ${distinctX(scene.cylinders)}`);
+        assert.ok(scene.cylinders.some((c) => c.component === 'guide_tube'), 'expected guide tubes from the pick dict');
+        assert.ok(scene.cylinders.some((c) => c.component === 'instrument_tube'), 'expected an instrument tube (I)');
+    });
+
+    test('OpenMC resolves a core literal of assembly references (dict + function calls)', () => {
+        // Core lattice whose entries are Python references — `ASM_U["A"]`,
+        // `W` — to universes built by an assembly-builder function. The literal
+        // / NumPy finders cannot read this (rows contain `[` from subscripts);
+        // the programmatic resolver must walk dict → var → _assembly() → grid.
+        const deck = [
+            'import openmc',
+            'fuel_pin = openmc.Universe()',
+            'guide_tube = openmc.Universe()',
+            'COL = {"f": fuel_pin, "gt": guide_tube}',
+            'ASM_TEMPLATES = {',
+            '    "A": [',
+            '        "FGF",',
+            '        "GFG",',
+            '        "FGF",',
+            '    ],',
+            '}',
+            'def _assembly(name, fuel_key, template):',
+            '    F = COL[fuel_key]',
+            '    pick = {"G": COL["gt"]}',
+            '    lat = openmc.RectLattice(name=name)',
+            '    lat.lower_left = (-1.89, -1.89)',
+            '    lat.pitch = (1.26, 1.26)',
+            '    lat.universes = [[pick.get(ch, F) for ch in row] for row in template]',
+            '    return openmc.Universe(name=name, cells=[openmc.Cell(fill=lat)])',
+            'u_water = openmc.Universe(name="w")',
+            'asm_a = _assembly("asm_a", "f", ASM_TEMPLATES["A"])',
+            'ASM_U = {"A": asm_a}',
+            'W = u_water',
+            'core_lat = openmc.RectLattice()',
+            'core_lat.lower_left = (-1.89, -1.89)',
+            'core_lat.pitch = (3.78, 3.78)',
+            'core_lat.universes = [',
+            '    [ASM_U["A"], W],',
+            '    [W, ASM_U["A"]],',
+            ']',
+        ].join('\n');
+        const scene = buildScene(deck, 'openmc', { detail: 'disc' });
+        // 2 placed assemblies × 9 pins = 18 (the 2 water positions render nothing).
+        assert.strictEqual(scene.fidelity.totalPins, 18, `expected 2 assemblies × 9 pins = 18, got ${scene.fidelity.totalPins}`);
+        assert.ok(distinctX(scene.cylinders) >= 6, `expected ≥6 distinct columns across 2 offset assemblies, got ${distinctX(scene.cylinders)}`);
+        assert.ok(scene.cylinders.some((c) => c.component === 'guide_tube'), 'expected guide tubes inside the assemblies');
+        assert.ok(/programmatic/i.test(scene.notes.join(' ')), 'expected a programmatic-core expansion note');
+        assert.strictEqual(scene.warnings.length, 0, `expected no fallback warning, got: ${scene.warnings.join(' | ')}`);
+    });
+
+    // --- v0.2.7: MCNP multi-level universe chain (radial → axial column → assembly → core) ---
+
+    test('MCNP resolves radial-pin → pz-column → assembly-lattice → core-lattice', () => {
+        // Mirrors the BEAVRS structure: a radial pin universe (cz cylinders), a
+        // per-pin axial COLUMN universe (cells bounded by pz, single-filled with
+        // the radial pin), a 2x2 assembly lattice of columns, and a 2x2 core
+        // lattice of assemblies. All four levels must resolve to placed pins.
+        const deck = [
+            'c MCNP 4-level: pin -> column -> assembly -> core',
+            '1 1 -10.4 -1    u=1 imp:n=1   $ fuel pellet',
+            '2 3 -6.5   1 -2 u=1 imp:n=1   $ clad',
+            '3 4 -1.0   2    u=1 imp:n=1   $ water',
+            'c --- axial column universe u=5 (pz-bounded, filled with pin u=1) ---',
+            '10 0 100 -101 fill=1 u=5 imp:n=1   $ lower',
+            '11 0 101 -102 fill=1 u=5 imp:n=1   $ active fuel',
+            '12 0 102 -103 fill=1 u=5 imp:n=1   $ upper',
+            'c --- assembly lattice u=20 (2x2 of column u=5) ---',
+            '20 0 50 -51 52 -53 lat=1 u=20 imp:n=1',
+            '     fill=0:1 0:1 0:0',
+            '     5 5 5 5',
+            'c --- core lattice u=100 (2x2 of assembly u=20) ---',
+            '30 0 70 -71 72 -73 lat=1 u=100 imp:n=1',
+            '     fill=0:1 0:1 0:0',
+            '     20 20 20 20',
+            '40 0 -60 fill=100 imp:n=1',
+            '41 0  60 imp:n=0',
+            '',
+            '1 cz 0.40',
+            '2 cz 0.46',
+            '50 px -0.63', '51 px 0.63', '52 py -0.63', '53 py 0.63',
+            '70 px -1.26', '71 px 1.26', '72 py -1.26', '73 py 1.26',
+            '100 pz 0', '101 pz 5', '102 pz 45', '103 pz 55',
+            '60 rpp -5 5 -5 5 0 55',
+            '',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+            'm3 40090.80c 1.0',
+            'm4 1001.80c 2.0 8016.80c 1.0',
+            'mode n',
+        ].join('\n');
+        const scene = buildScene(deck, 'mcnp', { detail: 'disc', axial: false });
+        // 2x2 core × 2x2 assembly = 16 pin positions.
+        assert.strictEqual(scene.fidelity.totalPins, 16, `expected 16 pins across the 4-level chain, got ${scene.fidelity.totalPins}`);
+        assert.strictEqual(distinctX(scene.cylinders), 4, `expected 4 distinct columns, got ${distinctX(scene.cylinders)}`);
+        assert.strictEqual(scene.warnings.length, 0, `expected no fallback warning, got: ${scene.warnings.join(' | ')}`);
+        assert.ok(scene.fidelity.hasAxial, 'expected the pz-bounded column to be detected as axial structure');
+        assert.ok(scene.cylinders.some((c) => c.component === 'fuel'), 'expected fuel pins');
+    });
+
     test('builds a component legend in buildScene', () => {
         const deck = `
 geometry { universes {

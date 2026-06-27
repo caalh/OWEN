@@ -79,7 +79,13 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
 
     const grid = nested ? nested.grid : (findLatticeGrid(text) ?? buildNumpyGrid(text));
 
-    if (!grid || grid.length === 0) {
+    // When the literal / NumPy finders see nothing, try the programmatic-core
+    // resolver (comprehension-built assemblies + a core literal of universe
+    // references). Only attempted on the fallback path, so the simpler
+    // single-assembly / nested-literal cases keep their existing behaviour.
+    const coreTree = (!grid || grid.length === 0) ? resolveCoreTree(text) : null;
+
+    if ((!grid || grid.length === 0) && !coreTree) {
         const single = fuelTemplate ?? defaultTemplate('fuel');
         const cyls = emitLayers(single.radii, single.components, 0, 0, 0, height, 'pin', undefined, single.materials);
         if (hasLattice) {
@@ -92,7 +98,7 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     }
 
     // Count placed pins to pick fidelity.
-    const totalPins = countOpenmcPins(grid, latByName, universeMap);
+    const totalPins = coreTree ? countTreePins(coreTree) : countOpenmcPins(grid!, latByName, universeMap);
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
 
     // Axial structure from stacked ZPlane-bounded cells (active fuel / plenum /
@@ -129,7 +135,7 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         }
     };
 
-    const subPitch = nested ? smallestPitch(named) : Math.min(pitch[0], pitch[1]);
+    const subPitch = coreTree ? treeSmallestPitch(coreTree) : (nested ? smallestPitch(named) : Math.min(pitch[0], pitch[1]));
 
     const placePinAt = (template: PinTemplate, x: number, y: number, z: number, h: number, label: string, fuelMat?: string | null): void => {
         if (cylinders.length >= maxInstances) { capped = true; return; }
@@ -181,8 +187,8 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         let x0: number;
         let y0: number;
         if (lat.lowerLeft) {
-            x0 = lat.lowerLeft[0] + px / 2;
-            y0 = lat.lowerLeft[1] + (rows - 1) * py + py / 2;
+            x0 = cx + lat.lowerLeft[0] + px / 2;
+            y0 = cy + lat.lowerLeft[1] + (rows - 1) * py + py / 2;
         } else {
             x0 = cx - (cols - 1) * px / 2;
             y0 = cy + (rows - 1) * py / 2;
@@ -199,13 +205,61 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         }
     };
 
-    if (nested) {
+    // Walks the resolved programmatic-core tree (lattices of lattices of pins),
+    // placing each pin by its classified role. Mirrors `placeGrid` but consumes
+    // pre-resolved `ResolvedNode`s instead of token strings + a name map.
+    const placeTree = (node: ResolvedNode, cx: number, cy: number, label: string, depth: number): void => {
+        if (depth > 10 || cylinders.length >= maxInstances) return;
+        if (node.kind === 'skip') return;
+        if (node.kind === 'pin') {
+            const template = templateFor(roleToken(node.role));
+            if (!template || !template.render) return;
+            if (axialOn) {
+                for (let i = 0; i < axialBands.length; i++) {
+                    const b = axialBands[i];
+                    const fuelMat = b.fill ? bandFuelName(b.fill, text) : null;
+                    placePinAt(template, cx, cy, (b.zmin + b.zmax) / 2, Math.max(0.01, b.zmax - b.zmin), `${label}_z${i}`, fuelMat);
+                }
+            } else {
+                placePinAt(template, cx, cy, 0, height, label);
+            }
+            return;
+        }
+        const g = node.grid;
+        const rows = g.length;
+        const cols = g.reduce((m, r) => Math.max(m, r.length), 0);
+        const px = node.pitch[0];
+        const py = node.pitch[1];
+        let x0: number;
+        let y0: number;
+        if (node.lowerLeft) {
+            // `lower_left` is in the lattice's own local frame; offset by the
+            // parent cell centre (cx, cy) so nested assemblies land in their
+            // core position instead of all stacking on the origin.
+            x0 = cx + node.lowerLeft[0] + px / 2;
+            y0 = cy + node.lowerLeft[1] + (rows - 1) * py + py / 2;
+        } else {
+            x0 = cx - (cols - 1) * px / 2;
+            y0 = cy + (rows - 1) * py / 2;
+        }
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < g[r].length; c++) {
+                placeTree(g[r][c], x0 + c * px, y0 - r * py, `${label}_r${r}c${c}`, depth + 1);
+            }
+        }
+    };
+
+    if (coreTree) {
+        placeTree(coreTree, 0, 0, 'core', 0);
+        const asmCount = countTreeLattices(coreTree);
+        notes.push(`Expanded a programmatic OpenMC core (${asmCount} assembly lattice(s), ${totalPins.toLocaleString()} pins) by statically resolving the comprehension/dict-built universe map.`);
+    } else if (nested) {
         placeGrid(nested, 0, 0, 'core', 0);
         notes.push(`Expanded a nested OpenMC core (${nested.grid.length}×${nested.grid[0]?.length ?? 0} of ${named.length - 1} assembly lattice(s)).`);
     } else {
-        placeGrid({ grid, pitch, lowerLeft }, 0, 0, 'asm', 0);
-        const rows = grid.length;
-        const cols = grid.reduce((m, r) => Math.max(m, r.length), 0);
+        placeGrid({ grid: grid!, pitch, lowerLeft }, 0, 0, 'asm', 0);
+        const rows = grid!.length;
+        const cols = grid!.reduce((m, r) => Math.max(m, r.length), 0);
         notes.push(`Expanded a ${rows}×${cols} lattice (${cylinders.length} ${discMode ? 'pins' : 'pin layers'}).`);
     }
 
@@ -665,4 +719,555 @@ function buildNumpyGrid(text: string, arrName?: string): string[][] | null {
 
 function escapeRe(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ---------------------------------------------------------------------------
+// Programmatic-core resolver
+// ---------------------------------------------------------------------------
+//
+// Community decks (the BEAVRS full-core port included) build their lattices
+// without a single literal grid OWEN can read off the page:
+//
+//   * Assemblies come from a comprehension over a literal char template:
+//       lat.universes = [[pick.get(ch, F) for ch in row] for row in template]
+//     where `template` is a list of 17 strings, `pick` is a {char: universe}
+//     dict, and `F` is the default (fuel) universe.
+//   * The core lattice is a literal nested list whose *entries are Python
+//     references* — `ASM_U["A31"]`, `BAF["sq_br"]`, `W` — not string tokens.
+//
+// The literal / NumPy grid finders above see neither (the comprehension is not
+// a literal, and the core rows contain `[` from the dict subscripts, which the
+// row parser rejects), so the deck collapsed to a single representative pin.
+//
+// This resolver builds a small symbol table (dict literals, simple `name = …`
+// assignments, RectLattice variables, and the assembly-builder function) and
+// statically resolves the core lattice into a tree of nested lattices and pin
+// roles — WITHOUT executing any Python. Anything it cannot resolve degrades to
+// a `skip` node (rendered as nothing, like a water/baffle position) so an
+// opaque entry never aborts the whole expansion.
+
+type ResolvedRole = 'fuel' | 'guide' | 'instrument' | 'empty';
+interface ResolvedPin { kind: 'pin'; role: ResolvedRole; }
+interface ResolvedLattice {
+    kind: 'lattice';
+    grid: ResolvedNode[][];
+    pitch: [number, number];
+    lowerLeft: [number, number] | null;
+}
+interface ResolvedSkip { kind: 'skip'; }
+type ResolvedNode = ResolvedPin | ResolvedLattice | ResolvedSkip;
+
+interface AssemblyFn {
+    params: string[];
+    /** char → universe-expr (from the `pick` dict). */
+    pick: Map<string, string>;
+    /** Default universe-expr (the `F` fallback in `pick.get(ch, F)`). */
+    defaultExpr: string;
+    /** Parameter name supplying the template (list of strings). */
+    templateParam: string;
+    pitch: [number, number] | null;
+    lowerLeft: [number, number] | null;
+}
+
+interface Scope {
+    text: string;
+    dicts: Map<string, Map<string, string>>;
+    vars: Map<string, string>;
+    rectLats: Set<string>;
+    latUniverses: Map<string, string>;
+    asmFns: Map<string, AssemblyFn>;
+    memo: Map<string, ResolvedNode>;
+}
+
+/** Balanced-delimiter matcher (handles []{}() and string literals). */
+function findMatching(s: string, open: number): number {
+    const pairs: Record<string, string> = { '[': ']', '{': '}', '(': ')' };
+    const want = pairs[s[open]];
+    if (!want) return -1;
+    let depth = 0;
+    let quote = '';
+    for (let i = open; i < s.length; i++) {
+        const ch = s[i];
+        if (quote) {
+            if (ch === quote && s[i - 1] !== '\\') quote = '';
+            continue;
+        }
+        if (ch === '"' || ch === "'") { quote = ch; continue; }
+        if (ch === '[' || ch === '{' || ch === '(') depth++;
+        else if (ch === ']' || ch === '}' || ch === ')') {
+            depth--;
+            if (depth === 0) return i;
+        }
+    }
+    return -1;
+}
+
+/** Splits a body string by top-level commas (respecting brackets + quotes). */
+function splitTopLevel(body: string): string[] {
+    const out: string[] = [];
+    let depth = 0;
+    let quote = '';
+    let start = 0;
+    for (let i = 0; i < body.length; i++) {
+        const ch = body[i];
+        if (quote) {
+            if (ch === quote && body[i - 1] !== '\\') quote = '';
+            continue;
+        }
+        if (ch === '"' || ch === "'") { quote = ch; continue; }
+        if (ch === '[' || ch === '{' || ch === '(') depth++;
+        else if (ch === ']' || ch === '}' || ch === ')') depth--;
+        else if (ch === ',' && depth === 0) { out.push(body.slice(start, i)); start = i + 1; }
+    }
+    if (start < body.length) out.push(body.slice(start));
+    return out;
+}
+
+/** Parses a `[ "a", "b", … ]` string-list literal. Returns null if not pure strings. */
+function parseStringList(expr: string): string[] | null {
+    const open = expr.indexOf('[');
+    if (open < 0) return null;
+    const close = findMatching(expr, open);
+    if (close < 0) return null;
+    const parts = splitTopLevel(expr.slice(open + 1, close));
+    const out: string[] = [];
+    for (const p of parts) {
+        const t = p.trim();
+        if (!t) continue;
+        const m = t.match(/^['"]([\s\S]*)['"]$/);
+        if (!m) return null;
+        out.push(m[1]);
+    }
+    return out.length ? out : null;
+}
+
+/** Extracts the meaningful name from a universe expression for classification. */
+function keyOf(expr: string): string {
+    const t = expr.trim();
+    const sub = t.match(/^[A-Za-z_]\w*\s*\[\s*['"]([^'"]+)['"]\s*\]$/);
+    if (sub) return sub[1];
+    const str = t.match(/^['"]([^'"]+)['"]$/);
+    if (str) return str[1];
+    return t;
+}
+
+/** Maps a resolved role to a token `classifyToken`/`templateFor` understands. */
+function roleToken(role: ResolvedRole): string {
+    switch (role) {
+        case 'guide': return 'guide';
+        case 'instrument': return 'instrument';
+        case 'empty': return 'water';
+        default: return 'fuel';
+    }
+}
+
+function classifyKey(name: string): ResolvedRole {
+    const low = name.toLowerCase();
+    if (/guide/.test(low) || /^gtd?$/.test(low) || /^ssgt$/.test(low) || /(^|_)gt(g|d)?$/.test(low)) return 'guide';
+    if (/instr/.test(low) || /^itb?g?$/.test(low) || /^it$/.test(low)) return 'instrument';
+    if (/(water|^w$|mod|cool|empty|none|void)/.test(low)) return 'empty';
+    // Fuel, burnable absorber (rendered as a pin), and unknown leaf pins.
+    return 'fuel';
+}
+
+function buildScope(text: string): Scope {
+    const dicts = new Map<string, Map<string, string>>();
+    const vars = new Map<string, string>();
+    const rectLats = new Set<string>();
+    const latUniverses = new Map<string, string>();
+    const asmFns = new Map<string, AssemblyFn>();
+
+    // Dict literals: `NAME = { … }` (NAME un-dotted, at any indent).
+    const dictRe = /(^|\n)[ \t]*([A-Za-z_]\w*)\s*=\s*\{/g;
+    let dm: RegExpExecArray | null;
+    while ((dm = dictRe.exec(text)) !== null) {
+        const name = dm[2];
+        const open = text.indexOf('{', dm.index);
+        const close = findMatching(text, open);
+        if (close < 0) continue;
+        const entries = new Map<string, string>();
+        for (const part of splitTopLevel(text.slice(open + 1, close))) {
+            const colon = topLevelColon(part);
+            if (colon < 0) continue;
+            const km = part.slice(0, colon).trim().match(/^['"]([^'"]+)['"]$/);
+            if (!km) continue;
+            entries.set(km[1], part.slice(colon + 1).trim());
+        }
+        dicts.set(name, entries);
+        dictRe.lastIndex = close;
+    }
+
+    // List literals: `NAME = [ … ]` (possibly multi-line, e.g. a char template).
+    // Captured balanced so a template that spans lines resolves intact; the
+    // single-line scan below would only grab the opening `[`.
+    const listRe = /(^|\n)[ \t]*([A-Za-z_]\w*)\s*=\s*\[/g;
+    let lm: RegExpExecArray | null;
+    while ((lm = listRe.exec(text)) !== null) {
+        const name = lm[2];
+        const open = text.indexOf('[', lm.index);
+        const close = findMatching(text, open);
+        if (close < 0) continue;
+        if (!vars.has(name)) vars.set(name, text.slice(open, close + 1));
+        listRe.lastIndex = close;
+    }
+
+    // Simple single-line assignments: `name = rhs` (skip dicts, dotted targets).
+    for (const line of text.split(/\r?\n/)) {
+        const m = line.match(/^[ \t]*([A-Za-z_]\w*)\s*=\s*([^\n]+?)\s*(?:#.*)?$/);
+        if (!m) continue;
+        const name = m[1];
+        const rhs = m[2].trim();
+        if (rhs.startsWith('{')) continue; // dict (handled above / multiline)
+        if (!vars.has(name)) vars.set(name, rhs);
+        if (/^openmc\.RectLattice\s*\(/.test(rhs)) rectLats.add(name);
+    }
+
+    // RectLattice variables assigned across the whole text (incl. inside fns).
+    for (const m of text.matchAll(/([A-Za-z_]\w*)\s*=\s*openmc\.RectLattice\s*\(/g)) rectLats.add(m[1]);
+
+    // `<lat>.universes = <rhs>` (balanced when the RHS opens a bracket).
+    const uniRe = /([A-Za-z_]\w*)\s*\.\s*universes\s*=\s*/g;
+    let um: RegExpExecArray | null;
+    while ((um = uniRe.exec(text)) !== null) {
+        const name = um[1];
+        const after = text.slice(uniRe.lastIndex);
+        const trimmed = after.replace(/^[ \t]*/, '');
+        let rhs: string;
+        if (trimmed[0] === '[') {
+            const open = text.indexOf('[', uniRe.lastIndex);
+            const close = findMatching(text, open);
+            rhs = close > open ? text.slice(open, close + 1) : trimmed.split(/\n/)[0];
+        } else {
+            rhs = trimmed.split(/\n/)[0].trim();
+        }
+        if (!latUniverses.has(name)) latUniverses.set(name, rhs);
+    }
+
+    // Assembly-builder functions: a def whose body assigns a lattice's
+    // `.universes` from `[[pick.get(ch, F) for ch in row] for row in <param>]`.
+    const defRe = /(^|\n)def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/g;
+    let fm: RegExpExecArray | null;
+    while ((fm = defRe.exec(text)) !== null) {
+        const fname = fm[2];
+        const params = fm[3].split(',').map((p) => p.split(/[:=]/)[0].trim()).filter(Boolean);
+        const bodyStart = defRe.lastIndex;
+        const rest = text.slice(bodyStart);
+        const nextDef = rest.search(/\n[A-Za-z_#@]/); // first non-indented line
+        const body = nextDef >= 0 ? rest.slice(0, nextDef) : rest;
+        const comp = parseComprehension(body);
+        if (!comp) continue;
+        const pickName = comp.dict;
+        const pick = pickName && dictForBody(body, pickName) ? dictForBody(body, pickName)! : new Map<string, string>();
+        // Default expr: trace `F` back to a `F = <expr>` in the body.
+        let defaultExpr = comp.def ?? '';
+        const defm = comp.def ? body.match(new RegExp(`${escapeRe(comp.def)}\\s*=\\s*([^\\n]+)`)) : null;
+        if (defm) defaultExpr = defm[1].trim();
+        const pitch = tupleAfter(body, /\.\s*pitch\s*=\s*/);
+        const lowerLeft = tupleAfter(body, /\.\s*lower_left\s*=\s*/);
+        asmFns.set(fname, {
+            params, pick, defaultExpr, templateParam: comp.template, pitch, lowerLeft,
+        });
+    }
+
+    return { text, dicts, vars, rectLats, latUniverses, asmFns, memo: new Map() };
+}
+
+/** First top-level `:` in a dict-entry string (respects brackets/quotes). */
+function topLevelColon(s: string): number {
+    let depth = 0;
+    let quote = '';
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (quote) { if (ch === quote && s[i - 1] !== '\\') quote = ''; continue; }
+        if (ch === '"' || ch === "'") { quote = ch; continue; }
+        if (ch === '[' || ch === '{' || ch === '(') depth++;
+        else if (ch === ']' || ch === '}' || ch === ')') depth--;
+        else if (ch === ':' && depth === 0) return i;
+    }
+    return -1;
+}
+
+/** Parses a `{char: expr}` dict literal that lives inside a function body. */
+function dictForBody(body: string, name: string): Map<string, string> | null {
+    const re = new RegExp(`${escapeRe(name)}\\s*=\\s*\\{`);
+    const m = body.match(re);
+    if (!m || m.index === undefined) return null;
+    const open = body.indexOf('{', m.index);
+    const close = findMatching(body, open);
+    if (close < 0) return null;
+    const out = new Map<string, string>();
+    for (const part of splitTopLevel(body.slice(open + 1, close))) {
+        const colon = topLevelColon(part);
+        if (colon < 0) continue;
+        const km = part.slice(0, colon).trim().match(/^['"]([^'"]+)['"]$/);
+        if (!km) continue;
+        out.set(km[1], part.slice(colon + 1).trim());
+    }
+    return out;
+}
+
+/** Extracts a `(a, b)` numeric tuple following a matched key (e.g. `.pitch = `). */
+function tupleAfter(text: string, keyRe: RegExp): [number, number] | null {
+    const m = text.match(keyRe);
+    if (!m || m.index === undefined) return null;
+    const after = text.slice(m.index + m[0].length);
+    const tm = after.match(/^\(?\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*,\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/);
+    if (!tm) return null;
+    return [Number(tm[1]), Number(tm[2])];
+}
+
+interface Comprehension { cell: string; dict: string | null; def: string | null; template: string; }
+
+/**
+ * Parses `[[ <cell> for <ch> in <row> ] for <row> in <template> ]`, returning
+ * the per-cell expression, the dict it indexes (`pick`), the default fallback
+ * (`F`), and the template expression. Returns null when the RHS is not this
+ * 2-level comprehension shape.
+ */
+function parseComprehension(rhs: string): Comprehension | null {
+    const m = rhs.match(/\[\s*\[\s*([\s\S]+?)\s+for\s+(\w+)\s+in\s+(\w+)\s*\]\s+for\s+(\w+)\s+in\s+([\s\S]+?)\s*\]/);
+    if (!m) return null;
+    const cell = m[1].trim();
+    const chVar = m[2];
+    const template = m[5].trim();
+    // `pick.get(ch, F)` or `pick[ch]` or `pick.get(ch)`.
+    let dict: string | null = null;
+    let def: string | null = null;
+    const getM = cell.match(/^([A-Za-z_]\w*)\s*\.\s*get\s*\(\s*(\w+)\s*(?:,\s*([\s\S]+?)\s*)?\)$/);
+    const subM = cell.match(/^([A-Za-z_]\w*)\s*\[\s*(\w+)\s*\]$/);
+    if (getM && getM[2] === chVar) { dict = getM[1]; def = getM[3] ? getM[3].trim() : null; }
+    else if (subM && subM[2] === chVar) { dict = subM[1]; }
+    else return null;
+    return { cell, dict, def, template };
+}
+
+/** Resolves an expression to a list-of-strings template, if possible. */
+function resolveTemplate(expr: string, scope: Scope): string[] | null {
+    const t = expr.trim();
+    if (t.startsWith('[')) return parseStringList(t);
+    const sub = t.match(/^([A-Za-z_]\w*)\s*\[\s*['"]([^'"]+)['"]\s*\]$/);
+    if (sub) {
+        const d = scope.dicts.get(sub[1]);
+        if (d && d.has(sub[2])) return resolveTemplate(d.get(sub[2])!, scope);
+        return null;
+    }
+    if (/^[A-Za-z_]\w*$/.test(t) && scope.vars.has(t)) return resolveTemplate(scope.vars.get(t)!, scope);
+    return null;
+}
+
+/**
+ * Builds a lattice node by mapping each character of a string template through
+ * a `pick` dict (char → universe-expr) with an `F` default, classifying each
+ * resulting universe-expr into a pin role.
+ */
+function buildGridFromTemplate(
+    rows: string[],
+    pick: Map<string, string>,
+    defExpr: string,
+    pitch: [number, number],
+    lowerLeft: [number, number] | null,
+): ResolvedLattice {
+    const grid: ResolvedNode[][] = [];
+    for (const row of rows) {
+        const out: ResolvedNode[] = [];
+        for (const ch of row) {
+            const cellExpr = pick.has(ch) ? pick.get(ch)! : defExpr;
+            out.push({ kind: 'pin', role: classifyKey(keyOf(cellExpr)) });
+        }
+        grid.push(out);
+    }
+    return { kind: 'lattice', grid, pitch, lowerLeft };
+}
+
+/** Builds a lattice node for a comprehension-built assembly grid (`lat.universes = …`). */
+function expandComprehensionGrid(
+    rhs: string,
+    scope: Scope,
+    overrides?: { pitch?: [number, number] | null; lowerLeft?: [number, number] | null },
+): ResolvedLattice | null {
+    const comp = parseComprehension(rhs);
+    if (!comp) return null;
+    const rows = resolveTemplate(comp.template, scope);
+    if (!rows || rows.length === 0) return null;
+    const pick = (comp.dict && scope.dicts.has(comp.dict)) ? scope.dicts.get(comp.dict)! : new Map<string, string>();
+    return buildGridFromTemplate(
+        rows, pick, comp.def ?? '',
+        overrides?.pitch ?? findNamedPitch(scope.text, 'lat') ?? [1.26, 1.26],
+        overrides?.lowerLeft ?? null,
+    );
+}
+
+/** Resolves a `_assembly(name, fuel_key, template)`-style call into a lattice. */
+function resolveAssemblyCall(fname: string, args: string[], scope: Scope): ResolvedNode | null {
+    const fn = scope.asmFns.get(fname);
+    if (!fn) return null;
+    const bind = new Map<string, string>();
+    fn.params.forEach((p, i) => { if (i < args.length) bind.set(p, args[i].trim()); });
+
+    // Default universe expr: substitute any param reference (e.g. F = COL[fuel_key]).
+    let defExpr = fn.defaultExpr;
+    for (const [p, v] of bind) defExpr = defExpr.replace(new RegExp(`\\b${escapeRe(p)}\\b`, 'g'), v);
+    // Template expr param → its bound argument, then resolve to its string rows.
+    const templateExpr = bind.get(fn.templateParam) ?? fn.templateParam;
+    const rows = resolveTemplate(templateExpr, scope);
+    if (!rows || rows.length === 0) return null;
+
+    return buildGridFromTemplate(rows, fn.pick, defExpr, fn.pitch ?? [1.26, 1.26], fn.lowerLeft);
+}
+
+/** Resolves an arbitrary universe expression into a render tree node. */
+function resolveExpr(expr: string, scope: Scope, depth: number): ResolvedNode {
+    const t = expr.trim();
+    if (depth > 12 || !t) return { kind: 'skip' };
+    const memoHit = scope.memo.get(t);
+    if (memoHit) return memoHit;
+    scope.memo.set(t, { kind: 'skip' }); // cycle guard
+
+    let result: ResolvedNode = { kind: 'skip' };
+
+    // Dict subscript: D["key"].
+    const sub = t.match(/^([A-Za-z_]\w*)\s*\[\s*['"]([^'"]+)['"]\s*\]$/);
+    if (sub && scope.dicts.has(sub[1])) {
+        const d = scope.dicts.get(sub[1])!;
+        if (d.has(sub[2])) result = resolveExpr(d.get(sub[2])!, scope, depth + 1);
+    } else {
+        // Function call: name(args).
+        const call = t.match(/^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/);
+        if (call && scope.asmFns.has(call[1])) {
+            result = resolveAssemblyCall(call[1], splitTopLevel(call[2]), scope) ?? { kind: 'skip' };
+        } else if (/^[A-Za-z_]\w*$/.test(t)) {
+            // Bare identifier: a RectLattice, another variable, or a leaf pin.
+            if (scope.rectLats.has(t) && scope.latUniverses.has(t)) {
+                result = resolveLatticeVar(t, scope, depth);
+            } else if (scope.vars.has(t) && scope.vars.get(t) !== t) {
+                const rhs = scope.vars.get(t)!;
+                if (/^openmc\.(Universe|Material)\s*\(/.test(rhs) || /^openmc\./.test(rhs)) {
+                    result = { kind: 'pin', role: classifyKey(t) };
+                    if (result.role === 'empty') result = { kind: 'skip' };
+                } else {
+                    result = resolveExpr(rhs, scope, depth + 1);
+                }
+            } else {
+                const role = classifyKey(t);
+                result = role === 'empty' ? { kind: 'skip' } : { kind: 'pin', role };
+            }
+        }
+        // A call we don't model (e.g. _baffle(...)) stays a skip.
+    }
+
+    scope.memo.set(t, result);
+    return result;
+}
+
+/** Resolves a named RectLattice (via its `.universes` RHS) into a lattice node. */
+function resolveLatticeVar(name: string, scope: Scope, depth: number): ResolvedNode {
+    const rhs = scope.latUniverses.get(name);
+    if (!rhs) return { kind: 'skip' };
+    const pitch = findNamedPitch(scope.text, name) ?? [1.26, 1.26];
+    const lowerLeft = findNamedLowerLeft(scope.text, name);
+
+    // Comprehension-built grid.
+    if (/\bfor\b/.test(rhs) && rhs.trim().startsWith('[')) {
+        const lat = expandComprehensionGrid(rhs, scope, { pitch, lowerLeft });
+        if (lat) return lat;
+    }
+    // Literal nested list of references.
+    if (rhs.trim().startsWith('[')) {
+        const rows = parseRefRows(rhs);
+        if (rows) {
+            const grid = rows.map((row) => row.map((tok) => resolveExpr(tok, scope, depth + 1)));
+            return { kind: 'lattice', grid, pitch, lowerLeft };
+        }
+    }
+    // `.tolist()` / variable → NumPy-built grid (reuse the existing finder).
+    const arr = rhs.match(/^([A-Za-z_]\w*)/);
+    if (arr) {
+        const np = buildNumpyGrid(scope.text, arr[1]);
+        if (np) {
+            const grid = np.map((row) => row.map((tok) => resolveExpr(tok, scope, depth + 1)));
+            return { kind: 'lattice', grid, pitch, lowerLeft };
+        }
+    }
+    return { kind: 'skip' };
+}
+
+/** Parses a literal `[[a, b], [c, d]]` grid into rows of expression tokens. */
+function parseRefRows(listExpr: string): string[][] | null {
+    const open = listExpr.indexOf('[');
+    if (open < 0) return null;
+    const close = findMatching(listExpr, open);
+    if (close < 0) return null;
+    const rows: string[][] = [];
+    for (const part of splitTopLevel(listExpr.slice(open + 1, close))) {
+        const p = part.trim();
+        if (!p.startsWith('[')) continue;
+        const rc = findMatching(p, 0);
+        if (rc < 0) continue;
+        const toks = splitTopLevel(p.slice(1, rc)).map((s) => s.trim()).filter((s) => s.length > 0);
+        if (toks.length) rows.push(toks);
+    }
+    return rows.length ? rows : null;
+}
+
+/**
+ * Top-level entry: resolves the deck's core lattice into a render tree, or null
+ * when no programmatic core could be recovered (so the caller can fall back).
+ */
+function resolveCoreTree(text: string): ResolvedLattice | null {
+    const scope = buildScope(text);
+
+    // Root candidates: any RectLattice variable with a bracketed `.universes`
+    // (a literal core nested list, or a standalone comprehension-built
+    // assembly). Per-call assembly lattices built inside a function reference
+    // unresolvable parameters and resolve to 0 pins, so they self-eliminate.
+    const candidates: string[] = [];
+    for (const name of scope.rectLats) {
+        const rhs = scope.latUniverses.get(name);
+        if (!rhs) continue;
+        if (rhs.trim().startsWith('[')) candidates.push(name);
+    }
+    if (candidates.length === 0) return null;
+
+    // Resolve every candidate; the root is the one with the largest pin count
+    // (a core of assemblies outweighs any single assembly resolved on its own).
+    const resolved = new Map<string, ResolvedLattice>();
+    for (const name of candidates) {
+        const node = resolveLatticeVar(name, scope, 0);
+        if (node.kind === 'lattice') resolved.set(name, node);
+    }
+    if (resolved.size === 0) return null;
+
+    let best: ResolvedLattice | null = null;
+    let bestPins = 0;
+    for (const node of resolved.values()) {
+        const pins = countTreePins(node);
+        if (pins > bestPins) { bestPins = pins; best = node; }
+    }
+    return bestPins > 1 ? best : null;
+}
+
+function countTreePins(node: ResolvedNode): number {
+    if (node.kind === 'pin') return 1;
+    if (node.kind === 'skip') return 0;
+    let total = 0;
+    for (const row of node.grid) for (const cell of row) total += countTreePins(cell);
+    return total;
+}
+
+function countTreeLattices(node: ResolvedNode, depth = 0): number {
+    if (node.kind !== 'lattice') return 0;
+    let total = depth > 0 ? 1 : 0;
+    for (const row of node.grid) for (const cell of row) total += countTreeLattices(cell, depth + 1);
+    return total;
+}
+
+function treeSmallestPitch(node: ResolvedNode): number {
+    let p = Infinity;
+    const walk = (n: ResolvedNode): void => {
+        if (n.kind !== 'lattice') return;
+        p = Math.min(p, n.pitch[0], n.pitch[1]);
+        for (const row of n.grid) for (const cell of row) walk(cell);
+    };
+    walk(node);
+    return isFinite(p) && p > 0 ? p : 1.26;
 }
