@@ -780,6 +780,55 @@ geometry {
         assert.ok(scene.cylinders.some((c) => c.component === 'instrument_tube'), 'expected an instrument tube (I)');
     });
 
+    test('OpenMC recovers axial bands from a ZP[z] dict + (zb,zt,key) stack table', () => {
+        // BEAVRS OpenMC axial idiom: z-planes live in a `ZP[z]` dict and columns
+        // are built from `(z_bottom, z_top, key)` stack tables referenced as
+        // `region=+ZP[zb] & -ZP[zt]`. The name-based ZPlane scan can't see this
+        // (the dict subscript is not a simple identifier), so OWEN must recover
+        // the band grid from the stack-table tuples — otherwise pins render
+        // full-height (the v0.2.7 residual this fixes).
+        const deck = [
+            'import openmc',
+            'fuel_pin = openmc.Universe()',
+            'guide_tube = openmc.Universe()',
+            'R = {"f": fuel_pin, "gt": guide_tube}',
+            '_zvals = sorted({0.0, 20.0, 200.0, 400.0})',
+            'ZP = {}',
+            'for z in _zvals:',
+            '    ZP[z] = openmc.ZPlane(z0=z)',
+            'def _stack(e):',
+            '    return [',
+            '        (0.0, 20.0, "w"),',
+            '        (20.0, 200.0, e),',
+            '        (200.0, 400.0, e + "g"),',
+            '    ]',
+            'STACKS = {"f": _stack("f")}',
+            'def column(name, table):',
+            '    cells = []',
+            '    for zb, zt, key in table:',
+            '        c = openmc.Cell(fill=R[key], region=+ZP[zb] & -ZP[zt])',
+            '        cells.append(c)',
+            '    return openmc.Universe(name=name, cells=cells)',
+            'COL = {k: column(k, t) for k, t in STACKS.items()}',
+            'template = ["FGF", "GFG", "FGF"]',
+            'pick = {"G": guide_tube}',
+            'F = fuel_pin',
+            'asm = openmc.RectLattice()',
+            'asm.pitch = (1.26, 1.26)',
+            'asm.universes = [[pick.get(ch, F) for ch in row] for row in template]',
+        ].join('\n');
+        const collapsed = buildScene(deck, 'openmc', { detail: 'disc', axial: false });
+        assert.ok(collapsed.fidelity.hasAxial, 'expected the ZP[z]/stack-table deck to be detected as axial');
+        const zCollapsed = new Set(collapsed.cylinders.map((c) => Math.round(c.z)));
+        assert.strictEqual(zCollapsed.size, 1, 'collapsed view uses one representative axial height');
+
+        const axial = buildScene(deck, 'openmc', { detail: 'disc', axial: true });
+        assert.ok(axial.fidelity.axial, 'expected axial detail to be on');
+        const zAxial = new Set(axial.cylinders.map((c) => Math.round(c.z)));
+        assert.strictEqual(zAxial.size, 3, `expected 3 distinct axial elevations, got ${[...zAxial].join(', ')}`);
+        assert.ok(axial.cylinders.some((c) => typeof c.axialIndex === 'number' && c.axialLayer), 'cylinders are tagged with an axial layer');
+    });
+
     test('OpenMC resolves a core literal of assembly references (dict + function calls)', () => {
         // Core lattice whose entries are Python references — `ASM_U["A"]`,
         // `W` — to universes built by an assembly-builder function. The literal

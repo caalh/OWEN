@@ -5,6 +5,45 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] — 2026-06-27
+
+Bundle the complete BEAVRS full core for every code, make the MCNP reference tracker role-aware,
+and recover the OpenMC axial stack.
+
+### Added
+
+- **Complete BEAVRS full-core prebuilt models for all four codes.** `OWEN: Open Prebuilt Model…`
+  now lists a **BEAVRS Full Core** entry for **MCNP, OpenMC, Serpent, and SCONE** — the axially- and
+  radially-complete Cycle-1 core (193 assemblies, full axial pin stacks with grid spacers / plena /
+  end plugs, Pyrex burnable-poison clusters, SS304 baffle / barrel / neutron-shield pads, downcomer,
+  RPV). The SCONE deck is the author-verified source of truth; the MCNP / OpenMC / Serpent decks are
+  geometry/materials-faithful translations of it (community example decks, not benchmark-validated).
+  The earlier partial "BEAVRS Core" MCNP/Serpent fixtures are superseded by these; the 17×17 PWR
+  assembly starters are kept.
+- **Role- and position-aware occurrence highlighting in MCNP files.** Putting the cursor on a number
+  now highlights only the other occurrences of *that entity* (e.g. surface 3), instead of VS Code's
+  default behavior of lighting up every matching digit in the file.
+- **Transform (`tr`) and material-data (`mt`/`mx`) cross-references for MCNP.** The reference tracker
+  now understands coordinate-transform numbers (`trcl=`/`*trcl` on a cell, the transform field on a
+  surface card, and the `tr{n}`/`*tr{n}` definition card) and the `mt{n}`/`mx{n}` data cards (which
+  reference an existing material). They appear in hover, Go-to-Definition, Find-References, and the
+  References tree like cells / surfaces / materials / universes.
+
+### Changed
+
+- **3D preview: OpenMC now shows the axial stack.** OpenMC BEAVRS-style decks that store their
+  z-planes in a `ZP[z]` dict and build columns from `(z_bottom, z_top, key)` stack tables (which the
+  v0.2.7 name-based scan could not read) now have their axial bands recovered, so OpenMC renders the
+  layered z-stack like MCNP / Serpent / SCONE instead of full-height pins. (Per-band radial material
+  swaps — e.g. distinct grid-spacer cross-sections — are not yet reconstructed for OpenMC.)
+
+### Fixed
+
+- **MCNP reference tracker no longer confuses numbers across roles.** Resolution is keyed by entity
+  role *and* card position, so clicking surface `3` returns only references to surface 3 — never
+  material 3, cell 3, or the digit `3` inside a `fill=` index. (The core index was already role-keyed;
+  this hardens it with transform/`mt` coverage, role-aware highlighting, and disambiguation tests.)
+
 ## [0.2.7] — 2026-06-27
 
 Expand and render the full axially- and radially-complete BEAVRS decks across codes.

@@ -1,11 +1,28 @@
 // ===================================================================
-// BEAVRS PWR Benchmark - SCONE Full Core Model (Cycle 1)
+// BEAVRS Cycle 1 full-core PWR - SCONE deck (VERIFIED)
 // Westinghouse 4-loop PWR, 193 assemblies, 17x17 lattice
-// Enrichments: 1.6/2.4/3.1% UO2, 975 ppm boron, HFP 600K, CRs out
-// Reference: MIT BEAVRS Rev 2.0
+// Enrichments: 1.6/2.4/3.1% UO2, 975 ppm boron, 600 K, CRs withdrawn
+// Reference: MIT BEAVRS rev 2.0.2 (Horelik, Herman, Forget, Smith; CRPG/MIT)
 //
-// Saved as an OWEN 3D-renderer test fixture (user-provided, Jun 2026).
-// Full universe hierarchy: surfaces -> pin/cell/lat universes -> core.
+// PROVENANCE: This is the author-VERIFIED Cambridge SCONE BEAVRS full-core
+// model (parity twin of scone-examples/scone_beavrs_clean.inp and the
+// repo-root "Scone Input"), named to match the geometry/materials-derived
+// beavrs_fullcore.{i,sss,py} translations for the other three codes. Its
+// geometry + material number densities are the SOURCE OF TRUTH those
+// translations were ported from. Full universe hierarchy: surfaces ->
+// pin/cell/lat universes -> 193-assembly core -> RPV/barrel/shields.
+//
+// LIBRARY: ZAID suffix .06 = 600 K; author run used JEF-3.1.1
+// (/home/.../JEF311.aceXS). Set `aceLibrary` below to your local ACE data.
+//
+// WATER / S(a,b) FLAG: H-1 is carried on the commented `moder` line in the
+// Water material (with its BEAVRS number density 4.9456E-02). Uncomment it
+// and point `file` at an H-in-H2O thermal-scattering table that matches your
+// library before running for physics; as shipped (H-1 commented) the deck is
+// geometry/preview-faithful but water lacks hydrogen. S(a,b) belongs on WATER
+// ONLY - never on UO2.
+//
+// Full verification-grade eigenvalue runs need substantial memory + CPU.
 // ===================================================================
 type eigenPhysicsPackage;
 pop      100000;

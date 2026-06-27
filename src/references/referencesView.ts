@@ -32,10 +32,11 @@ const KIND_ICON: Record<McnpEntityKind, string> = {
     surface: 'symbol-interface',
     material: 'symbol-color',
     universe: 'symbol-class',
+    transform: 'symbol-ruler',
 };
 
 const KIND_PLURAL: Record<McnpEntityKind, string> = {
-    cell: 'Cells', surface: 'Surfaces', material: 'Materials', universe: 'Universes',
+    cell: 'Cells', surface: 'Surfaces', material: 'Materials', universe: 'Universes', transform: 'Transforms',
 };
 
 class McnpReferenceTreeProvider implements vscode.TreeDataProvider<RefNode> {
@@ -90,7 +91,7 @@ class McnpReferenceTreeProvider implements vscode.TreeDataProvider<RefNode> {
         }
 
         // --- Entity groups ---
-        for (const kind of ['universe', 'material', 'surface', 'cell'] as McnpEntityKind[]) {
+        for (const kind of ['universe', 'material', 'surface', 'cell', 'transform'] as McnpEntityKind[]) {
             const ids = uniqueIds(index, kind);
             if (!ids.length) continue;
             groups.push({

@@ -299,25 +299,75 @@ function findAxialBands(text: string): AxialBand[] {
         const zm = m[2].match(/z0\s*=\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/);
         if (zm) zplanes.set(m[1], Number(zm[1]));
     }
-    if (zplanes.size < 2) return [];
+
+    if (zplanes.size >= 2) {
+        const bands: AxialBand[] = [];
+        const cellRe = /openmc\.Cell\s*\(([^)]*)\)/g;
+        for (const m of text.matchAll(cellRe)) {
+            const args = m[1];
+            if (!/region\s*=/.test(args)) continue;
+            const zs: number[] = [];
+            for (const vm of args.matchAll(/[+\-]\s*([A-Za-z_]\w*)/g)) {
+                const z = zplanes.get(vm[1]);
+                if (z !== undefined) zs.push(z);
+            }
+            if (zs.length < 2) continue;
+            const fm = args.match(/fill\s*=\s*([A-Za-z_]\w*)/);
+            const zmin = Math.min(...zs);
+            const zmax = Math.max(...zs);
+            if (zmax > zmin) bands.push({ zmin, zmax, fill: fm ? fm[1] : null });
+        }
+        bands.sort((a, b) => a.zmin - b.zmin);
+        if (bands.length >= 2) return bands;
+    }
+
+    // Fallback for the dict-of-planes idiom: `ZP[z] = openmc.ZPlane(z0=z)` and
+    // columns built from `(z_bottom, z_top, key)` stack tables referenced as
+    // `region=+ZP[zb] & -ZP[zt], fill=R[key]`. The per-cell zb/zt are loop
+    // variables (not statically resolvable), so we recover the band grid from
+    // the stack tables themselves: the union of every (z_bottom, z_top, key)
+    // tuple's boundaries. (BEAVRS OpenMC full-core deck.)
+    if (/\bZP\s*\[/.test(text) && /region\s*=\s*[^\n,]*ZP\s*\[/.test(text)) {
+        return findAxialBandsFromStackTables(text);
+    }
+    return [];
+}
+
+/**
+ * Recovers axial bands from `(z_bottom, z_top, key)` stack tables (the BEAVRS
+ * OpenMC `STACKS` / `_fuel_stack` idiom). Harvests every such tuple, takes the
+ * union of its z-boundaries as the global band grid, and tags each band with the
+ * `key` of the finest tuple that exactly spans it (so a fuel band still names
+ * its fuel fill). All-numeric third fields (colors / coordinates) are skipped.
+ */
+function findAxialBandsFromStackTables(text: string): AxialBand[] {
+    const tupleRe = /\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*([^)]+?)\s*\)/g;
+    const intervals: { zmin: number; zmax: number; key: string }[] = [];
+    for (const m of text.matchAll(tupleRe)) {
+        const third = m[3].trim();
+        if (/^[\d.+\-eE\s]*$/.test(third)) continue; // numeric 3rd field → not a stack key
+        const zmin = Number(m[1]);
+        const zmax = Number(m[2]);
+        if (!(zmax > zmin)) continue;
+        const key = third.replace(/^['"]|['"]$/g, '');
+        intervals.push({ zmin, zmax, key });
+    }
+    if (intervals.length < 2) return [];
+
+    const bounds = [...new Set(intervals.flatMap((iv) => [iv.zmin, iv.zmax]))].sort((a, b) => a - b);
+    if (bounds.length < 3) return [];
 
     const bands: AxialBand[] = [];
-    const cellRe = /openmc\.Cell\s*\(([^)]*)\)/g;
-    for (const m of text.matchAll(cellRe)) {
-        const args = m[1];
-        if (!/region\s*=/.test(args)) continue;
-        const zs: number[] = [];
-        for (const vm of args.matchAll(/[+\-]\s*([A-Za-z_]\w*)/g)) {
-            const z = zplanes.get(vm[1]);
-            if (z !== undefined) zs.push(z);
-        }
-        if (zs.length < 2) continue;
-        const fm = args.match(/fill\s*=\s*([A-Za-z_]\w*)/);
-        const zmin = Math.min(...zs);
-        const zmax = Math.max(...zs);
-        if (zmax > zmin) bands.push({ zmin, zmax, fill: fm ? fm[1] : null });
+    for (let i = 0; i + 1 < bounds.length; i++) {
+        const zmin = bounds[i];
+        const zmax = bounds[i + 1];
+        // Prefer a fuel-bearing key that exactly spans this band, so fuel bands
+        // keep an enrichment-aware fill; otherwise the first exact match.
+        const exact = intervals.filter((iv) => iv.zmin === zmin && iv.zmax === zmax);
+        const fuelKey = exact.find((iv) => /fuel|pellet|uo2|mox|^f\d/i.test(iv.key));
+        const fill = (fuelKey ?? exact[0])?.key ?? null;
+        bands.push({ zmin, zmax, fill });
     }
-    bands.sort((a, b) => a.zmin - b.zmin);
     return bands;
 }
 

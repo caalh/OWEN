@@ -12,7 +12,7 @@
 // tested headlessly (tsc → mocha). The editor providers and tree view that wrap
 // it live in `./providers.ts` and `./referencesView.ts`.
 
-export type McnpEntityKind = 'cell' | 'surface' | 'material' | 'universe';
+export type McnpEntityKind = 'cell' | 'surface' | 'material' | 'universe' | 'transform';
 
 /** A single 0-based source position span on one line. */
 export interface SourceSpan {
@@ -130,13 +130,18 @@ function spanAt(card: Card, start: number, end: number): SourceSpan | null {
 // Card classification
 // ---------------------------------------------------------------------------
 
-type CardKind = 'cell' | 'surface' | 'material' | 'other';
+type CardKind = 'cell' | 'surface' | 'material' | 'matdata' | 'transform' | 'other';
 
 function classify(text: string): CardKind {
     const tokens = text.trim().split(/\s+/);
     if (tokens.length === 0) return 'other';
     const first = tokens[0].toLowerCase();
     if (/^m\d+$/.test(first)) return 'material';
+    // mt{n}/mx{n} data cards (S(a,b) thermal scattering, nuclide substitution)
+    // are keyed by an existing material number; they reference, not define, mN.
+    if (/^(?:mt|mx)\d+/.test(first)) return 'matdata';
+    // tr{n}/*tr{n} coordinate-transformation cards define a transform id.
+    if (/^\*?tr\d+$/.test(first)) return 'transform';
     if (/^\*?\d+$/.test(tokens[0])) {
         const t1 = (tokens[1] ?? '').toLowerCase();
         const t2 = (tokens[2] ?? '').toLowerCase();
@@ -283,6 +288,32 @@ export function buildMcnpReferenceIndex(text: string): McnpReferenceIndex {
             continue;
         }
 
+        if (kind === 'matdata') {
+            // mt{n}/mx{n}: a reference to material n, never a definition. Only the
+            // digits of the material number are the entity span (mt16 → "16").
+            const lead = (card.text.match(/^\s*(?:mt|mx)/i) ?? [''])[0].length;
+            const numMatch = card.text.slice(lead).match(/^\d+/);
+            if (numMatch) {
+                const id = parseInt(numMatch[0], 10);
+                const span = spanAt(card, lead, lead + numMatch[0].length);
+                if (span) occurrences.push({ kind: 'material', id, ...span, isDefinition: false });
+            }
+            continue;
+        }
+
+        if (kind === 'transform') {
+            const lead = (card.text.match(/^\s*\*?tr/i) ?? [''])[0].length;
+            const numMatch = card.text.slice(lead).match(/^\d+/);
+            if (numMatch) {
+                const id = parseInt(numMatch[0], 10);
+                const span = spanAt(card, lead, lead + numMatch[0].length)
+                    ?? { line: card.firstLine, startCol: 0, endCol: 1 };
+                addDef({ kind: 'transform', id, ...span, summary: 'transformation', detail: firstLine(text, span.line) });
+                occurrences.push({ kind: 'transform', id, ...span, isDefinition: true });
+            }
+            continue;
+        }
+
         if (kind === 'surface') {
             const toks = card.text.trim().split(/\s+/);
             const idTok = toks[0].replace(/^\*/, '');
@@ -297,6 +328,17 @@ export function buildMcnpReferenceIndex(text: string): McnpReferenceIndex {
             const summary = params ? `${mnemonic} ${params}`.trim() : mnemonic;
             addDef({ kind: 'surface', id, ...span, summary, detail: firstLine(text, span.line) });
             occurrences.push({ kind: 'surface', id, ...span, isDefinition: true });
+            // Optional transform number between the surface id and its mnemonic
+            // (e.g. "3 1 cz 0.5" → surface 3 uses transform 1).
+            if (idx === 2) {
+                const trTok = toks[1];
+                const trId = parseInt(trTok, 10);
+                const trStart = card.text.indexOf(trTok, idStart + toks[0].length);
+                const trSpan = spanAt(card, trStart, trStart + trTok.length);
+                if (!Number.isNaN(trId) && trSpan) {
+                    occurrences.push({ kind: 'transform', id: trId, ...trSpan, isDefinition: false });
+                }
+            }
             continue;
         }
 
@@ -353,6 +395,10 @@ export function buildMcnpReferenceIndex(text: string): McnpReferenceIndex {
         if (params.lat) lat = params.lat.value;
         if (lat !== null && u !== null) universeIsLattice.add(u);
 
+        if (params.trcl) {
+            occurrences.push({ kind: 'transform', id: params.trcl.value, ...params.trcl.span, isDefinition: false, cellContext: id });
+        }
+
         if (params.fillSingle) {
             occurrences.push({ kind: 'universe', id: params.fillSingle.value, ...params.fillSingle.span, isDefinition: false, cellContext: id });
         }
@@ -407,11 +453,22 @@ interface ParamScan {
     lat?: { value: number; span: SourceSpan };
     fillSingle?: { value: number; span: SourceSpan };
     fillArray?: { entries: { value: number; span: SourceSpan }[]; expanded: number[]; nx: number; ny: number; nz: number };
+    trcl?: { value: number; span: SourceSpan };
 }
 
 function scanParams(card: Card): ParamScan {
     const out: ParamScan = {};
     const text = card.text;
+
+    // trcl=N / *trcl=N: reference to a tr{n} card. The inline-array form
+    // (trcl=(dx dy dz …)) defines a transform in place and references nothing,
+    // so we only capture the bare-integer form (digit immediately after "=").
+    const trclMatch = /\*?trcl\s*=\s*(\d+)/i.exec(text);
+    if (trclMatch) {
+        const numStart = trclMatch.index + trclMatch[0].length - trclMatch[1].length;
+        const span = spanAt(card, numStart, numStart + trclMatch[1].length);
+        if (span) out.trcl = { value: parseInt(trclMatch[1], 10), span };
+    }
 
     // Locate u= / lat= / fill= keys and their value start offsets.
     const keyRe = /\b(u|lat|fill)\b\s*=\s*/gi;
@@ -578,7 +635,7 @@ export function getReferences(index: McnpReferenceIndex, kind: McnpEntityKind, i
 }
 
 const KIND_LABEL: Record<McnpEntityKind, string> = {
-    cell: 'Cell', surface: 'Surface', material: 'Material', universe: 'Universe',
+    cell: 'Cell', surface: 'Surface', material: 'Material', universe: 'Universe', transform: 'Transform',
 };
 
 /** Builds the hover/markdown body for the entity an occurrence points at. */

@@ -12,6 +12,95 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-27 — v0.2.8 — BEAVRS prebuilts for all codes + role-aware MCNP references + OpenMC axial recovery
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.7` → `0.2.8` in `package.json` / `package-lock.json`. Three shipped items plus
+the (completed) OpenMC axial stretch. 106 headless tests pass (98 prior + 8 new). OWEN never executes
+Python.
+
+### 1 — Bundle all four complete BEAVRS full-core decks
+
+- Copied the axially+radially-complete decks from `reactor-monte-carlo-guide/` into
+  `prebuilt-models/` with code-labeled names: `beavrs_fullcore_mcnp.i` (54 KB), `…_openmc.py`
+  (41 KB), `…_serpent.sss` (67 KB), `…_scone.scone` (71 KB). The SCONE deck is the author-verified
+  source of truth; the other three are geometry/materials-faithful translations of it (community
+  example decks — honest provenance label, not "verified").
+- `prebuilt-models/index.json`: added four `full-core` BEAVRS entries (one per code), removed the
+  superseded partial `mcnp-beavrs-core` / `serpent-beavrs-core` fixtures and the old
+  `beavrs_scone_fullcore.scone`, kept the three 17×17 assembly starters. Schema unchanged
+  (`{id, name, code, scale, provenance, description, filename}`), matching `openPrebuiltModel.ts`
+  (reads via `context.extensionUri` + `vscode.workspace.fs`) and `prebuiltModels.test.ts` (which
+  still asserts a `verified` SCONE full-core entry).
+- `.vscodeignore` already had `!prebuilt-models/**`; verified the seven decks + `index.json` ship via
+  `vsce ls`.
+
+### 2 — Role-aware MCNP cross-reference tracker
+
+**Audit finding:** the core index (`mcnpReferences.ts`) was **already role-keyed** — occurrences are
+stored as `{kind, id, span}` and queried by `defKey(kind, id)`, so `getReferences('surface', 3)`
+never returned material/cell/universe 3. The "it just finds all the 1s" symptom came from two real
+gaps, both fixed:
+
+- **No `DocumentHighlightProvider`** → VS Code fell back to its default word-occurrence highlighter,
+  which highlights *every* matching digit when the cursor sits on a number. Added
+  `McnpDocumentHighlightProvider` (`providers.ts`) backed by the index: highlights only the
+  occurrences of that entity/kind (definition = Write, refs = Read).
+- **Unmodeled roles** (`trcl`/`tr` transforms, the surface-card transform field, `mt`/`mx` data
+  cards) resolved to nothing → naive fallback. Extended `mcnpReferences.ts`:
+  - New `McnpEntityKind` `'transform'`. `classify()` recognizes `tr{n}`/`*tr{n}` (definition) and
+    `mt{n}`/`mx{n}` (material reference) cards.
+  - Cell `trcl=N`/`*trcl=N` (bare-integer form only — the inline `trcl=(…)` array defines a transform
+    in place and references nothing) → transform reference. The surface-card transform field
+    (`3 1 cz 0.5` → surface 3 uses transform 1) → transform reference. `tr{n}` card → transform def.
+  - `mt{n}`/`mx{n}` → a *reference* to material n (the digits only), so it shows in hover /
+    find-refs / the References tree alongside the cell uses.
+  - `KIND_LABEL`/`KIND_ICON`/`KIND_PLURAL` + the tree-view entity loop gained `transform`.
+- Lattice `fill`-array universe decoding (a 0.2.3 feature) verified still role-correct (the `trcl`
+  number is excluded from the geometry surface scan, so it is never double-counted as a surface).
+- **Tests (`mcnpReferences.test.ts`, +7):** a disambiguation deck where the digit **3** is at once a
+  cell id, material number, surface id, and universe — asserts four *distinct* reference-set sizes
+  (1 / 4 / 3 / 1), per-column `resolveAt` role resolution, "surface 3 returns only surfaces", and
+  `mt3` → material 3. A transform deck asserts `trcl=` + surface transform field + `tr5` all resolve
+  to transform 5, that a surface transform field is not mistaken for a surface id (no "surface 5"),
+  and that the `trcl` arg is not double-counted as a geometry surface. These would all fail under
+  naive numeric matching.
+
+### 4 (stretch) — OpenMC axial band recovery — DONE
+
+- Root cause (v0.2.7 residual): the BEAVRS OpenMC deck stores z-planes in a `ZP[z]` **dict** and
+  builds columns from `(z_bottom, z_top, key)` **stack tables** (`region=+ZP[zb] & -ZP[zt]`,
+  `fill=R[key]`), so the name-based `findAxialBands` (`name = openmc.ZPlane`) found nothing →
+  `hasAxial=false` → full-height pins.
+- Fix (`codes/openmc.ts`): when the named-ZPlane scan yields < 2 bands **and** the deck uses the
+  `ZP[` dict idiom in cell regions, `findAxialBandsFromStackTables()` harvests every `(num, num, key)`
+  stack tuple (skipping all-numeric third fields = colors/coords), takes the **union** of their
+  z-boundaries as the global band grid, and tags each band with the spanning key (preferring a
+  fuel-bearing key). On the real prebuilt deck: `hasAxial` **false → true**, **30 axial bands**
+  recovered, distinct z-elevations 1 → 31; gated behind the user's "Axial segments" toggle and the
+  instance budget, so default rendering is unchanged.
+- **Residual (documented):** per-band *radial* material swaps for OpenMC (e.g. Inconel grid-spacer
+  sleeves, plenum/end-plug cross-sections) are not reconstructed — every band reuses the pin's radial
+  template, so the axial stack is z-segmented but radially uniform. MCNP/Serpent/SCONE still do full
+  per-band material differentiation. Fixing this needs `R[key]`→`make_pin` shell resolution.
+- Test (`extractor.test.ts`, +1): a compact `ZP[z]` + stack-table deck → 3 recovered bands, 3
+  distinct z-elevations with axial on, 1 with axial off.
+
+### 3 — Changelog backfill
+
+- Audit: `AI_CHANGELOG.md` (root), `owen/AI_CHANGELOG.md`, and `owen/CHANGELOG.md` already had
+  complete, correctly-ordered entries for 0.2.4 / 0.2.5 / 0.2.6 / 0.2.7 (no gaps, newest-first). Only
+  the 0.2.8 entry was missing — added to all three.
+
+### Build / test
+
+- `node node_modules/typescript/bin/tsc --noEmit` clean; `node esbuild.js --production` clean; `out/`
+  ships only `extension.js` (verified `vsce ls`); webview-injected functions remain minification-safe.
+  106 headless tests pass. Packaged `owen-neutronics-0.2.8.vsix`.
+
+---
+
 ## 2026-06-27 — v0.2.7 — 3D preview: expand the full BEAVRS decks (OpenMC programmatic core)
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

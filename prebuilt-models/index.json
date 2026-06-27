@@ -1,12 +1,39 @@
 [
   {
+    "id": "mcnp-beavrs-fullcore",
+    "name": "BEAVRS Full Core",
+    "code": "mcnp",
+    "scale": "full-core",
+    "provenance": "translated from verified SCONE — geometry/materials-faithful, not benchmark-validated",
+    "description": "MIT BEAVRS Cycle 1 PWR benchmark, full 193-assembly core (975 ppm boron, HFP 600K, CRs withdrawn). Westinghouse 4-loop, 17x17 lattices, 1.6/2.4/3.1 wt% UO2 zones, Pyrex burnable-poison clusters, full axial pin stacks (grid spacers, plena, end plugs), SS304 baffle/barrel/shields, downcomer, RPV. Translated layer-for-layer from the verified Cambridge SCONE deck. Community example deck — not an official MIT/CRPG product.",
+    "filename": "beavrs_fullcore_mcnp.i"
+  },
+  {
+    "id": "openmc-beavrs-fullcore",
+    "name": "BEAVRS Full Core",
+    "code": "openmc",
+    "scale": "full-core",
+    "provenance": "translated from verified SCONE — geometry/materials-faithful, not benchmark-validated",
+    "description": "MIT BEAVRS Cycle 1 PWR benchmark, full 193-assembly core (975 ppm boron, HFP 600K, CRs withdrawn) for OpenMC (Python, modern API). Westinghouse 4-loop, 17x17 lattices, 1.6/2.4/3.1 wt% UO2 zones, Pyrex burnable-poison clusters, full axial pin stacks (grid spacers, plena, end plugs), SS304 baffle/barrel/shields, downcomer, RPV. Translated layer-for-layer from the verified Cambridge SCONE deck. Community example deck — not an official MIT/CRPG product.",
+    "filename": "beavrs_fullcore_openmc.py"
+  },
+  {
+    "id": "serpent-beavrs-fullcore",
+    "name": "BEAVRS Full Core",
+    "code": "serpent",
+    "scale": "full-core",
+    "provenance": "translated from verified SCONE — geometry/materials-faithful, not benchmark-validated",
+    "description": "MIT BEAVRS Cycle 1 PWR benchmark, full 193-assembly core (975 ppm boron, HFP 600K, CRs withdrawn) for Serpent 2. Westinghouse 4-loop, 17x17 lattices, 1.6/2.4/3.1 wt% UO2 zones, Pyrex burnable-poison clusters, full axial pin stacks (grid spacers, plena, end plugs), SS304 baffle/barrel/shields, downcomer, RPV. Translated layer-for-layer from the verified Cambridge SCONE deck. Community example deck — not an official MIT/CRPG product.",
+    "filename": "beavrs_fullcore_serpent.sss"
+  },
+  {
     "id": "scone-beavrs-fullcore",
     "name": "BEAVRS Full Core",
     "code": "scone",
     "scale": "full-core",
     "provenance": "verified",
-    "description": "MIT BEAVRS PWR benchmark, full 193-assembly core (Cycle 1, 975 ppm boron, HFP 600K). Westinghouse 4-loop, 17x17 lattices. Continuous-energy eigenvalue deck.",
-    "filename": "beavrs_scone_fullcore.scone"
+    "description": "MIT BEAVRS Cycle 1 PWR benchmark, full 193-assembly core (975 ppm boron, HFP 600K, CRs withdrawn). Westinghouse 4-loop, 17x17 lattices, 1.6/2.4/3.1 wt% UO2 zones, Pyrex burnable-poison clusters, full axial pin stacks (grid spacers, plena, end plugs), SS304 baffle/barrel/shields, downcomer, RPV. Author-verified Cambridge SCONE model — the source of truth the other three code translations were ported from. Continuous-energy eigenvalue deck.",
+    "filename": "beavrs_fullcore_scone.scone"
   },
   {
     "id": "mcnp-assembly-17x17",
@@ -34,23 +61,5 @@
     "provenance": "example fixture — not converged",
     "description": "Westinghouse-style 17x17 PWR assembly for OpenMC (Python). Built from OWEN's omc_assembly_script snippet; modern OpenMC API. Starter/visualization deck, not a validated benchmark.",
     "filename": "assembly_17x17_openmc.py"
-  },
-  {
-    "id": "mcnp-beavrs-core",
-    "name": "BEAVRS Core",
-    "code": "mcnp",
-    "scale": "full-core",
-    "provenance": "example fixture — not converged",
-    "description": "BEAVRS-style PWR core layout for MCNP. Physically sane geometry/materials for visualization; not a converged/validated benchmark.",
-    "filename": "beavrs_core_mcnp.i"
-  },
-  {
-    "id": "serpent-beavrs-core",
-    "name": "BEAVRS Core",
-    "code": "serpent",
-    "scale": "full-core",
-    "provenance": "example fixture — not converged",
-    "description": "BEAVRS-style PWR core layout for Serpent. Physically sane geometry/materials for visualization; not a converged/validated benchmark.",
-    "filename": "beavrs_core_serpent.sss"
   }
 ]

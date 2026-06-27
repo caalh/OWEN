@@ -70,11 +70,36 @@ class McnpReferenceProvider implements vscode.ReferenceProvider {
     }
 }
 
+// Replaces VS Code's default word-based occurrence highlight (which lights up
+// every matching digit in the file — the "it just finds all the 1s" problem)
+// with a role-aware highlight: only the occurrences of THIS entity of THIS kind
+// are highlighted. The definition is marked Write, references Read.
+class McnpDocumentHighlightProvider implements vscode.DocumentHighlightProvider {
+    provideDocumentHighlights(
+        doc: vscode.TextDocument,
+        position: vscode.Position,
+    ): vscode.DocumentHighlight[] | undefined {
+        const index = getIndexFor(doc);
+        const occ = resolveAt(index, position.line, position.character);
+        if (!occ) return undefined;
+        return getReferences(index, occ.kind, occ.id, true).map(
+            (r) =>
+                new vscode.DocumentHighlight(
+                    spanToRange(r),
+                    r.isDefinition
+                        ? vscode.DocumentHighlightKind.Write
+                        : vscode.DocumentHighlightKind.Read,
+                ),
+        );
+    }
+}
+
 export function registerMcnpReferenceProviders(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.languages.registerHoverProvider(MCNP_SELECTOR, new McnpHoverProvider()),
         vscode.languages.registerDefinitionProvider(MCNP_SELECTOR, new McnpDefinitionProvider()),
         vscode.languages.registerReferenceProvider(MCNP_SELECTOR, new McnpReferenceProvider()),
+        vscode.languages.registerDocumentHighlightProvider(MCNP_SELECTOR, new McnpDocumentHighlightProvider()),
         vscode.workspace.onDidCloseTextDocument((d) => cache.delete(d.uri.toString())),
     );
 }
