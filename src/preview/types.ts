@@ -113,6 +113,13 @@ export interface GeometryScene {
 export interface FidelityOptions {
     detail?: 'auto' | 'disc' | 'layers';
     axial?: boolean;
+    /**
+     * Ceiling on emitted cylinder instances. When the requested fidelity would
+     * exceed this, parsers auto-degrade detail (layers→disc, then collapse
+     * axial) instead of truncating pins. Defaults to `DEFAULT_MAX_INSTANCES`
+     * (see budget.ts); driven by the `owen.preview.maxInstances` setting.
+     */
+    maxInstances?: number;
 }
 
 /** Resolved fidelity the parser actually used, echoed back to the webview. */
@@ -136,6 +143,12 @@ export interface ParseResult {
     notes?: string[];
     /** Fidelity actually applied, for the webview's toggle state. */
     fidelity?: FidelityState;
+    /**
+     * True when placement hit the instance ceiling and dropped geometry. The
+     * dispatch layer uses this to retry at a lower fidelity (auto-LOD) so pins
+     * are never silently truncated when a coarser detail would fit.
+     */
+    capped?: boolean;
 }
 
 /**

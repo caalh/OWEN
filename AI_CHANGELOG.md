@@ -12,6 +12,77 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-27 — v0.2.6 — 3D preview: render a full BEAVRS core (instance budget + auto-LOD)
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.5` → `0.2.6` in `package.json`. Removes the fixed 500,000-primitive truncation
+that hid pins from full-core decks (BEAVRS) once axial segments were on, replacing it with a
+configurable instance ceiling plus graceful auto-LOD. No geometry IR shape change beyond two new
+optional fields; all 85 existing tests untouched and still green (95 total with the 10 new ones).
+
+### Root cause
+
+The webview already batches every cylinder into `THREE.InstancedMesh` groups keyed by geometry
+signature, so **draw calls are tiny** (10–142 for a full BEAVRS core regardless of pin count). The
+explosion was purely the **parser-side** `const MAX_CYLINDERS = 500000` in each of `codes/{mcnp,
+openmc,serpent,scone}.ts`: it counted emitted *cylinders* (= GPU instances) and hard-truncated the
+list. Measured BEAVRS full-core instance counts (≈56k pin positions):
+
+| fidelity | instances | draw calls | old behavior |
+|---|---|---|---|
+| layers (radially complete, no axial) | ~170,411 | ~21 | rendered fine (under 500k) |
+| disc + full axial | ~1,222,266 | ~40 | **truncated at 500k** |
+| layers + full axial | ~3.27M (MCNP/SCONE), ~4.17M (Serpent) | ~130–142 | **truncated at 500k** |
+
+So the user hit truncation specifically when enabling axial.
+
+### New module — `src/preview/budget.ts` (pure, vscode-free, headlessly tested)
+
+- `DEFAULT_MAX_INSTANCES = 1_500_000`.
+- `estimatePrimitives({totalPins, avgLayers, axialSegments, detail, axial, context})` — `pins ×
+  (1 | avgLayers) × (1 | axialSegments) + context`.
+- `planRender(...)` — predictive degrade: requested → drop **layers→disc** first (preserves the
+  axial structure the user explicitly enabled) → then **collapse axial**. Never reduces the pin
+  factor, so "all pins visible" holds. Returns effective `{detail, axial}` + `droppedToDisc` /
+  `droppedAxial` flags.
+- `simplificationNote(...)` / `truncationWarning(...)` — user-facing messaging.
+
+### Per-code parsers (`codes/*.ts`)
+
+- Replaced the fixed `MAX_CYLINDERS` with `opts.maxInstances ?? DEFAULT_MAX_INSTANCES`.
+- After `resolveDetail`, each parser computes `avgLayers` (mean positive-radius shell count across
+  pin universes) and `axialSegments` (tallest axial stack), calls `planRender`, and renders at the
+  effective `{detail, axial}`. The hard cap remains as a final safety net (sets a new `capped` flag
+  on `ParseResult`); the alarming warning text was removed from the parsers.
+
+### Dispatch retry safety net (`extractor.ts`)
+
+Per-code pin counting can **under-estimate** (Serpent's nested-core `countPins` returns 193
+assemblies, not ~56k pins), so the predictive estimate alone is insufficient — Serpent
+layers+axial still hit the cap (1.5M, truncated). `parse()` now wraps `parseRaw()` in an auto-LOD
+**retry loop**: if placement reports `capped`, re-parse at a coarser fidelity (layers→disc, then
+drop axial) until it fits — reacting to the *actual* emitted count, independent of counting
+accuracy. Unified messaging compares the requested fidelity to what was drawn and emits the
+auto-LOD note (or, only if even the coarsest fidelity overflows, the truncation warning).
+
+### Result (default 1.5M ceiling)
+
+All four codes: **no truncation warnings, no dropped pins.** layers = 170k (full radial core);
+disc+axial = 1.22M (all pins + full axial); layers+axial auto-degrades to disc+axial (1.22M) with
+an explanatory note. Raising `owen.preview.maxInstances` to ~4M renders the full layers+axial core
+(3.27M/4.17M) outright. (OpenMC's BEAVRS `.py` still only yields one representative pin — a
+pre-existing limitation of expanding arbitrary-Python cores, unrelated to this change.)
+
+### Config / tests
+
+- `owen.preview.maxInstances` added to `package.json` `contributes.configuration`; `webview.ts`
+  `withConfig()` folds the live setting into the fidelity options at both `buildScene` call sites.
+- New `src/test/suite/budget.test.ts` (10 tests): pure budget math + degradation ordering, plus
+  synthetic-core integration tests asserting auto-LOD drops to discs (not pins), keeps every pin
+  column, and only warns when even discs overflow.
+- Verified the toString-injected `measure.ts` functions still survive esbuild `--production`.
+
 ## 2026-06-27 — v0.2.5 — 3D preview: precise layer inspection + measurement tools
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

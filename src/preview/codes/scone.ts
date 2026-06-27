@@ -23,6 +23,7 @@
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
+import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 
 interface LeafBlock {
     name: string;
@@ -55,8 +56,6 @@ interface AxialSegment {
     zmax: number;
     universe: number;
 }
-
-const MAX_CYLINDERS = 500000;
 
 export function extractSconeCylinders(text: string): CylinderSpec[] {
     return parseScone(text).cylinders;
@@ -200,11 +199,21 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     // Count pin positions to pick viz fidelity.
     const totalPins = countPins(coreLatId, latDefs, resolveToPin);
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
-    const discMode = detail === 'disc';
 
     // Does the deck define axial structure anywhere reachable?
     const hasAxial = [...cellUniCells.keys()].some((uid) => axialStack(uid) !== null);
-    const axialOn = !!opts?.axial && hasAxial;
+
+    // Budget the instance count: degrade detail before hiding pins.
+    const maxInstances = opts?.maxInstances && opts.maxInstances > 0 ? opts.maxInstances : DEFAULT_MAX_INSTANCES;
+    const avgLayers = averagePinLayers(pinDefs);
+    let axialSegments = 1;
+    for (const uid of cellUniCells.keys()) {
+        const segs = axialStack(uid);
+        if (segs) axialSegments = Math.max(axialSegments, segs.length);
+    }
+    const plan = planRender({ totalPins, avgLayers, axialSegments, detail, axial: !!opts?.axial && hasAxial, maxInstances });
+    const discMode = plan.detail === 'disc';
+    const axialOn = plan.axial;
 
     // Heights / global axial extent.
     const vessel = collectVessel(surfaces);
@@ -228,7 +237,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     };
 
     const placePinAt = (uid: number, cx: number, cy: number, z: number, height: number, label: string): void => {
-        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        if (cylinders.length >= maxInstances) { capped = true; return; }
         const pin = pinDefs.get(uid);
         if (!pin) return;
         const nameLow = pin.name.toLowerCase();
@@ -358,10 +367,6 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     } else if (hasAxial) {
         notes.push('This deck defines axial structure (active fuel / plenum / grids / dashpot). Enable "Axial segments" to expand it; the Slice (Z) control cuts the stack.');
     }
-    if (capped) {
-        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Some pins are not shown — switch Pin detail to Disc, turn off Axial segments, or open a single assembly.`);
-    }
-
     // Vessel / barrel shells for full-reactor context.
     if (vessel.shells.length && cylinders.length > 0) {
         let footprint = 0;
@@ -384,8 +389,19 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         }
     }
 
-    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
-    return { cylinders, warnings, notes, fidelity };
+    const fidelity: FidelityState = { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial };
+    return { cylinders, warnings, notes, fidelity, capped };
+}
+
+/** Average positive-radius layer count across pinUniverse blocks (≥1), for budgeting. */
+function averagePinLayers(pinDefs: Map<number, PinDef>): number {
+    let sum = 0;
+    let n = 0;
+    for (const pin of pinDefs.values()) {
+        const count = pin.radii.filter((r) => r > 0).length;
+        if (count > 0) { sum += count; n++; }
+    }
+    return n > 0 ? sum / n : 1;
 }
 
 // ---------------------------------------------------------------------------

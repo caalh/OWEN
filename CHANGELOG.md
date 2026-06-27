@@ -5,6 +5,34 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] — 2026-06-27
+
+Render a full BEAVRS core without truncating pins.
+
+### Changed
+
+- **The 3D preview no longer drops pins from large cores.** The old fixed 500,000-primitive
+  safety cap truncated full-core decks (BEAVRS and similar) the moment axial segments were
+  enabled, hiding entire pins with an alarming "geometry was truncated" message. The ceiling is
+  now a much higher, configurable **instance** budget (default **1,500,000**, set via the new
+  `owen.preview.maxInstances` setting). A radially-complete full core (every pin, concentric
+  fuel/gap/clad/coolant shells) and a one-disc-per-pin core with full axial segments both render
+  comfortably within the default.
+- **Graceful auto-LOD instead of silent truncation.** When the requested detail would exceed the
+  ceiling, OWEN automatically simplifies *detail* rather than dropping pins — first collapsing
+  concentric shells to one disc per pin (preserving the axial structure you turned on), then
+  collapsing axial segments if still needed. **Every pin position stays visible.** A non-alarming
+  note explains exactly what was simplified and how to override (open a single assembly, or raise
+  `owen.preview.maxInstances`). The hard truncation warning now appears only in the extreme case
+  where even one disc per pin overflows the ceiling.
+
+### Added
+
+- **`owen.preview.maxInstances` setting.** Caps the total cylinder instances the preview renders
+  (default 1,500,000). Raise it (e.g. 4,000,000) to view a full BEAVRS core at concentric-shell +
+  axial detail simultaneously on a powerful machine; lower it on constrained hardware. Draw calls
+  stay low regardless thanks to instanced rendering — this bounds memory/CPU, not draw count.
+
 ## [0.2.5] — 2026-06-27
 
 Precise layer inspection and interactive measurement tools in the 3D geometry preview.

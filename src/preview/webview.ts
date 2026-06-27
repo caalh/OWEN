@@ -35,10 +35,19 @@ function postScene(): void {
     }
 }
 
+/**
+ * Folds the live `owen.preview.maxInstances` setting into the fidelity options
+ * so the parsers' auto-LOD budgeting honours the user's configured ceiling.
+ */
+function withConfig(opts: FidelityOptions): FidelityOptions {
+    const max = vscode.workspace.getConfiguration('owen').get<number>('preview.maxInstances');
+    return { ...opts, maxInstances: typeof max === 'number' && max > 0 ? max : undefined };
+}
+
 /** Re-extracts the current source at the requested fidelity and re-posts it. */
 function rebuildScene(): void {
     if (!lastText) return;
-    lastScene = buildScene(lastText, lastLanguage, fidelity);
+    lastScene = buildScene(lastText, lastLanguage, withConfig(fidelity));
     postScene();
 }
 
@@ -53,7 +62,7 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
         lastText = editor.document.getText();
         lastLanguage = language;
         fidelity = { detail: 'auto', axial: false };
-        lastScene = buildScene(lastText, language, fidelity);
+        lastScene = buildScene(lastText, language, withConfig(fidelity));
 
         if (currentPanel) {
             currentPanel.reveal(vscode.ViewColumn.Beside);

@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit: syntax highlighting, lattice builder, geometry preview, validation, and workflow automation for MCNP, OpenMC, Serpent, and SCONE.",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -410,6 +410,12 @@
           "type": "string",
           "default": "https://reactormc.net/data",
           "description": "Base URL for live NRDP material/element snapshots (expects nrdp-materials.json and nrdp-elements.json)."
+        },
+        "owen.preview.maxInstances": {
+          "type": "integer",
+          "default": 1500000,
+          "minimum": 50000,
+          "description": "Maximum number of cylinder instances the 3D Geometry Preview will render. The webview batches geometry into instanced meshes, so draw calls stay low regardless; this caps total instances to bound memory/CPU. When a deck's requested fidelity would exceed this, OWEN auto-simplifies detail (concentric layers → single discs, then collapses axial segments) instead of hiding pins. Raise it (e.g. 4000000) to view a full BEAVRS core at concentric-shell + axial detail on a powerful machine; lower it on constrained hardware."
         },
         "owen.highlight.mcnp.palette": {
           "type": "string",

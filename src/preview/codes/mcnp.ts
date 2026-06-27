@@ -24,8 +24,7 @@
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { componentColor, emitLayers, materialColor, resolveDetail } from '../palette';
-
-const MAX_CYLINDERS = 500000;
+import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 
 type SurfaceType =
     | 'cz' | 'cx' | 'cy' | 'c/z' | 'c/x' | 'c/y'
@@ -176,7 +175,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         if (segs) axialStacks.set(uid, segs);
     }
     const hasAxial = axialStacks.size > 0;
-    const axialOn = !!opts?.axial && hasAxial;
+    const requestedAxial = !!opts?.axial && hasAxial;
 
     // Determine the top universe to place: a universe-0 cell with fill=,
     // preferring one that resolves to a lattice; else the largest lattice.
@@ -211,7 +210,16 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     // Count pins to choose fidelity (layer mode vs. disc mode).
     const totalPins = countPins(topUid, latUniverses, pinUniverses, axialStacks);
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
-    const discMode = detail === 'disc';
+
+    // Budget the instance count: degrade detail before hiding pins so a full
+    // core stays renderable. `avgLayers` ≈ shells per pin in layers mode;
+    // `axialSegments` = tallest axial stack.
+    const maxInstances = opts?.maxInstances && opts.maxInstances > 0 ? opts.maxInstances : DEFAULT_MAX_INSTANCES;
+    const avgLayers = averagePinLayers(pinUniverses);
+    const axialSegments = maxAxialSegments(axialStacks);
+    const plan = planRender({ totalPins, avgLayers, axialSegments, detail, axial: requestedAxial, maxInstances });
+    const discMode = plan.detail === 'disc';
+    const axialOn = plan.axial;
 
     const height = zBounds
         ? Math.max(0.1, zBounds.zmax - zBounds.zmin)
@@ -227,7 +235,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     let capped = false;
 
     const placePin = (uid: number, cx: number, cy: number, label: string, zCenter: number = zmid, segHeight: number = height): void => {
-        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        if (cylinders.length >= maxInstances) { capped = true; return; }
         const pin = pinUniverses.get(uid);
         if (!pin || pin.layers.length === 0) return;
 
@@ -285,7 +293,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
 
     const placeUniverse = (uid: number, cx: number, cy: number, label: string, depth: number): void => {
         if (depth > 12) return;
-        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        if (cylinders.length >= maxInstances) { capped = true; return; }
         const lat = latUniverses.get(uid);
         if (lat) {
             const { nx, ny, grid } = lat.fill;
@@ -366,17 +374,31 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     if ([...latUniverses.values()].some((l) => l.hex)) {
         notes.push('Hex lattice (lat=2) placed on real hexagonal coordinates.');
     }
-    if (capped) {
-        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
-    }
     if (axialOn) {
         notes.push('Axial detail: each pin expanded into its real z-segments (active fuel / plenum / grids / dashpot / end plugs). Use the Axial Layers toggles and the Axial slice to inspect levels.');
     } else if (hasAxial) {
         notes.push('This deck defines axial structure (pz-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
     }
 
-    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
-    return { cylinders, warnings, notes, fidelity };
+    const fidelity: FidelityState = { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial };
+    return { cylinders, warnings, notes, fidelity, capped };
+}
+
+/** Average concentric-shell count across pin universes (≥1), for budgeting. */
+function averagePinLayers(pinUniverses: Map<number, PinUniverse>): number {
+    let sum = 0;
+    let n = 0;
+    for (const pin of pinUniverses.values()) {
+        if (pin.layers.length > 0) { sum += pin.layers.length; n++; }
+    }
+    return n > 0 ? sum / n : 1;
+}
+
+/** Tallest axial stack (segment count), for budgeting axial expansion. */
+function maxAxialSegments(axialStacks: Map<number, AxialSegment[]>): number {
+    let max = 1;
+    for (const segs of axialStacks.values()) max = Math.max(max, segs.length);
+    return max;
 }
 
 // ---------------------------------------------------------------------------

@@ -16,8 +16,7 @@
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
-
-const MAX_CYLINDERS = 500000;
+import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 
 const SERPENT_KEYWORDS = new Set([
     'pin', 'surf', 'cell', 'lat', 'set', 'mat', 'det', 'dep', 'plot', 'mesh',
@@ -195,8 +194,17 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
 
     const totalPins = countPins(coreLat, lats, resolveFill, (u) => pinLayers(u) !== null || axialStacks.has(u));
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
-    const discMode = detail === 'disc';
-    const axialOn = !!opts?.axial && hasAxial;
+
+    // Budget the instance count: degrade detail before hiding pins.
+    const maxInstances = opts?.maxInstances && opts.maxInstances > 0 ? opts.maxInstances : DEFAULT_MAX_INSTANCES;
+    const avgLayers = averagePinLayers(pins);
+    let axialSegments = 1;
+    for (const segs of axialStacks.values()) axialSegments = Math.max(axialSegments, segs.length);
+    const plan = planRender({
+        totalPins, avgLayers, axialSegments, detail, axial: !!opts?.axial && hasAxial, maxInstances,
+    });
+    const discMode = plan.detail === 'disc';
+    const axialOn = plan.axial;
 
     // Global axial extent from pz planes drives both the collapsed pin height
     // and the vessel/barrel context shells; falls back to a nominal height.
@@ -226,7 +234,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     };
 
     const placePin = (name: string, cx: number, cy: number, label: string, zCenter: number = fullZmid, segHeight: number = fullHeight): void => {
-        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        if (cylinders.length >= maxInstances) { capped = true; return; }
         const layers = pinLayers(name);
         if (!layers) return;
         const positive = layers.radii.map((r, i) => ({ r, mat: layers.materials[i] ?? `mat${i}` })).filter((l) => l.r > 0);
@@ -290,7 +298,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     };
 
     const placeUniverse = (name: string, cx: number, cy: number, label: string, depth: number): void => {
-        if (depth > 12 || cylinders.length >= MAX_CYLINDERS) return;
+        if (depth > 12 || cylinders.length >= maxInstances) return;
         const resolved = resolveFill(name);
         const lat = lats.get(resolved);
         if (lat) {
@@ -385,9 +393,6 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     } else if (hasAxial) {
         notes.push('This deck defines axial structure (pz-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
     }
-    if (capped) {
-        warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive safety cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
-    }
     if (cylinders.length === 0) {
         if (/\bsurf\b/.test(text) || /\bcell\b/.test(text)) {
             warnings.push('Could not expand any `pin`, `lat`, or `cell`/`surf` geometry into drawable cylinders. Check that pins reference `cyl` surfaces and lattices reference defined universes.');
@@ -396,8 +401,19 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         }
     }
 
-    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
-    return { cylinders, warnings, notes, fidelity };
+    const fidelity: FidelityState = { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial };
+    return { cylinders, warnings, notes, fidelity, capped };
+}
+
+/** Average positive-radius layer count across `pin` blocks (≥1), for budgeting. */
+function averagePinLayers(pins: Map<string, PinDef>): number {
+    let sum = 0;
+    let n = 0;
+    for (const pin of pins.values()) {
+        const count = pin.radii.filter((r) => r > 0).length;
+        if (count > 0) { sum += count; n++; }
+    }
+    return n > 0 ? sum / n : 1;
 }
 
 // ---------------------------------------------------------------------------

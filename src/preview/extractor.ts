@@ -19,6 +19,7 @@ import {
     FidelityState,
 } from './types';
 import { componentColor } from './palette';
+import { DEFAULT_MAX_INSTANCES, simplificationNote, truncationWarning } from './budget';
 import { parseMcnp } from './codes/mcnp';
 import { parseOpenmc } from './codes/openmc';
 import { parseSerpent } from './codes/serpent';
@@ -26,7 +27,7 @@ import { parseScone } from './codes/scone';
 
 export type { CylinderSpec };
 
-function parse(text: string, language: string, opts?: FidelityOptions): ParseResult {
+function parseRaw(text: string, language: string, opts?: FidelityOptions): ParseResult {
     switch (language) {
         case 'mcnp':
             return parseMcnp(text, opts);
@@ -40,6 +41,49 @@ function parse(text: string, language: string, opts?: FidelityOptions): ParseRes
             console.warn(`[owen.preview] unknown language ${language}`);
             return { cylinders: [], warnings: [`Unknown language "${language}" — no geometry parser available.`] };
     }
+}
+
+/**
+ * Parses with an auto-LOD safety net. Each parser predictively degrades detail
+ * to fit the instance ceiling (see budget.ts), but per-code pin counting can
+ * under-estimate (e.g. Serpent nested cores), so placement may still hit the
+ * cap. When that happens we re-parse at a coarser fidelity — concentric layers
+ * → single discs, then collapse axial segments — until everything fits. Every
+ * pin position is preserved at each step, so pins are never silently dropped
+ * when a coarser detail would render the whole core. A non-alarming note
+ * explains any simplification; a warning fires only if even the coarsest
+ * fidelity overflows.
+ */
+function parse(text: string, language: string, opts?: FidelityOptions): ParseResult {
+    let res = parseRaw(text, language, opts);
+
+    let guard = 0;
+    while (res.capped && res.fidelity && guard++ < 3) {
+        const f = res.fidelity;
+        let next: FidelityOptions | null = null;
+        if (f.detail === 'layers') next = { ...opts, detail: 'disc' };
+        else if (f.axial) next = { ...opts, detail: 'disc', axial: false };
+        if (!next) break;
+        res = parseRaw(text, language, next);
+    }
+
+    const f = res.fidelity;
+    if (f) {
+        const max = opts?.maxInstances && opts.maxInstances > 0 ? opts.maxInstances : DEFAULT_MAX_INSTANCES;
+        const requestedDetail = opts?.detail === 'disc' || opts?.detail === 'layers' ? opts.detail : f.autoDetail;
+        const requestedAxial = !!opts?.axial && f.hasAxial;
+        if (res.capped) {
+            res.warnings = [truncationWarning(max), ...(res.warnings ?? [])];
+        } else {
+            const note = simplificationNote(
+                requestedDetail === 'layers' && f.detail === 'disc',
+                requestedAxial && !f.axial,
+                max,
+            );
+            if (note) res.notes = [note, ...(res.notes ?? [])];
+        }
+    }
+    return res;
 }
 
 /**

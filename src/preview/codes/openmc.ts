@@ -17,6 +17,7 @@
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail } from '../palette';
+import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 
 interface NamedValue {
     name: string;
@@ -48,8 +49,6 @@ interface AxialBand {
 export function extractOpenmcCylinders(text: string): CylinderSpec[] {
     return parseOpenmc(text).cylinders;
 }
-
-const MAX_CYLINDERS = 500000;
 
 export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     const warnings: string[] = [];
@@ -95,14 +94,27 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     // Count placed pins to pick fidelity.
     const totalPins = countOpenmcPins(grid, latByName, universeMap);
     const { detail, autoDetail } = resolveDetail(opts, totalPins);
-    const discMode = detail === 'disc';
 
     // Axial structure from stacked ZPlane-bounded cells (active fuel / plenum /
     // end plugs). Best-effort: OpenMC decks are arbitrary Python, so we only
     // expand the z-bands a deck makes explicit via `ZPlane` + `Cell(region=...)`.
     const axialBands = findAxialBands(text);
     const hasAxial = axialBands.length >= 2;
-    const axialOn = !!opts?.axial && hasAxial;
+
+    // Budget the instance count: degrade detail before hiding pins.
+    const maxInstances = opts?.maxInstances && opts.maxInstances > 0 ? opts.maxInstances : DEFAULT_MAX_INSTANCES;
+    const tmpls = [
+        fuelTemplate ?? defaultTemplate('fuel'),
+        guideTemplate ?? defaultTemplate('guide'),
+        instrTemplate ?? defaultTemplate('instrument'),
+    ];
+    const avgLayers = tmpls.reduce((s, t) => s + Math.max(1, t.radii.length), 0) / tmpls.length;
+    const plan = planRender({
+        totalPins, avgLayers, axialSegments: Math.max(1, axialBands.length),
+        detail, axial: !!opts?.axial && hasAxial, maxInstances,
+    });
+    const discMode = plan.detail === 'disc';
+    const axialOn = plan.axial;
 
     const cylinders: CylinderSpec[] = [];
     let capped = false;
@@ -120,7 +132,7 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     const subPitch = nested ? smallestPitch(named) : Math.min(pitch[0], pitch[1]);
 
     const placePinAt = (template: PinTemplate, x: number, y: number, z: number, h: number, label: string, fuelMat?: string | null): void => {
-        if (cylinders.length >= MAX_CYLINDERS) { capped = true; return; }
+        if (cylinders.length >= maxInstances) { capped = true; return; }
         // When a z-band names its own fill, relabel the fuel layer so distinct
         // axial fuel materials read as separate, separately-coloured bands.
         const mats = (fuelMat && fuelMat.length)
@@ -160,7 +172,7 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     };
 
     const placeGrid = (lat: NamedLattice | { grid: string[][]; pitch: [number, number]; lowerLeft: [number, number] | null }, cx: number, cy: number, label: string, depth: number): void => {
-        if (depth > 8 || cylinders.length >= MAX_CYLINDERS) return;
+        if (depth > 8 || cylinders.length >= maxInstances) return;
         const g = lat.grid;
         const rows = g.length;
         const cols = g.reduce((m, r) => Math.max(m, r.length), 0);
@@ -203,7 +215,6 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     if (discMode) {
         notes.push(`Disc mode: one disc per pin. Switch "Pin detail" to Detailed layers for concentric fuel/gap/clad/coolant shells.`);
     }
-    if (capped) warnings.push(`Geometry exceeded the ${MAX_CYLINDERS.toLocaleString()}-primitive cap and was truncated. Switch Pin detail to Disc or open a single assembly.`);
     if (isHex) {
         notes.push('Hex lattice laid out on a rectangular approximation (OpenMC HexLattice index order is not reconstructed).');
         for (const cyl of cylinders) cyl.label = `hexapprox_${cyl.label}`;
@@ -214,8 +225,8 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         notes.push('This deck defines axial structure (ZPlane-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
     }
 
-    const fidelity: FidelityState = { detail, axial: axialOn, autoDetail, totalPins, hasAxial };
-    return { cylinders, warnings, notes, fidelity };
+    const fidelity: FidelityState = { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial };
+    return { cylinders, warnings, notes, fidelity, capped };
 }
 
 // ---------------------------------------------------------------------------
