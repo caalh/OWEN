@@ -5,6 +5,17 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-28
+
+First-class **ALLEN** (Atomic Library Linking Evaluated Nuclear-data) integration — in-editor σ(E) plots linked to the NRDP ENDF/B-VIII.0 bundle.
+
+### Added
+
+- **`OWEN: Open ALLEN Cross-Sections`** (`owen.openAllen`) — webview panel with uPlot log-log σ(E) charts, nuclide/reaction/temperature pickers, hover readout, and coverage notices for missing manifest entries.
+- **Context-aware nuclide detection** from MCNP `m` cards (ZAIDs), OpenMC `add_nuclide`, Serpent/SCONE decks; defaults to U-235/U-238 teaching preset when none found.
+- **Setting `owen.allen.dataBaseUrl`** (default `https://reactormc.net/data/allen`) for offline or local NRDP dev overrides.
+- Command palette, editor title OWEN submenu, and right-click OWEN context menu entries for ALLEN.
+
 ## [0.2.9] — 2026-06-27
 
 Fix the OpenMC 3D-preview axial fidelity so the BEAVRS full core renders at its true height with the

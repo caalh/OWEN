@@ -13,6 +13,7 @@ import { registerHighlightPalettes } from './highlight';
 import { registerDecorations } from './decorations';
 import { registerMcnpReferenceProviders } from './references/providers';
 import { registerMcnpReferencesView } from './references/referencesView';
+import { openAllenCrossSections } from './allen/panel';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('OWEN extension activated');
@@ -26,6 +27,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('owen.openLatticeBuilder', () => {
             LatticeBuilderPanel.createOrShow(context.extensionUri);
+        }),
+
+        vscode.commands.registerCommand('owen.openAllen', () => {
+            openAllenCrossSections(context.extensionUri);
         }),
 
         vscode.commands.registerCommand('owen.validateInput', () => {

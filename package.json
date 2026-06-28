@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit: syntax highlighting, lattice builder, geometry preview, validation, and workflow automation for MCNP, OpenMC, Serpent, and SCONE.",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -46,6 +46,7 @@
     "onLanguage:scone",
     "onLanguage:python",
     "onCommand:owen.openLatticeBuilder",
+    "onCommand:owen.openAllen",
     "onCommand:owen.validateInput",
     "onCommand:owen.runSimulation",
     "onCommand:owen.openGeometryPreview",
@@ -124,6 +125,12 @@
       }
     ],
     "commands": [
+      {
+        "command": "owen.openAllen",
+        "title": "OWEN: Open ALLEN Cross-Sections",
+        "category": "OWEN",
+        "icon": "$(graph-line)"
+      },
       {
         "command": "owen.openLatticeBuilder",
         "title": "OWEN: Open Lattice Builder",
@@ -226,6 +233,10 @@
       ],
       "owen.editorTitleMenu": [
         {
+          "command": "owen.openAllen",
+          "group": "1_analyze@0"
+        },
+        {
           "command": "owen.validateInput",
           "group": "1_analyze@1"
         },
@@ -283,6 +294,10 @@
         }
       ],
       "owen.contextMenu": [
+        {
+          "command": "owen.openAllen",
+          "group": "1_analyze@0"
+        },
         {
           "command": "owen.validateInput",
           "group": "1_analyze@1"
@@ -410,6 +425,11 @@
           "type": "string",
           "default": "https://reactormc.net/data",
           "description": "Base URL for live NRDP material/element snapshots (expects nrdp-materials.json and nrdp-elements.json)."
+        },
+        "owen.allen.dataBaseUrl": {
+          "type": "string",
+          "default": "https://reactormc.net/data/allen",
+          "description": "Base URL for ALLEN cross-section JSON (index.json and endfb80/ curves). Override for offline or local NRDP dev servers."
         },
         "owen.preview.maxInstances": {
           "type": "integer",
