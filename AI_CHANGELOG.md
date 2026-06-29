@@ -12,6 +12,52 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-28 — v0.4.2 — Fix the badly-rendered ALLEN σ(E) log-log plot
+
+**AI Agent:** claude-opus-4-8-thinking-high (Cursor IDE)
+
+**Root cause:** The ALLEN webview (`src/allen/panel.ts` `buildPlot`) plotted on **linear** uPlot scales
+over data that was only *partially* log-transformed, with a `10^exponent` axis formatter. Six defects
+followed:
+
+1. **Garbled x labels** (`10^5000000…`): the x-series was **raw energy** (1e-5 … 2e7 eV), but the axis
+   formatter did `'10^' + v.toFixed(0)` — i.e. it treated raw eV as a log10 exponent. Linear ticks like
+   5e6, 1e7 became `10^5000000`, `10^10000000`, overlapping into one run-on string.
+2. **Malformed y labels** (`0^-5`, `0^-10`): y data *was* log10(σ), so ticks were −5, −10, −15…; the
+   `10^…` text overflowed the narrow default axis gutter and clipped the leading `1`.
+3. **Cluttered legend:** uPlot's built-in legend (`legend.show` defaulted on) rendered a stacked
+   `Value: --` row per series under the custom HTML legend.
+4. **Header readout `E = Infinity eV`:** the readout did `Math.pow(10, u.data[0][idx])`, but `u.data[0]`
+   was raw energy, so `pow(10, 2e7) = Infinity`. It also concatenated every series with no wrapping.
+5. **Right-edge cliff to ~1e-30:** every curve was resampled onto the **longest** energy grid; out-of-range
+   points were extrapolated and σ floored to `1e-30` (→ log10 = −30), producing a vertical drop at the edge.
+6. **No axis titles / weak polish.**
+
+**Fix (`src/allen/panel.ts`, `src/allen/plotConfig.ts`):**
+
+- Native uPlot **log scales** (`scales.{x,y}.distr = 3`); plot real eV / barns, not pre-logged values.
+- **Power-of-ten decade formatter** (`logTickLabel`) renders `10⁻⁵ … 10⁷` via Unicode superscripts and
+  blanks minor splits. Widened the y-axis `size` so labels don't clip; added axis titles + label fonts.
+- **Compact legend:** `legend: { show: false }` disables uPlot's block; the custom one-swatch-per-series
+  legend stays.
+- **Readout:** uses real `u.data[0][idx]` energy (no more `Infinity`), lists only series with data at the
+  cursor, wraps, and resets to the placeholder when the cursor leaves.
+- **No edge cliff:** new `unifiedGrid` builds one sorted, de-duped, positive energy grid (union of all
+  curves keeps native points); `interpLogLog` interpolates in log-log space and returns `null` outside a
+  curve's own `[Emin, Emax]` (no `1e-30` floor), so lines end cleanly.
+
+**Single source of truth + tests:** the pure helpers live in `src/allen/plotConfig.ts` (`unifiedGrid`,
+`interpLogLog`, `logTickLabel`, `supExp`, `buildPlotData`) and are unit-tested in
+`src/test/suite/allenPlot.test.ts`. The webview embeds equivalent inline copies (it can't import modules;
+kept as a plain string so esbuild minification can't break it). **The rendered webview still needs human
+eyes** — headless tests cover the config/algorithm, not the canvas.
+
+**Website check:** `reactor-monte-carlo-guide` `XSPlot.tsx` is a *separate, internally-consistent*
+implementation (both axes log-transformed consistently, real-eV readout, built-in live legend) and does
+**not** exhibit these defects, so it was left unchanged.
+
+**Version:** `0.4.2`. VSIX built locally; Marketplace/Open VSX publish deferred to the maintainer.
+
 ---
 
 ## 2026-06-28 — v0.4.1 — MCNP references: fix Ctrl+F-style false highlights

@@ -5,6 +5,29 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-06-28
+
+Fix the badly-rendered **ALLEN σ(E) cross-section plot** in the OWEN webview. The log-log chart now
+uses native uPlot log scales with clean power-of-ten decade labels, a compact legend, a tidy hover
+readout, and curves that end at their real energy bounds instead of dropping to ~0.
+
+### Fixed
+
+- **X-axis labels** were garbled (`10^5000000…` run-on) because the x data was raw energy fed to a
+  `10^exponent` formatter. The plot now uses a native log scale (`distr: 3`) with a power-of-ten
+  decade formatter, so ticks read `10⁻⁵ … 10⁰ … 10⁷ eV`.
+- **Y-axis labels** (`0^-5`, `0^-10`) lost their leading `1` and clipped. Now rendered as proper
+  Unicode powers of ten (`10⁻³ … 10⁵ b`) with a wider axis gutter so nothing clips.
+- **Legend** no longer shows uPlot's stacked `Value: --` block (built-in legend disabled). A single
+  compact custom legend lists one swatch + label per active series.
+- **Header readout** no longer defaults the cursor energy to `Infinity` or runs every series value
+  together; it shows `E = … eV` plus only the series with data at the cursor, and resets when the
+  cursor leaves the plot.
+- **Right-edge cliff** removed: curves are resampled onto a unified energy grid in log-log space and
+  return `null` outside each curve's real `[Emin, Emax]` (no `1e-30` floor), so lines end cleanly.
+- Proper axis titles ("Neutron energy (eV)", "Cross section (barns)"), gridlines, and dark-theme
+  margins. New unit tests (`allenPlot.test.ts`) cover the resampling and tick-label logic.
+
 ## [0.4.1] — 2026-06-28
 
 Fix MCNP cross-reference **in-editor highlights** and **Find All References** falsely matching every
