@@ -5,56 +5,54 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.2] — 2026-06-28
+## [0.3.2] — 2026-06-28
 
-Fix the badly-rendered **ALLEN σ(E) cross-section plot** in the OWEN webview. The log-log chart now
-uses native uPlot log scales with clean power-of-ten decade labels, a compact legend, a tidy hover
-readout, and curves that end at their real energy bounds instead of dropping to ~0.
-
-### Fixed
-
-- **X-axis labels** were garbled (`10^5000000…` run-on) because the x data was raw energy fed to a
-  `10^exponent` formatter. The plot now uses a native log scale (`distr: 3`) with a power-of-ten
-  decade formatter, so ticks read `10⁻⁵ … 10⁰ … 10⁷ eV`.
-- **Y-axis labels** (`0^-5`, `0^-10`) lost their leading `1` and clipped. Now rendered as proper
-  Unicode powers of ten (`10⁻³ … 10⁵ b`) with a wider axis gutter so nothing clips.
-- **Legend** no longer shows uPlot's stacked `Value: --` block (built-in legend disabled). A single
-  compact custom legend lists one swatch + label per active series.
-- **Header readout** no longer defaults the cursor energy to `Infinity` or runs every series value
-  together; it shows `E = … eV` plus only the series with data at the cursor, and resets when the
-  cursor leaves the plot.
-- **Right-edge cliff** removed: curves are resampled onto a unified energy grid in log-log space and
-  return `null` outside each curve's real `[Emin, Emax]` (no `1e-30` floor), so lines end cleanly.
-- Proper axis titles ("Neutron energy (eV)", "Cross section (barns)"), gridlines, and dark-theme
-  margins. New unit tests (`allenPlot.test.ts`) cover the resampling and tick-label logic.
-
-## [0.4.1] — 2026-06-28
-
-Fix MCNP cross-reference **in-editor highlights** and **Find All References** falsely matching every
-occurrence of a digit (Ctrl+F-style) instead of the role-aware entity under the cursor.
-
-### Fixed
-
-- **`McnpDocumentHighlightProvider`** always returns a highlight array (never `undefined`) so VS Code
-  does not fall through to its built-in word-occurrence highlighter.
-- **`McnpReferenceProvider`** returns `[]` instead of `undefined` when the cursor is not on a
-  referenceable entity, blocking text-search fallback on Shift+F12.
-- **`configurationDefaults`** sets `"[mcnp]": { "editor.occurrencesHighlight": "singleFile", "editor.selectionHighlight": false }` so OWEN's role-aware `DocumentHighlightProvider` runs without VS Code's parallel word/selection highlighter.
-- MCNP **`wordPattern`** no longer classifies bare integers as editor words (eliminates digit fallback).
-- New **`getHighlightOccurrences`** / **`entityAtPosition`** helpers; expanded disambiguation tests
-  (digit 3 as cell / material / surface / universe; lattice `fill=` universe IDs).
-
-## [0.4.0] — 2026-06-28
-
-Integrated **Input Builder** webview — wizard to assemble starter MCNP / OpenMC / Serpent / SCONE decks from a curated material library, optional lattice geometry, and run settings.
+Consolidated release on top of 0.3.1, bundling the **Input Builder** wizard, a fix for MCNP
+cross-reference false highlights, and a rebuilt **ALLEN σ(E)** cross-section plot. (This release was
+renumbered down from the unpublished 0.4.0/0.4.1/0.4.2 dev versions — none of those reached the
+Marketplace; the published timeline is 0.3.1 → 0.3.2.)
 
 ### Added
 
-- **`OWEN: Open Input Builder`** (`owen.openInputBuilder`) — five-step wizard (code, materials, geometry, settings, preview) with **Insert at Cursor** / **New File**.
-- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
-- **`src/inputBuilder/deckBuilder.ts`** — assembles pin-cell or lattice starter decks; lattice mode reuses `latticeCodegen.ts`.
-- Headless unit tests for material codegen and deck assembly (`inputBuilder.test.ts`).
-- BEAVRS MCNP extractor test now asserts baffle **box** count > 0.
+- **`OWEN: Open Input Builder`** (`owen.openInputBuilder`) — integrated five-step wizard (code,
+  materials, geometry, settings, preview) that assembles starter MCNP / OpenMC / Serpent / SCONE
+  decks, with **Insert at Cursor** / **New File**.
+- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers
+  (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
+- **`src/inputBuilder/deckBuilder.ts`** — assembles pin-cell or lattice starter decks; lattice mode
+  reuses `latticeCodegen.ts`.
+- Headless unit tests for material codegen and deck assembly (`inputBuilder.test.ts`); BEAVRS MCNP
+  extractor test now asserts baffle **box** count > 0.
+
+### Fixed
+
+- **MCNP cross-reference highlights & Find All References** no longer fall back to matching every
+  occurrence of a digit (Ctrl+F-style) instead of the role-aware entity under the cursor:
+  - **`McnpDocumentHighlightProvider`** always returns a highlight array (never `undefined`) so VS
+    Code does not fall through to its built-in word-occurrence highlighter.
+  - **`McnpReferenceProvider`** returns `[]` instead of `undefined` when the cursor is not on a
+    referenceable entity, blocking text-search fallback on Shift+F12.
+  - **`configurationDefaults`** sets `"[mcnp]": { "editor.occurrencesHighlight": "singleFile", "editor.selectionHighlight": false }` so OWEN's role-aware `DocumentHighlightProvider` runs without VS Code's parallel word/selection highlighter.
+  - MCNP **`wordPattern`** no longer classifies bare integers as editor words (eliminates digit fallback).
+  - New **`getHighlightOccurrences`** / **`entityAtPosition`** helpers; expanded disambiguation tests
+    (digit 3 as cell / material / surface / universe; lattice `fill=` universe IDs).
+- **ALLEN σ(E) cross-section plot** in the OWEN webview is rebuilt — the log-log chart now uses
+  native uPlot log scales with clean power-of-ten decade labels, a compact legend, a tidy hover
+  readout, and curves that end at their real energy bounds instead of dropping to ~0:
+  - **X-axis labels** were garbled (`10^5000000…` run-on) because the x data was raw energy fed to a
+    `10^exponent` formatter. The plot now uses a native log scale (`distr: 3`) with a power-of-ten
+    decade formatter, so ticks read `10⁻⁵ … 10⁰ … 10⁷ eV`.
+  - **Y-axis labels** (`0^-5`, `0^-10`) lost their leading `1` and clipped. Now rendered as proper
+    Unicode powers of ten (`10⁻³ … 10⁵ b`) with a wider axis gutter so nothing clips.
+  - **Legend** no longer shows uPlot's stacked `Value: --` block (built-in legend disabled). A single
+    compact custom legend lists one swatch + label per active series.
+  - **Header readout** no longer defaults the cursor energy to `Infinity` or runs every series value
+    together; it shows `E = … eV` plus only the series with data at the cursor, and resets when the
+    cursor leaves the plot.
+  - **Right-edge cliff** removed: curves are resampled onto a unified energy grid in log-log space and
+    return `null` outside each curve's real `[Emin, Emax]` (no `1e-30` floor), so lines end cleanly.
+  - Proper axis titles ("Neutron energy (eV)", "Cross section (barns)"), gridlines, and dark-theme
+    margins. New unit tests (`allenPlot.test.ts`) cover the resampling and tick-label logic.
 
 ### Changed
 

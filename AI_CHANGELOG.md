@@ -12,9 +12,59 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
-## 2026-06-28 — v0.4.2 — Fix the badly-rendered ALLEN σ(E) log-log plot
+## 2026-06-28 — v0.3.2 — Input Builder + MCNP reference highlight fix + ALLEN σ(E) plot rebuild
 
 **AI Agent:** claude-opus-4-8-thinking-high (Cursor IDE)
+
+**Renumbering note:** This entry consolidates what was briefly developed as v0.4.0 (Input Builder),
+v0.4.1 (MCNP reference highlight fix), and v0.4.2 (ALLEN plot rebuild). None of those were ever
+published to the Marketplace / Open VSX, and the 0.4 major-ish bump overstated what were small
+fixes/features on top of 0.3.1. They have been collapsed into a single **v0.3.2** so the published
+timeline reads 0.3.1 → 0.3.2. Version set to `0.3.2` in `package.json` / `package-lock.json`.
+
+### 1 — Input Builder wizard
+
+Adds an integrated **Input Builder** webview to assemble starter decks without hand-typing boilerplate.
+
+- **`owen.openInputBuilder`** — five-step wizard (code, materials, geometry, settings, preview) with
+  **Insert at Cursor** / **New File** actions.
+- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers
+  (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
+- **`src/inputBuilder/deckBuilder.ts`** — pin-cell or 17×17 lattice starter decks; lattice mode
+  reuses `latticeCodegen.ts`.
+- **`src/panels/inputBuilder.ts`** — webview panel wiring; editor title / context menus list Input
+  Builder ahead of Lattice Builder.
+- **Tests:** `inputBuilder.test.ts` (8 unit tests); BEAVRS MCNP extractor asserts baffle **box**
+  count > 0.
+
+### 2 — MCNP references: fix Ctrl+F-style false highlights
+
+**Root cause:** The role-aware index (`mcnpReferences.ts`) was already correct — occurrences are
+stored as `{kind, id, span}` and queried by `(kind, id)`. The user-visible “highlights every matching
+digit” symptom came from VS Code’s **built-in word-occurrence highlighter** (`editor.occurrencesHighlight`)
+and provider fallbacks, not from naive indexing:
+
+1. `DocumentHighlightProvider.provideDocumentHighlights` returned `undefined` when the cursor was not
+   on an indexed entity → VS Code treated that as “no provider result” and ran word-based highlighting
+   for the digit under the cursor (every `3` in the file lights up).
+2. `ReferenceProvider.provideReferences` had the same `undefined` fallback → Shift+F12 could degrade
+   to a text search for the bare number.
+3. Setting `editor.occurrencesHighlight: "off"` disabled *all* occurrence highlighting, including the
+   custom `DocumentHighlightProvider`, while **`editor.selectionHighlight`** (default on) still painted
+   every matching digit. Fix: `"singleFile"` + `"selectionHighlight": false`.
+4. MCNP **`wordPattern`** treated bare integers as editor “words”, feeding the fallback highlighter.
+   Tightened to decimals / letter-led tokens / `m|mt|mx|tr` cards only.
+
+**Fix (`providers.ts`, `package.json`):**
+
+- Document highlight provider always returns an array; uses new `getHighlightOccurrences()`.
+- Reference provider returns `[]` instead of `undefined` when nothing is referenceable.
+- `contributes.configurationDefaults`: `"[mcnp]": { "editor.occurrencesHighlight": "singleFile", "editor.selectionHighlight": false }`.
+- MCNP `wordPattern` no longer treats bare integers as words (stops Ctrl+F-style fallback).
+- Exported `entityAtPosition` (alias for `resolveAt`) and `getHighlightOccurrences`.
+- Tests: disambiguation deck highlight counts, lattice fill universe IDs, non-entity `imp:n=` digits.
+
+### 3 — Fix the badly-rendered ALLEN σ(E) log-log plot
 
 **Root cause:** The ALLEN webview (`src/allen/panel.ts` `buildPlot`) plotted on **linear** uPlot scales
 over data that was only *partially* log-transformed, with a `10^exponent` axis formatter. Six defects
@@ -56,61 +106,7 @@ eyes** — headless tests cover the config/algorithm, not the canvas.
 implementation (both axes log-transformed consistently, real-eV readout, built-in live legend) and does
 **not** exhibit these defects, so it was left unchanged.
 
-**Version:** `0.4.2`. VSIX built locally; Marketplace/Open VSX publish deferred to the maintainer.
-
----
-
-## 2026-06-28 — v0.4.1 — MCNP references: fix Ctrl+F-style false highlights
-
-**AI Agent:** Claude (Cursor IDE)
-
-**Root cause:** The role-aware index (`mcnpReferences.ts`) was already correct — occurrences are
-stored as `{kind, id, span}` and queried by `(kind, id)`. The user-visible “highlights every matching
-digit” symptom came from VS Code’s **built-in word-occurrence highlighter** (`editor.occurrencesHighlight`)
-and provider fallbacks, not from naive indexing:
-
-1. `DocumentHighlightProvider.provideDocumentHighlights` returned `undefined` when the cursor was not
-   on an indexed entity → VS Code treated that as “no provider result” and ran word-based highlighting
-   for the digit under the cursor (every `3` in the file lights up).
-2. `ReferenceProvider.provideReferences` had the same `undefined` fallback → Shift+F12 could degrade
-   to a text search for the bare number.
-3. **`editor.occurrencesHighlight: "off"`** (v0.4.1 attempt) disabled *all* occurrence
-   highlighting, including the custom `DocumentHighlightProvider`, while **`editor.selectionHighlight`**
-   (default on) still painted every matching digit. Fix: `"singleFile"` + `"selectionHighlight": false`.
-4. MCNP **`wordPattern`** treated bare integers as editor “words”, feeding the fallback highlighter.
-   Tightened to decimals / letter-led tokens / `m|mt|mx|tr` cards only.
-
-**Fix (`providers.ts`, `package.json`):**
-
-- Document highlight provider always returns an array; uses new `getHighlightOccurrences()`.
-- Reference provider returns `[]` instead of `undefined` when nothing is referenceable.
-- `contributes.configurationDefaults`: `"[mcnp]": { "editor.occurrencesHighlight": "singleFile", "editor.selectionHighlight": false }`.
-- MCNP `wordPattern` no longer treats bare integers as words (stops Ctrl+F-style fallback).
-- Exported `entityAtPosition` (alias for `resolveAt`) and `getHighlightOccurrences`.
-- Tests: disambiguation deck highlight counts, lattice fill universe IDs, non-entity `imp:n=` digits.
-
-**Coordination:** Ships on top of **Input Builder v0.4.0** (same release train; version bumped to
-**0.4.1** for the MCNP reference fix).
-
----
-
-## 2026-06-28 — v0.4.0 — Input Builder wizard
-
-**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
-
-Version bumped `0.3.1` → `0.4.0` in `package.json` / `package-lock.json`. Adds an integrated
-**Input Builder** webview to assemble starter decks without hand-typing boilerplate.
-
-- **`owen.openInputBuilder`** — five-step wizard (code, materials, geometry, settings, preview) with
-  **Insert at Cursor** / **New File** actions.
-- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers
-  (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
-- **`src/inputBuilder/deckBuilder.ts`** — pin-cell or 17×17 lattice starter decks; lattice mode
-  reuses `latticeCodegen.ts`.
-- **`src/panels/inputBuilder.ts`** — webview panel wiring; editor title / context menus list Input
-  Builder ahead of Lattice Builder.
-- **Tests:** `inputBuilder.test.ts` (8 unit tests); BEAVRS MCNP extractor asserts baffle **box**
-  count > 0.
+**Version:** `0.3.2`. VSIX built locally; Marketplace/Open VSX publish deferred to the maintainer.
 
 ---
 
