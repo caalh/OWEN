@@ -24,6 +24,7 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
+import { emitSconeRadialStructure } from '../radialStructure';
 
 interface LeafBlock {
     name: string;
@@ -367,25 +368,13 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     } else if (hasAxial) {
         notes.push('This deck defines axial structure (active fuel / plenum / grids / dashpot). Enable "Axial segments" to expand it; the Slice (Z) control cuts the stack.');
     }
-    // Vessel / barrel shells for full-reactor context.
-    if (vessel.shells.length && cylinders.length > 0) {
+    // Radial containment (barrel, shields, downcomer, RPV).
+    if (cylinders.length > 0) {
         let footprint = 0;
         for (const cyl of cylinders) footprint = Math.max(footprint, Math.hypot(cyl.x, cyl.y) + cyl.radius);
-        for (const s of vessel.shells) {
-            if (s.radius && s.radius > footprint * 0.5) {
-                cylinders.push({
-                    label: `vessel_${s.id}`,
-                    radius: s.radius,
-                    height: coreHeight,
-                    x: 0,
-                    y: 0,
-                    z: coreZ,
-                    color: componentColor(Component.Vessel),
-                    opacity: 0.12,
-                    component: Component.Vessel,
-                    material: 'Structure',
-                });
-            }
+        const structN = emitSconeRadialStructure(text, cylinders, { height: coreHeight, zCenter: coreZ }, footprint);
+        if (structN > 0) {
+            notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV).`);
         }
     }
 

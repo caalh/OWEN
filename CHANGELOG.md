@@ -5,6 +5,53 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-06-28
+
+Fix MCNP cross-reference **in-editor highlights** and **Find All References** falsely matching every
+occurrence of a digit (Ctrl+F-style) instead of the role-aware entity under the cursor.
+
+### Fixed
+
+- **`McnpDocumentHighlightProvider`** always returns a highlight array (never `undefined`) so VS Code
+  does not fall through to its built-in word-occurrence highlighter.
+- **`McnpReferenceProvider`** returns `[]` instead of `undefined` when the cursor is not on a
+  referenceable entity, blocking text-search fallback on Shift+F12.
+- **`configurationDefaults`** sets `"[mcnp]": { "editor.occurrencesHighlight": "singleFile", "editor.selectionHighlight": false }` so OWEN's role-aware `DocumentHighlightProvider` runs without VS Code's parallel word/selection highlighter.
+- MCNP **`wordPattern`** no longer classifies bare integers as editor words (eliminates digit fallback).
+- New **`getHighlightOccurrences`** / **`entityAtPosition`** helpers; expanded disambiguation tests
+  (digit 3 as cell / material / surface / universe; lattice `fill=` universe IDs).
+
+## [0.4.0] — 2026-06-28
+
+Integrated **Input Builder** webview — wizard to assemble starter MCNP / OpenMC / Serpent / SCONE decks from a curated material library, optional lattice geometry, and run settings.
+
+### Added
+
+- **`OWEN: Open Input Builder`** (`owen.openInputBuilder`) — five-step wizard (code, materials, geometry, settings, preview) with **Insert at Cursor** / **New File**.
+- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
+- **`src/inputBuilder/deckBuilder.ts`** — assembles pin-cell or lattice starter decks; lattice mode reuses `latticeCodegen.ts`.
+- Headless unit tests for material codegen and deck assembly (`inputBuilder.test.ts`).
+- BEAVRS MCNP extractor test now asserts baffle **box** count > 0.
+
+### Changed
+
+- Editor title / context OWEN menus list Input Builder ahead of Lattice Builder.
+
+## [0.3.1] — 2026-06-28
+
+BEAVRS **radial structure** in the 3D preview: barrel, neutron-shield pads, downcomer, RPV liner/RPV, and peripheral baffle boxes.
+
+### Added
+
+- **`src/preview/radialStructure.ts`** — shared annular/box/wedge emitters for MCNP, OpenMC, Serpent, and SCONE parsers.
+- MCNP baffle universes (px/py SS304 plates) render as thin **box** prisms at peripheral lattice positions.
+- OpenMC `BAF["…"]` entries resolve to structure nodes instead of silent skips.
+- Headless tests assert BEAVRS MCNP/OpenMC extracts include radial structure primitives.
+
+### Changed
+
+- Vessel shells are now **annular** (inner/outer radius) where the deck defines cz pairs, not full-disc overlays.
+
 ## [0.3.0] — 2026-06-28
 
 First-class **ALLEN** (Atomic Library Linking Evaluated Nuclear-data) integration — in-editor σ(E) plots linked to the NRDP ENDF/B-VIII.0 bundle.

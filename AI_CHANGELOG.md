@@ -12,6 +12,100 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+---
+
+## 2026-06-28 — v0.4.1 — MCNP references: fix Ctrl+F-style false highlights
+
+**AI Agent:** Claude (Cursor IDE)
+
+**Root cause:** The role-aware index (`mcnpReferences.ts`) was already correct — occurrences are
+stored as `{kind, id, span}` and queried by `(kind, id)`. The user-visible “highlights every matching
+digit” symptom came from VS Code’s **built-in word-occurrence highlighter** (`editor.occurrencesHighlight`)
+and provider fallbacks, not from naive indexing:
+
+1. `DocumentHighlightProvider.provideDocumentHighlights` returned `undefined` when the cursor was not
+   on an indexed entity → VS Code treated that as “no provider result” and ran word-based highlighting
+   for the digit under the cursor (every `3` in the file lights up).
+2. `ReferenceProvider.provideReferences` had the same `undefined` fallback → Shift+F12 could degrade
+   to a text search for the bare number.
+3. **`editor.occurrencesHighlight: "off"`** (v0.4.1 attempt) disabled *all* occurrence
+   highlighting, including the custom `DocumentHighlightProvider`, while **`editor.selectionHighlight`**
+   (default on) still painted every matching digit. Fix: `"singleFile"` + `"selectionHighlight": false`.
+4. MCNP **`wordPattern`** treated bare integers as editor “words”, feeding the fallback highlighter.
+   Tightened to decimals / letter-led tokens / `m|mt|mx|tr` cards only.
+
+**Fix (`providers.ts`, `package.json`):**
+
+- Document highlight provider always returns an array; uses new `getHighlightOccurrences()`.
+- Reference provider returns `[]` instead of `undefined` when nothing is referenceable.
+- `contributes.configurationDefaults`: `"[mcnp]": { "editor.occurrencesHighlight": "singleFile", "editor.selectionHighlight": false }`.
+- MCNP `wordPattern` no longer treats bare integers as words (stops Ctrl+F-style fallback).
+- Exported `entityAtPosition` (alias for `resolveAt`) and `getHighlightOccurrences`.
+- Tests: disambiguation deck highlight counts, lattice fill universe IDs, non-entity `imp:n=` digits.
+
+**Coordination:** Ships on top of **Input Builder v0.4.0** (same release train; version bumped to
+**0.4.1** for the MCNP reference fix).
+
+---
+
+## 2026-06-28 — v0.4.0 — Input Builder wizard
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.3.1` → `0.4.0` in `package.json` / `package-lock.json`. Adds an integrated
+**Input Builder** webview to assemble starter decks without hand-typing boilerplate.
+
+- **`owen.openInputBuilder`** — five-step wizard (code, materials, geometry, settings, preview) with
+  **Insert at Cursor** / **New File** actions.
+- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers
+  (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
+- **`src/inputBuilder/deckBuilder.ts`** — pin-cell or 17×17 lattice starter decks; lattice mode
+  reuses `latticeCodegen.ts`.
+- **`src/panels/inputBuilder.ts`** — webview panel wiring; editor title / context menus list Input
+  Builder ahead of Lattice Builder.
+- **Tests:** `inputBuilder.test.ts` (8 unit tests); BEAVRS MCNP extractor asserts baffle **box**
+  count > 0.
+
+---
+
+## 2026-06-28 — v0.3.1 — BEAVRS radial structure in 3D preview
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.3.0` → `0.3.1` in `package.json` / `package-lock.json`. Adds the BEAVRS
+**radial structure** outside the fuel lattice to the Three.js 3D preview across all four codes.
+
+- **`src/preview/radialStructure.ts` (new).** Shared annular/box/wedge emitters consumed by each
+  code parser (`codes/mcnp.ts`, `openmc.ts`, `serpent.ts`, `scone.ts`).
+- **MCNP:** baffle universes (`px`/`py` SS304 plates) render as thin box prisms at peripheral
+  lattice positions; vessel `cz` pairs become annular shells (inner/outer radius), not full-disc
+  overlays.
+- **OpenMC:** `BAF["…"]` structure entries resolve to drawn nodes instead of silent skips.
+- **Serpent / SCONE:** matching barrel, neutron-shield octant pads, downcomer, RPV liner/RPV rings.
+- **Tests:** `extractor.test.ts` asserts BEAVRS MCNP/OpenMC extracts include non-zero radial
+  structure primitive counts.
+
+---
+
+## 2026-06-28 — v0.3.0 — ALLEN cross-section webview (NRDP ENDF/B-VIII.0)
+
+**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+
+Version bumped `0.2.9` → `0.3.0`. Ships **ALLEN** (Atomic Library Linking Evaluated Nuclear-data)
+as a first-class OWEN feature, coordinated with the NRDP rebrand (`/nrdp/allen`,
+`public/data/allen/` on reactormc.net).
+
+- **`owen.openAllen`** — uPlot webview panel fetching pre-computed σ(E) curves from
+  `owen.allen.dataBaseUrl` (default `https://reactormc.net/data/allen`).
+- **`src/allen/`** — `detectNuclides.ts` (context-aware ZAID/nuclide harvest from active deck),
+  `fetch.ts` (manifest + curve JSON), `panel.ts` (webview UI: nuclide/reaction/temperature
+  pickers, log-log plot, hover readout, coverage notices).
+- **Menus:** command palette, editor title OWEN submenu, and right-click context menu entries.
+- **Tests:** `allenDetect.test.ts` for nuclide detection from sample MCNP/OpenMC decks.
+- **VSIX:** `owen-neutronics-0.3.0.vsix` built locally; Marketplace publish deferred to user.
+
+---
+
 ## 2026-06-27 — v0.2.9 — OpenMC 3D preview: per-pin axial column reconstruction (BEAVRS fidelity)
 
 **AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)

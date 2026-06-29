@@ -21,8 +21,9 @@ function loadDeck(filename: string): string {
 function drawnZExtent(scene: GeometryScene): [number, number] {
     let zmin = Infinity;
     let zmax = -Infinity;
+    const pinLike = new Set(['fuel', 'guide_tube', 'instrument_tube', 'clad', 'gap', 'grid', 'plenum', 'end_plug', 'absorber']);
     for (const c of scene.cylinders) {
-        if (c.component === 'vessel') continue;
+        if (!pinLike.has(c.component ?? '')) continue;
         const h = c.height || 0;
         zmin = Math.min(zmin, (c.z ?? 0) - h / 2);
         zmax = Math.max(zmax, (c.z ?? 0) + h / 2);

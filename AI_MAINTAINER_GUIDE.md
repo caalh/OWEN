@@ -26,8 +26,12 @@ brings first-class editor support for the four major Monte Carlo neutron-transpo
 | **SCONE** | `scone` (`.scone`) | University of Cambridge |
 
 Features: TextMate syntax highlighting, snippets, a webview lattice builder, a Three.js 3D
-geometry preview, deep per-language validation, a simulation runner, a JSON-driven
-parameter sweep, NRDP material insertion, and an opt-in community-library browser.
+geometry preview (full-core BEAVRS, measurement tools, radial structure), **ALLEN** σ(E)
+webview (`src/allen/`), bundled prebuilt models (`prebuilt-models/`), deep per-language
+validation, a simulation runner, a JSON-driven parameter sweep, NRDP material insertion, and
+an opt-in community-library browser.
+
+Current release: **v0.3.1** (stable, VS Code Marketplace + Open VSX).
 
 ---
 
@@ -59,6 +63,8 @@ activate(context)            ← src/extension.ts
         ├── registers owen.runSimulation        → workflows/runner.ts
         ├── registers owen.runSweep             → workflows/sweep.ts
         ├── registers owen.openGeometryPreview  → preview/webview.ts + preview/extractor.ts
+        ├── registers owen.openAllen            → allen/panel.ts (uPlot σ(E) from NRDP)
+        ├── registers owen.openPrebuiltModel    → commands/openPrebuiltModel.ts
         ├── registers owen.insertMaterial       → commands/insertMaterial.ts (data/nrdp-*.json)
         ├── registers owen.openTutorial         → commands/openTutorial.ts (data/tutorial-links.json)
         └── registers owen.searchReactorLibrary → community/browser.ts → community/client.ts
@@ -80,7 +86,12 @@ files are sniffed for an `openmc` import.
 | Runner | `src/workflows/runner.ts` | `planLaunch()` + launch solver in a terminal |
 | Sweep | `src/workflows/sweep.ts` | cartesian param sweep, per-run mutation, k-eff parse, manifest + TSV |
 | Geometry | `src/preview/extractor.ts` | deck → `CylinderSpec[]` (ports GROVES `analysis.py`) |
-| Geometry | `src/preview/webview.ts` | Three.js webview, posts cylinders |
+| Geometry | `src/preview/webview.ts` | Three.js webview, layer toggles, measurement tools |
+| Geometry | `src/preview/radialStructure.ts` | BEAVRS barrel/shields/RPV/baffle annular+bbox emitters |
+| Geometry | `src/preview/codes/*.ts` | per-language parsers (MCNP, OpenMC, Serpent, SCONE) |
+| ALLEN | `src/allen/panel.ts` | `owen.openAllen` — uPlot webview, NRDP ENDF/B-VIII.0 curves |
+| ALLEN | `src/allen/detectNuclides.ts` | harvest ZAIDs/nuclides from active deck text |
+| Prebuilts | `prebuilt-models/` + `commands/openPrebuiltModel.ts` | bundled BEAVRS full core + assembly starters |
 | Materials | `src/commands/insertMaterial.ts` | NRDP picker → language-aware material code |
 | Tutorials | `src/commands/openTutorial.ts` | deep-links into reactormc.net |
 | Community | `src/community/client.ts` | **lazy** Supabase client factory |

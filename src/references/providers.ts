@@ -12,6 +12,7 @@ import {
     resolveAt,
     getDefinition,
     getReferences,
+    getHighlightOccurrences,
     describeEntity,
     Occurrence,
 } from './mcnpReferences';
@@ -61,10 +62,10 @@ class McnpReferenceProvider implements vscode.ReferenceProvider {
         doc: vscode.TextDocument,
         position: vscode.Position,
         context: vscode.ReferenceContext,
-    ): vscode.Location[] | undefined {
+    ): vscode.Location[] {
         const index = getIndexFor(doc);
         const occ = resolveAt(index, position.line, position.character);
-        if (!occ) return undefined;
+        if (!occ) return [];
         return getReferences(index, occ.kind, occ.id, context.includeDeclaration)
             .map((r) => new vscode.Location(doc.uri, spanToRange(r)));
     }
@@ -74,15 +75,17 @@ class McnpReferenceProvider implements vscode.ReferenceProvider {
 // every matching digit in the file — the "it just finds all the 1s" problem)
 // with a role-aware highlight: only the occurrences of THIS entity of THIS kind
 // are highlighted. The definition is marked Write, references Read.
+// Always returns an array (never undefined) so the provider chain stops and the
+// built-in word highlighter is not consulted; pair with configurationDefaults
+// for [mcnp]: occurrencesHighlight singleFile + selectionHighlight false.
 class McnpDocumentHighlightProvider implements vscode.DocumentHighlightProvider {
     provideDocumentHighlights(
         doc: vscode.TextDocument,
         position: vscode.Position,
-    ): vscode.DocumentHighlight[] | undefined {
+    ): vscode.DocumentHighlight[] {
         const index = getIndexFor(doc);
-        const occ = resolveAt(index, position.line, position.character);
-        if (!occ) return undefined;
-        return getReferences(index, occ.kind, occ.id, true).map(
+        const refs = getHighlightOccurrences(index, position.line, position.character);
+        return refs.map(
             (r) =>
                 new vscode.DocumentHighlight(
                     spanToRange(r),

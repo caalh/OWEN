@@ -1057,4 +1057,44 @@ geometry { universes {
         assert.ok(scene.components.some((c) => c.id === 'fuel' && c.count > 0), 'expected a fuel group with a count');
         assert.ok(scene.materials.some((m) => /UO2/i.test(m.name)), 'expected a UO2 material entry');
     });
+
+    // --- BEAVRS radial structure (v0.3.1) ---
+
+    test('BEAVRS MCNP extract includes radial structure (barrel / RPV / shields)', () => {
+        const fs = require('fs') as typeof import('fs');
+        const path = require('path') as typeof import('path');
+        const deckPath = path.join(__dirname, '..', '..', '..', 'prebuilt-models', 'beavrs_fullcore_mcnp.i');
+        if (!fs.existsSync(deckPath)) {
+            console.log('BEAVRS MCNP deck not bundled — skipping radial structure test');
+            return;
+        }
+        const deck = fs.readFileSync(deckPath, 'utf8');
+        const scene = buildScene(deck, 'mcnp', { detail: 'disc', axial: false });
+        const struct = scene.cylinders.filter((c) =>
+            c.component === 'vessel' || c.component === 'structure' || c.component === 'moderator');
+        assert.ok(struct.length > 0, `expected radial structure primitives, got ${struct.length}`);
+        const baffles = scene.cylinders.filter((c) => c.component === 'structure' && c.shape === 'box');
+        assert.ok(baffles.length > 0, `expected MCNP baffle boxes, got ${baffles.length}`);
+        assert.ok(struct.some((c) => c.innerRadius && c.innerRadius > 100),
+            'expected annular barrel/RPV shells (innerRadius > 100 cm)');
+        assert.ok(scene.components.some((c) => c.id === 'vessel' || c.id === 'structure'),
+            'expected vessel/structure in component legend');
+    });
+
+    test('BEAVRS OpenMC extract includes radial structure and baffle boxes', () => {
+        const fs = require('fs') as typeof import('fs');
+        const path = require('path') as typeof import('path');
+        const deckPath = path.join(__dirname, '..', '..', '..', 'prebuilt-models', 'beavrs_fullcore_openmc.py');
+        if (!fs.existsSync(deckPath)) {
+            console.log('BEAVRS OpenMC deck not bundled — skipping radial structure test');
+            return;
+        }
+        const deck = fs.readFileSync(deckPath, 'utf8');
+        const scene = buildScene(deck, 'openmc', { detail: 'disc', axial: false });
+        const struct = scene.cylinders.filter((c) =>
+            c.component === 'vessel' || c.component === 'structure' || c.shape === 'box');
+        assert.ok(struct.length > 0, `expected radial/baffle structure, got ${struct.length}`);
+        const pins = scene.cylinders.filter((c) => c.component === 'fuel' || c.component === 'guide_tube');
+        assert.ok(pins.length > 50000, `expected full pin count, got ${pins.length}`);
+    });
 });

@@ -622,6 +622,20 @@ export function resolveAt(index: McnpReferenceIndex, line: number, character: nu
     return best;
 }
 
+/** Alias used by providers/tests — entity (kind + id) at a source position. */
+export const entityAtPosition = resolveAt;
+
+/** Role-aware highlight/reference set for the entity under the cursor. */
+export function getHighlightOccurrences(
+    index: McnpReferenceIndex,
+    line: number,
+    character: number,
+): Occurrence[] {
+    const occ = resolveAt(index, line, character);
+    if (!occ) return [];
+    return getReferences(index, occ.kind, occ.id, true);
+}
+
 export function getDefinition(index: McnpReferenceIndex, kind: McnpEntityKind, id: number): EntityDefinition | undefined {
     return index.definitions.get(defKey(kind, id));
 }

@@ -11,12 +11,19 @@ owen/
 │   ├── extension.ts                  # activate(): registers all owen.* commands
 │   ├── commands/
 │   │   ├── insertMaterial.ts         # owen.insertMaterial — NRDP material → language-aware code
-│   │   └── openTutorial.ts           # owen.openTutorial — deep-link into reactormc.net
+│   │   ├── openTutorial.ts           # owen.openTutorial — deep-link into reactormc.net
+│   │   └── openPrebuiltModel.ts      # owen.openPrebuiltModel — bundled BEAVRS + assembly decks
+│   ├── allen/
+│   │   ├── detectNuclides.ts         # harvest ZAIDs/nuclides from active deck
+│   │   ├── fetch.ts                  # NRDP manifest + curve JSON
+│   │   └── panel.ts                  # owen.openAllen — uPlot σ(E) webview
 │   ├── panels/
 │   │   └── latticeBuilder.ts         # owen.openLatticeBuilder — webview grid → lattice code
 │   ├── preview/
 │   │   ├── extractor.ts              # deck text → CylinderSpec[] (port of GROVES analysis.py)
-│   │   └── webview.ts                # owen.openGeometryPreview — Three.js 3D webview
+│   │   ├── webview.ts                # owen.openGeometryPreview — Three.js 3D webview
+│   │   ├── radialStructure.ts        # BEAVRS barrel/shields/RPV/baffle emitters
+│   │   └── codes/                    # mcnp.ts, openmc.ts, serpent.ts, scone.ts
 │   ├── validation/
 │   │   └── validator.ts              # owen.validateInput — per-language diagnostics
 │   ├── workflows/                    # DO NOT RENAME (owen.runSimulation / owen.runSweep)
@@ -34,6 +41,8 @@ owen/
 │           ├── extractor.test.ts     # geometry-extractor tests
 │           └── validator.test.ts     # validation tests
 │
+├── prebuilt-models/                  # Bundled BEAVRS full core + assembly starters (VSIX-shipped)
+│   └── index.json                    # manifest for owen.openPrebuiltModel
 ├── syntaxes/                         # TextMate grammars
 │   ├── mcnp.tmLanguage.json
 │   ├── serpent.tmLanguage.json

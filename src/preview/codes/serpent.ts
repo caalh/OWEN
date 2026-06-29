@@ -17,6 +17,7 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
+import { emitSerpentRadialStructure } from '../radialStructure';
 
 const SERPENT_KEYWORDS = new Set([
     'pin', 'surf', 'cell', 'lat', 'set', 'mat', 'det', 'dep', 'plot', 'mesh',
@@ -359,26 +360,13 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         if (pins.size > 0) notes.push('No lattice card found — laid out pin definitions side by side.');
     }
 
-    // Vessel / barrel context from large `cyl` surfaces.
+    // Radial containment (barrel, shields, downcomer, RPV).
     if (cylinders.length > 0) {
         let footprint = 0;
         for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
-        const shells = [...surfs.values()]
-            .filter((s) => (s.type === 'cyl' || s.type === 'cylz') && surfRadius(s) > footprint * 0.5)
-            .sort((a, b) => surfRadius(b) - surfRadius(a));
-        for (const s of shells) {
-            cylinders.push({
-                label: `vessel_${s.id}`,
-                radius: surfRadius(s),
-                height: fullHeight,
-                x: 0,
-                y: 0,
-                z: fullZmid,
-                color: componentColor(Component.Vessel),
-                opacity: 0.12,
-                component: Component.Vessel,
-                material: 'Structure',
-            });
+        const structN = emitSerpentRadialStructure(text, surfs, cylinders, { height: fullHeight, zCenter: fullZmid }, footprint);
+        if (structN > 0) {
+            notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV).`);
         }
     }
 

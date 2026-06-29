@@ -2,8 +2,10 @@ import * as assert from 'assert';
 import {
     buildMcnpReferenceIndex,
     resolveAt,
+    entityAtPosition,
     getDefinition,
     getReferences,
+    getHighlightOccurrences,
 } from '../../references/mcnpReferences';
 
 // A compact 3×3 PWR-style lattice: fuel (u=1) + guide tube (u=2), placed by a
@@ -84,6 +86,10 @@ suite('OWEN MCNP reference tracker', () => {
         assert.strictEqual(occ!.kind, 'universe');
         assert.strictEqual(occ!.id, 2);
         assert.strictEqual(occ!.isDefinition, false, 'a fill entry is a reference, not a definition');
+
+        const fillHighlights = getHighlightOccurrences(index, lineIdx, 7);
+        assert.ok(fillHighlights.every((o) => o.kind === 'universe' && o.id === 2));
+        assert.strictEqual(fillHighlights.length, 7, 'universe 2 fill highlights should not merge other ids');
     });
 
     test('classifies material definitions by ZAID (UO2 / Zircaloy / Water)', () => {
@@ -191,6 +197,42 @@ suite('OWEN MCNP reference tracker — role disambiguation', () => {
         assert.strictEqual(occ!.kind, 'material');
         assert.strictEqual(occ!.id, 3);
         assert.strictEqual(occ!.isDefinition, false, 'mt3 references material 3, not defines it');
+    });
+
+    test('entityAtPosition is an alias for resolveAt', () => {
+        const index = buildMcnpReferenceIndex(DISAMBIG_DECK);
+        const lines = DISAMBIG_DECK.split('\n');
+        const cellLine = lines.findIndex((l) => l.startsWith('3 3 -10.0'));
+        const pos = { line: cellLine, col: 0 };
+        assert.deepStrictEqual(entityAtPosition(index, pos.line, pos.col), resolveAt(index, pos.line, pos.col));
+    });
+
+    test('getHighlightOccurrences returns role-specific counts, not all matching digits', () => {
+        const index = buildMcnpReferenceIndex(DISAMBIG_DECK);
+        const lines = DISAMBIG_DECK.split('\n');
+        const cellLine = lines.findIndex((l) => l.startsWith('3 3 -10.0'));
+
+        assert.strictEqual(getHighlightOccurrences(index, cellLine, 0).length, 1, 'cell 3');
+        assert.strictEqual(getHighlightOccurrences(index, cellLine, 2).length, 4, 'material 3');
+        const surfCol = lines[cellLine].indexOf(' -3') + 2;
+        assert.strictEqual(getHighlightOccurrences(index, cellLine, surfCol).length, 3, 'surface 3');
+        const uCol = lines[cellLine].indexOf('u=3') + 2;
+        assert.strictEqual(getHighlightOccurrences(index, cellLine, uCol).length, 1, 'universe 3');
+
+        const surfHighlights = getHighlightOccurrences(index, cellLine, surfCol);
+        assert.ok(surfHighlights.every((o) => o.kind === 'surface' && o.id === 3));
+        assert.ok(!surfHighlights.some((o) => o.kind === 'material' || o.kind === 'cell' || o.kind === 'universe'));
+        // Highlight ranges must not include unrelated "3" columns on the same line.
+        assert.ok(!surfHighlights.some((o) => o.line === cellLine && o.startCol === 0), 'cell-id 3 column');
+        assert.ok(!surfHighlights.some((o) => o.line === cellLine && o.startCol === 2), 'material 3 column');
+    });
+
+    test('non-entity numbers return no highlight occurrences', () => {
+        const index = buildMcnpReferenceIndex(DISAMBIG_DECK);
+        const lines = DISAMBIG_DECK.split('\n');
+        const cellLine = lines.findIndex((l) => l.startsWith('3 3 -10.0'));
+        const impCol = lines[cellLine].indexOf('imp:n=1') + 6; // the "1" in imp:n=1
+        assert.strictEqual(getHighlightOccurrences(index, cellLine, impCol).length, 0);
     });
 });
 

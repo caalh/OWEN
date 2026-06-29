@@ -25,6 +25,9 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { componentColor, emitLayers, materialColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
+import {
+    baffleBox, emitMcnpRadialStructure, mcnpBaffleUniverses,
+} from '../radialStructure';
 
 type SurfaceType =
     | 'cz' | 'cx' | 'cy' | 'c/z' | 'c/x' | 'c/y'
@@ -233,6 +236,8 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
 
     const cylinders: CylinderSpec[] = [];
     let capped = false;
+    const baffleUniverses = mcnpBaffleUniverses(byUniverse, surfaces, materials);
+    const radialCtx = { height, zCenter: zmid };
 
     const placePin = (uid: number, cx: number, cy: number, label: string, zCenter: number = zmid, segHeight: number = height): void => {
         if (cylinders.length >= maxInstances) { capped = true; return; }
@@ -273,6 +278,12 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     // into its z-segments; otherwise it collapses to its tallest (active-fuel)
     // segment over the full model height. A plain pin universe places directly.
     const placeEntry = (uid: number, cx: number, cy: number, label: string): void => {
+        if (baffleUniverses.has(uid)) {
+            if (cylinders.length >= maxInstances) { capped = true; return; }
+            const hw = Math.max(subPitch * 0.42, 1.0);
+            cylinders.push(baffleBox(`${label}_baffle`, cx, cy, hw, { height, zCenter: zmid }));
+            return;
+        }
         const segs = axialStacks.get(uid);
         if (segs) {
             if (axialOn) {
@@ -344,25 +355,10 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         return { cylinders: bare.cylinders, warnings, notes: bare.notes };
     }
 
-    // Vessel / barrel context: large z-axis cylinders not used as pins.
-    let footprint = 0;
-    for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
-    const vesselShells = [...surfaces.values()]
-        .filter((s) => (s.type === 'cz' || s.type === 'c/z') && cylinderRadius(s) > footprint * 0.5)
-        .sort((a, b) => cylinderRadius(b) - cylinderRadius(a));
-    for (const s of vesselShells) {
-        cylinders.push({
-            label: `vessel_${s.id}`,
-            radius: cylinderRadius(s),
-            height,
-            x: s.type === 'c/z' ? s.params[0] : 0,
-            y: s.type === 'c/z' ? s.params[1] : 0,
-            z: zmid,
-            color: componentColor(Component.Vessel),
-            opacity: 0.12,
-            component: Component.Vessel,
-            material: 'Structure',
-        });
+    // Radial containment: annular barrel / shields / downcomer / RPV + baffle boxes above.
+    const structCount = emitMcnpRadialStructure(surfaces, cells, cylinders, radialCtx, materials);
+    if (structCount > 0) {
+        notes.push(`Drew ${structCount} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV). Baffle plates render as thin boxes at peripheral lattice positions.`);
     }
 
     if (discMode) {

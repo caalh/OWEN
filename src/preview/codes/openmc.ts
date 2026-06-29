@@ -18,6 +18,7 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
+import { baffleBox, emitOpenmcRadialStructure } from '../radialStructure';
 
 interface NamedValue {
     name: string;
@@ -301,9 +302,14 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     // Walks the resolved programmatic-core tree (lattices of lattices of pins),
     // placing each pin by its classified role. Mirrors `placeGrid` but consumes
     // pre-resolved `ResolvedNode`s instead of token strings + a name map.
-    const placeTree = (node: ResolvedNode, cx: number, cy: number, label: string, depth: number): void => {
+    const placeTree = (node: ResolvedNode, cx: number, cy: number, label: string, depth: number, pitchHint = 1.26): void => {
         if (depth > 10 || cylinders.length >= maxInstances) return;
         if (node.kind === 'skip') return;
+        if (node.kind === 'structure') {
+            const hw = Math.max(pitchHint * 0.42, 1.0);
+            cylinders.push(baffleBox(`${label}_baffle`, cx, cy, hw, { height, zCenter: collapsedZ }));
+            return;
+        }
         if (node.kind === 'pin') {
             if (node.role === 'empty') return;
             if (columnModel) {
@@ -342,7 +348,7 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         }
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < g[r].length; c++) {
-                placeTree(g[r][c], x0 + c * px, y0 - r * py, `${label}_r${r}c${c}`, depth + 1);
+                placeTree(g[r][c], x0 + c * px, y0 - r * py, `${label}_r${r}c${c}`, depth + 1, Math.max(px, py));
             }
         }
     };
@@ -361,9 +367,11 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         notes.push(`Expanded a ${rows}×${cols} lattice (${cylinders.length} ${discMode ? 'pins' : 'pin layers'}).`);
     }
 
-    // Vessel / barrel shells from large bounding ZCylinders (span the full
-    // axial extent so they enclose the whole stack, not just the active fuel).
-    addVesselShells(text, cylinders, collapsedHeight, collapsedZ);
+    // Radial containment shells (barrel, shields, downcomer, RPV) + baffle boxes above.
+    const structN = emitOpenmcRadialStructure(text, cylinders, { height: collapsedHeight, zCenter: collapsedZ });
+    if (structN > 0) {
+        notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV). Baffle universes render as thin boxes at peripheral lattice positions.`);
+    }
 
     if (discMode) {
         notes.push(`Disc mode: one disc per pin. Switch "Pin detail" to Detailed layers for concentric fuel/gap/clad/coolant shells.`);
@@ -1208,7 +1216,8 @@ interface ResolvedLattice {
     lowerLeft: [number, number] | null;
 }
 interface ResolvedSkip { kind: 'skip'; }
-type ResolvedNode = ResolvedPin | ResolvedLattice | ResolvedSkip;
+interface ResolvedStructure { kind: 'structure'; subtype: 'baffle' | 'other'; }
+type ResolvedNode = ResolvedPin | ResolvedLattice | ResolvedSkip | ResolvedStructure;
 
 interface AssemblyFn {
     params: string[];
@@ -1582,13 +1591,23 @@ function resolveExpr(expr: string, scope: Scope, depth: number): ResolvedNode {
     // Dict subscript: D["key"].
     const sub = t.match(/^([A-Za-z_]\w*)\s*\[\s*['"]([^'"]+)['"]\s*\]$/);
     if (sub && scope.dicts.has(sub[1])) {
-        const d = scope.dicts.get(sub[1])!;
-        if (d.has(sub[2])) result = resolveExpr(d.get(sub[2])!, scope, depth + 1);
+        if (/^(BAF|baf)$/i.test(sub[1])) {
+            result = { kind: 'structure', subtype: 'baffle' };
+        } else {
+            const d = scope.dicts.get(sub[1])!;
+            if (d.has(sub[2])) result = resolveExpr(d.get(sub[2])!, scope, depth + 1);
+        }
+    } else if (sub && /^(BAF|baf)$/i.test(sub[1])) {
+        result = { kind: 'structure', subtype: 'baffle' };
+    } else if (/^BAF\s*\[/.test(t) || /\bbaf[_\[]/i.test(t)) {
+        result = { kind: 'structure', subtype: 'baffle' };
     } else {
         // Function call: name(args).
         const call = t.match(/^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/);
         if (call && scope.asmFns.has(call[1])) {
             result = resolveAssemblyCall(call[1], splitTopLevel(call[2]), scope) ?? { kind: 'skip' };
+        } else if (call && /_baffle/i.test(call[1])) {
+            result = { kind: 'structure', subtype: 'baffle' };
         } else if (/^[A-Za-z_]\w*$/.test(t)) {
             // Bare identifier: a RectLattice, another variable, or a leaf pin.
             if (scope.rectLats.has(t) && scope.latUniverses.has(t)) {
@@ -1702,7 +1721,7 @@ function resolveCoreTree(text: string): ResolvedLattice | null {
 
 function countTreePins(node: ResolvedNode): number {
     if (node.kind === 'pin') return 1;
-    if (node.kind === 'skip') return 0;
+    if (node.kind === 'skip' || node.kind === 'structure') return 0;
     let total = 0;
     for (const row of node.grid) for (const cell of row) total += countTreePins(cell);
     return total;

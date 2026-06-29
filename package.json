@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit: syntax highlighting, lattice builder, geometry preview, validation, and workflow automation for MCNP, OpenMC, Serpent, and SCONE.",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -46,6 +46,7 @@
     "onLanguage:scone",
     "onLanguage:python",
     "onCommand:owen.openLatticeBuilder",
+    "onCommand:owen.openInputBuilder",
     "onCommand:owen.openAllen",
     "onCommand:owen.validateInput",
     "onCommand:owen.runSimulation",
@@ -63,6 +64,12 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configurationDefaults": {
+      "[mcnp]": {
+        "editor.occurrencesHighlight": "singleFile",
+        "editor.selectionHighlight": false
+      }
+    },
     "languages": [
       {
         "id": "mcnp",
@@ -134,6 +141,11 @@
       {
         "command": "owen.openLatticeBuilder",
         "title": "OWEN: Open Lattice Builder",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.openInputBuilder",
+        "title": "OWEN: Open Input Builder",
         "category": "OWEN"
       },
       {
@@ -254,6 +266,10 @@
           "when": "editorLangId == mcnp"
         },
         {
+          "command": "owen.openInputBuilder",
+          "group": "2_build@0"
+        },
+        {
           "command": "owen.openLatticeBuilder",
           "group": "2_build@1"
         },
@@ -314,6 +330,10 @@
           "command": "owen.showMcnpReferences",
           "group": "1_analyze@4",
           "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.openInputBuilder",
+          "group": "2_build@0"
         },
         {
           "command": "owen.openLatticeBuilder",

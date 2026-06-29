@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { LatticeBuilderPanel } from './panels/latticeBuilder';
+import { InputBuilderPanel } from './panels/inputBuilder';
 import { validateInputFile } from './validation/validator';
 import { runSimulation } from './workflows/runner';
 import { registerRunSweep } from './workflows/sweep';
@@ -27,6 +28,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('owen.openLatticeBuilder', () => {
             LatticeBuilderPanel.createOrShow(context.extensionUri);
+        }),
+
+        vscode.commands.registerCommand('owen.openInputBuilder', () => {
+            InputBuilderPanel.createOrShow(context.extensionUri);
         }),
 
         vscode.commands.registerCommand('owen.openAllen', () => {
