@@ -53,6 +53,7 @@ switch to concentric pin layers, and slice through the core.
 | **3D geometry preview** | Three.js webview rendering of MCNP / OpenMC / Serpent / SCONE geometry with component / material / axial-layer toggles, slice planes, and a Disc/Layers fidelity control. Renders a **full BEAVRS core** (all 193 assemblies) across every code — including OpenMC cores whose lattices are built programmatically (comprehension/dict-driven assembly maps are statically expanded, no Python executed) — without dropping pins, and shows the **full axial stack** for OpenMC too — each pin is reconstructed as its real z-column from the deck's `_SHELLS`/`STACKS`/`R[key]` tables, so grid spacers, plena, end plugs and SS nozzles render with their own per-band shells/materials over the complete 0→460 cm assembly height, matching MCNP/Serpent/SCONE. Geometry is instanced (so draw calls stay low) and a configurable instance budget (`owen.preview.maxInstances`, default 1.5M) auto-simplifies detail (shells→discs, then collapses axial) instead of hiding pins when a deck is huge. **Hover** any part to read its layer, material, axial index, radius/diameter and z-range; **solo** a layer to isolate it; and **measure** distances (with Δx Δy Δz), included angles, and pin/shell radii directly in the view. |
 | **MCNP cross-reference tracker** | Role- and position-aware hover, Go-to-Definition, Find-All-References, occurrence highlight, and a **MCNP References** tree for MCNP decks. A number is resolved by *what it is and where it sits on the card* — cell id (1st field), material number (2nd field; `0` = void), geometry surface refs (signed entries), surface id (1st field of a surface card), `u=` universe, `fill`/`lat` (lattice fill arrays are decoded so universe references inside them resolve), `trcl`/`tr` transforms, and `mt`/`mx` material-data cards. Clicking surface `3` finds only the references to *surface 3* — never material 3, cell 3, or the digit `3` inside a `fill=` index. |
 | **Deep validation** | Language-aware diagnostics with codes — ZAID format, density/fraction sign conventions, `mt`/S(α,β) hydrogen checks, macrobody parameter counts (MCNP); `IndependentSource`/`RectangularPrism` API checks (OpenMC); `cuboid` vs `rect`, `trcl`, CLI `omp` (Serpent); `aceNeutronDatabase`, temperature-suffix matching, `pinUniverse` radii/fills (SCONE). |
+| **ALLEN σ(E) viewer** | Built-in cross-section webview: log-log σ(E) plots from ENDF/B-VIII.0, nuclide/reaction picker, multi-overlay, hover readout, temperature and library selectors. Open via `OWEN: Open ALLEN Cross-Sections` or from any NRDP material link. |
 | **Workflow automation** | One-command simulation runner that launches the right solver in a dedicated terminal. |
 | **Parametric sweep** | JSON-described parameter sweeps with per-run input mutation, output capture, k-eff parsing, and a manifest + TSV summary. |
 | **Material insertion (NRDP)** | Insert reactor materials from the Nuclear Reactor Data Project database — bundled snapshot with optional live refresh from reactormc.net, language-aware output. |
@@ -71,9 +72,9 @@ switch to concentric pin layers, and slice through the core.
 **From a VSIX** (available now via [GitHub Releases](https://github.com/caalh/owen/releases/latest)):
 
 ```bash
-code --install-extension owen-neutronics-0.1.0.vsix
+code --install-extension owen-neutronics-0.3.2.vsix
 # Cursor:
-cursor --install-extension owen-neutronics-0.1.0.vsix
+cursor --install-extension owen-neutronics-0.3.2.vsix
 ```
 
 Or in the editor: Extensions view → `...` menu → **Install from VSIX…**.
@@ -84,14 +85,18 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 
 | Command | Description |
 |---------|-------------|
+| `OWEN: Open ALLEN Cross-Sections` | Built-in σ(E) webview — nuclide/reaction picker, log-log plot, multi-overlay |
 | `OWEN: Open Input Builder` | Wizard: materials + geometry + settings → full starter deck |
 | `OWEN: Open Lattice Builder` | Visual lattice grid editor |
 | `OWEN: Validate Input File` | Deep MCNP / OpenMC / Serpent / SCONE checks |
 | `OWEN: Run Simulation` | Launch the appropriate solver in a dedicated terminal |
 | `OWEN: Run Parameter Sweep` | Generate and run a JSON-described sweep |
-| `OWEN: Open 3D Geometry Preview` | Three.js webview (MCNP cylinders) |
+| `OWEN: Open 3D Geometry Preview` | Three.js webview — full-core BEAVRS, layer toggles, measurement tools |
+| `OWEN: Open Prebuilt Model…` | Load a bundled BEAVRS full-core or assembly deck |
+| `OWEN: Show MCNP References` | Open the MCNP cross-reference tracker dock |
 | `OWEN: Open Tutorial` | Jump to a reactormc.net tutorial page |
 | `OWEN: Insert Material from Database` | NRDP material picker, language-aware |
+| `OWEN: Choose Highlight Palette` | Switch between Classic / Solarized / High Contrast / Pastel |
 | `OWEN: Search Reactor Library` | Community Library browser (disabled by default) |
 
 ## Configuration
