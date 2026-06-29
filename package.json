@@ -1,8 +1,8 @@
 {
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
-  "description": "Nuclear reactor modeling toolkit: syntax highlighting, lattice builder, geometry preview, validation, and workflow automation for MCNP, OpenMC, Serpent, and SCONE.",
-  "version": "0.4.1",
+  "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: syntax highlighting (4 palettes), MCNP cross-reference tracker, ALLEN σ(E) cross-section viewer, 3D geometry preview (full-core BEAVRS, measurement tools), lattice builder, prebuilt BEAVRS models, deep validation, and simulation automation.",
+  "version": "0.3.3",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -48,6 +48,7 @@
     "onCommand:owen.openLatticeBuilder",
     "onCommand:owen.openInputBuilder",
     "onCommand:owen.openAllen",
+    "onCommand:owen.openResults",
     "onCommand:owen.validateInput",
     "onCommand:owen.runSimulation",
     "onCommand:owen.openGeometryPreview",
@@ -137,6 +138,12 @@
         "title": "OWEN: Open ALLEN Cross-Sections",
         "category": "OWEN",
         "icon": "$(graph-line)"
+      },
+      {
+        "command": "owen.openResults",
+        "title": "OWEN: View Results",
+        "category": "OWEN",
+        "icon": "$(output)"
       },
       {
         "command": "owen.openLatticeBuilder",
@@ -278,6 +285,10 @@
           "group": "2_build@2"
         },
         {
+          "command": "owen.openResults",
+          "group": "3_run@3"
+        },
+        {
           "command": "owen.runSimulation",
           "group": "3_run@1"
         },
@@ -342,6 +353,10 @@
         {
           "command": "owen.openGeometryPreview",
           "group": "2_build@2"
+        },
+        {
+          "command": "owen.openResults",
+          "group": "3_run@3"
         },
         {
           "command": "owen.runSimulation",
@@ -575,6 +590,7 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "h5wasm": "^0.7.9"
   }
 }

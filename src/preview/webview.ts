@@ -35,6 +35,24 @@ function postScene(): void {
     }
 }
 
+/** Post mesh-tally heatmap overlay to the live 3D preview (axial slice). */
+export function postMeshOverlay(mesh: {
+    nx: number;
+    ny: number;
+    nz: number;
+    values: number[];
+    label?: string;
+}): void {
+    if (currentPanel && webviewReady) {
+        currentPanel.webview.postMessage({ type: 'meshOverlay', mesh });
+        currentPanel.reveal();
+    } else {
+        vscode.window.showWarningMessage(
+            'OWEN: Open the 3D Geometry Preview first, then overlay mesh tallies.',
+        );
+    }
+}
+
 /**
  * Folds the live `owen.preview.maxInstances` setting into the fidelity options
  * so the parsers' auto-LOD budgeting honours the user's configured ceiling.
@@ -897,7 +915,36 @@ function buildHtml(webview: vscode.Webview): string {
     window.addEventListener('message', (event) => {
       const data = event.data;
       if (data && data.type === 'scene' && data.scene) render(data.scene);
+      if (data && data.type === 'meshOverlay' && data.mesh) applyMeshOverlay(data.mesh);
     });
+
+    let meshOverlayGroup = null;
+    function applyMeshOverlay(mesh) {
+      if (meshOverlayGroup) { scene.remove(meshOverlayGroup); meshOverlayGroup = null; }
+      const { nx, ny, values } = mesh;
+      const max = Math.max(...values.slice(0, nx * ny), 1e-30);
+      const canvas = document.createElement('canvas');
+      canvas.width = nx; canvas.height = ny;
+      const ctx = canvas.getContext('2d');
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          const v = values[i + nx * j] / max;
+          const hue = (1 - v) * 240;
+          ctx.fillStyle = 'hsl(' + hue + ',70%,45%)';
+          ctx.fillRect(i, ny - 1 - j, 1, 1);
+        }
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.magFilter = THREE.NearestFilter;
+      const geo = new THREE.PlaneGeometry(Math.max(nx, ny) * 0.5, Math.max(nx, ny) * 0.5);
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+      const plane = new THREE.Mesh(geo, mat);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.y = 0.05;
+      meshOverlayGroup = new THREE.Group();
+      meshOverlayGroup.add(plane);
+      scene.add(meshOverlayGroup);
+    }
 
     vscode.postMessage({ type: 'ready' });
   </script>

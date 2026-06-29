@@ -1,0 +1,6 @@
+SCONE run output (synthetic fixture)
+cycle 1 k_eff 0.980000 0.002000
+cycle 2 k_eff 0.990000 0.001500
+cycle 3 k_eff 1.000000 0.001000
+flux_thermal  1.250000E+14  0.012000E+14
+absorption_rate  3.400000E+12  0.050000E+12

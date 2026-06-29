@@ -15,7 +15,7 @@ async function main() {
         platform: 'node',
         format: 'cjs',
         target: 'node18',
-        external: ['vscode'],
+        external: ['vscode', 'h5wasm'],
         sourcemap: !production,
         minify: production,
         logLevel: 'info',

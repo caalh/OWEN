@@ -4,6 +4,7 @@
 src/**
 scripts/**
 node_modules/**
+!node_modules/h5wasm/**
 esbuild.js
 .gitignore
 .eslintrc.json

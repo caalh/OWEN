@@ -12,11 +12,48 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-06-29 — v0.3.3 — Doppler Studio + Cross-Code Results Viewer
+
+**AI Agent:** claude-opus-4-8-thinking-high (Cursor IDE)
+
+### Added
+- **Doppler Studio** in ALLEN webview: multi-T overlay, resonance integral, σ₀ Bondarenko shielding, ∂σ/∂T.
+- **`owen.openResults`**: Results Viewer webview (k-eff, spectrum, tallies, mesh heatmap).
+- **`src/results/`** parsers: OpenMC (h5wasm statepoint + stdout), MCNP mctal, Serpent `_res.m`, SCONE `.out`.
+- Mesh tally overlay on 3D geometry preview.
+- **141** unit tests green (+6 new).
+
+### Version
+- `0.3.3` — VSIX built; Marketplace publish deferred.
+
 ---
 
-## 2026-06-28 — v0.4.1 — MCNP references: fix Ctrl+F-style false highlights
+## 2026-06-28 — v0.3.2 — Input Builder + MCNP reference highlight fix + ALLEN σ(E) plot rebuild
 
-**AI Agent:** Claude (Cursor IDE)
+**AI Agent:** claude-opus-4-8-thinking-high (Cursor IDE)
+
+**Renumbering note:** This entry consolidates what was briefly developed as v0.4.0 (Input Builder),
+v0.4.1 (MCNP reference highlight fix), and v0.4.2 (ALLEN plot rebuild). None of those were ever
+published to the Marketplace / Open VSX, and the 0.4 major-ish bump overstated what were small
+fixes/features on top of 0.3.1. They have been collapsed into a single **v0.3.2** so the published
+timeline reads 0.3.1 → 0.3.2. Version set to `0.3.2` in `package.json` / `package-lock.json`.
+
+### 1 — Input Builder wizard
+
+Adds an integrated **Input Builder** webview to assemble starter decks without hand-typing boilerplate.
+
+- **`owen.openInputBuilder`** — five-step wizard (code, materials, geometry, settings, preview) with
+  **Insert at Cursor** / **New File** actions.
+- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers
+  (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
+- **`src/inputBuilder/deckBuilder.ts`** — pin-cell or 17×17 lattice starter decks; lattice mode
+  reuses `latticeCodegen.ts`.
+- **`src/panels/inputBuilder.ts`** — webview panel wiring; editor title / context menus list Input
+  Builder ahead of Lattice Builder.
+- **Tests:** `inputBuilder.test.ts` (8 unit tests); BEAVRS MCNP extractor asserts baffle **box**
+  count > 0.
+
+### 2 — MCNP references: fix Ctrl+F-style false highlights
 
 **Root cause:** The role-aware index (`mcnpReferences.ts`) was already correct — occurrences are
 stored as `{kind, id, span}` and queried by `(kind, id)`. The user-visible “highlights every matching
@@ -28,9 +65,9 @@ and provider fallbacks, not from naive indexing:
    for the digit under the cursor (every `3` in the file lights up).
 2. `ReferenceProvider.provideReferences` had the same `undefined` fallback → Shift+F12 could degrade
    to a text search for the bare number.
-3. **`editor.occurrencesHighlight: "off"`** (v0.4.1 attempt) disabled *all* occurrence
-   highlighting, including the custom `DocumentHighlightProvider`, while **`editor.selectionHighlight`**
-   (default on) still painted every matching digit. Fix: `"singleFile"` + `"selectionHighlight": false`.
+3. Setting `editor.occurrencesHighlight: "off"` disabled *all* occurrence highlighting, including the
+   custom `DocumentHighlightProvider`, while **`editor.selectionHighlight`** (default on) still painted
+   every matching digit. Fix: `"singleFile"` + `"selectionHighlight": false`.
 4. MCNP **`wordPattern`** treated bare integers as editor “words”, feeding the fallback highlighter.
    Tightened to decimals / letter-led tokens / `m|mt|mx|tr` cards only.
 
@@ -43,28 +80,49 @@ and provider fallbacks, not from naive indexing:
 - Exported `entityAtPosition` (alias for `resolveAt`) and `getHighlightOccurrences`.
 - Tests: disambiguation deck highlight counts, lattice fill universe IDs, non-entity `imp:n=` digits.
 
-**Coordination:** Ships on top of **Input Builder v0.4.0** (same release train; version bumped to
-**0.4.1** for the MCNP reference fix).
+### 3 — Fix the badly-rendered ALLEN σ(E) log-log plot
 
----
+**Root cause:** The ALLEN webview (`src/allen/panel.ts` `buildPlot`) plotted on **linear** uPlot scales
+over data that was only *partially* log-transformed, with a `10^exponent` axis formatter. Six defects
+followed:
 
-## 2026-06-28 — v0.4.0 — Input Builder wizard
+1. **Garbled x labels** (`10^5000000…`): the x-series was **raw energy** (1e-5 … 2e7 eV), but the axis
+   formatter did `'10^' + v.toFixed(0)` — i.e. it treated raw eV as a log10 exponent. Linear ticks like
+   5e6, 1e7 became `10^5000000`, `10^10000000`, overlapping into one run-on string.
+2. **Malformed y labels** (`0^-5`, `0^-10`): y data *was* log10(σ), so ticks were −5, −10, −15…; the
+   `10^…` text overflowed the narrow default axis gutter and clipped the leading `1`.
+3. **Cluttered legend:** uPlot's built-in legend (`legend.show` defaulted on) rendered a stacked
+   `Value: --` row per series under the custom HTML legend.
+4. **Header readout `E = Infinity eV`:** the readout did `Math.pow(10, u.data[0][idx])`, but `u.data[0]`
+   was raw energy, so `pow(10, 2e7) = Infinity`. It also concatenated every series with no wrapping.
+5. **Right-edge cliff to ~1e-30:** every curve was resampled onto the **longest** energy grid; out-of-range
+   points were extrapolated and σ floored to `1e-30` (→ log10 = −30), producing a vertical drop at the edge.
+6. **No axis titles / weak polish.**
 
-**AI Agent:** Claude (`claude-opus-4-8-thinking-high`, Cursor IDE)
+**Fix (`src/allen/panel.ts`, `src/allen/plotConfig.ts`):**
 
-Version bumped `0.3.1` → `0.4.0` in `package.json` / `package-lock.json`. Adds an integrated
-**Input Builder** webview to assemble starter decks without hand-typing boilerplate.
+- Native uPlot **log scales** (`scales.{x,y}.distr = 3`); plot real eV / barns, not pre-logged values.
+- **Power-of-ten decade formatter** (`logTickLabel`) renders `10⁻⁵ … 10⁷` via Unicode superscripts and
+  blanks minor splits. Widened the y-axis `size` so labels don't clip; added axis titles + label fonts.
+- **Compact legend:** `legend: { show: false }` disables uPlot's block; the custom one-swatch-per-series
+  legend stays.
+- **Readout:** uses real `u.data[0][idx]` energy (no more `Infinity`), lists only series with data at the
+  cursor, wraps, and resets to the placeholder when the cursor leaves.
+- **No edge cliff:** new `unifiedGrid` builds one sorted, de-duped, positive energy grid (union of all
+  curves keeps native points); `interpLogLog` interpolates in log-log space and returns `null` outside a
+  curve's own `[Emin, Emax]` (no `1e-30` floor), so lines end cleanly.
 
-- **`owen.openInputBuilder`** — five-step wizard (code, materials, geometry, settings, preview) with
-  **Insert at Cursor** / **New File** actions.
-- **`src/inputBuilder/materials.ts`** — 18 NRDP-aligned reactor materials with per-code renderers
-  (MCNP `m`/`mt`, OpenMC `Material`, Serpent `mat`, SCONE blocks).
-- **`src/inputBuilder/deckBuilder.ts`** — pin-cell or 17×17 lattice starter decks; lattice mode
-  reuses `latticeCodegen.ts`.
-- **`src/panels/inputBuilder.ts`** — webview panel wiring; editor title / context menus list Input
-  Builder ahead of Lattice Builder.
-- **Tests:** `inputBuilder.test.ts` (8 unit tests); BEAVRS MCNP extractor asserts baffle **box**
-  count > 0.
+**Single source of truth + tests:** the pure helpers live in `src/allen/plotConfig.ts` (`unifiedGrid`,
+`interpLogLog`, `logTickLabel`, `supExp`, `buildPlotData`) and are unit-tested in
+`src/test/suite/allenPlot.test.ts`. The webview embeds equivalent inline copies (it can't import modules;
+kept as a plain string so esbuild minification can't break it). **The rendered webview still needs human
+eyes** — headless tests cover the config/algorithm, not the canvas.
+
+**Website check:** `reactor-monte-carlo-guide` `XSPlot.tsx` is a *separate, internally-consistent*
+implementation (both axes log-transformed consistently, real-eV readout, built-in live legend) and does
+**not** exhibit these defects, so it was left unchanged.
+
+**Version:** `0.3.2`. VSIX built locally; Marketplace/Open VSX publish deferred to the maintainer.
 
 ---
 

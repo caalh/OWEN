@@ -56,6 +56,8 @@ export class AllenPanel {
                     await this._bootstrap(initial);
                 } else if (msg?.command === 'loadCurves') {
                     await this._loadCurves(msg.nuclides, msg.reactions, msg.temperature);
+                } else if (msg?.command === 'loadDoppler') {
+                    await this._loadDoppler(msg.nuclide, msg.reaction, msg.temperatures, msg.sigma0);
                 }
             },
             null,
@@ -111,6 +113,22 @@ export class AllenPanel {
         }
 
         this._panel.webview.postMessage({ type: 'curves', curves, temperature });
+    }
+
+    private async _loadDoppler(nuclide: string, reaction: string, temperatures: number[], sigma0: number) {
+        if (!this._index) return;
+        const cfg = vscode.workspace.getConfiguration('owen');
+        const baseUrl = allenDataBaseUrl(cfg);
+        const lib = this._index.libraryKey;
+        const curves: AllenCurve[] = [];
+
+        for (const t of temperatures) {
+            if (!nuclideAvailable(this._index, nuclide, reaction, t)) continue;
+            const c = await fetchAllenCurve(baseUrl, lib, nuclide, reaction, t);
+            if (c) curves.push(c);
+        }
+
+        this._panel.webview.postMessage({ type: 'dopplerCurves', curves, sigma0, nuclide, reaction });
     }
 
     public dispose() {
@@ -170,7 +188,7 @@ export class AllenPanel {
     .chk { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
     .chk input { width: auto; }
     #chart { width: 100%; height: 420px; background: var(--card); border-radius: 8px; border: 1px solid var(--border); }
-    #readout { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); min-height: 1.2em; margin-bottom: 8px; }
+    #readout { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); min-height: 1.2em; line-height: 1.5; margin-bottom: 8px; word-break: break-word; }
     .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 11px; }
     .legend span { display: inline-flex; align-items: center; gap: 4px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -194,6 +212,17 @@ export class AllenPanel {
       <label>Temperature</label>
       <select id="tempSelect"></select>
       <button id="reloadBtn">Update plot</button>
+      <hr style="border-color:var(--border);margin:12px 0" />
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);margin-bottom:6px">Doppler Studio</div>
+      <label>Nuclide (multi-T)</label>
+      <select id="dopNuclide"></select>
+      <label>Reaction</label>
+      <select id="dopReaction"><option value="capture">capture</option><option value="fission">fission</option><option value="elastic">elastic</option></select>
+      <label>σ₀ background (b)</label>
+      <input type="range" id="sigma0" min="0" max="1000" value="10" style="width:100%" />
+      <div id="sigma0Val" style="font-size:11px;color:var(--muted)">10 b</div>
+      <button id="dopBtn">Load Doppler overlay</button>
+      <div id="riReadout" style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.4"></div>
       <div id="coverage" class="coverage"></div>
     </aside>
     <main>
@@ -206,7 +235,29 @@ export class AllenPanel {
   <script>
     const vscode = acquireVsCodeApi();
     const state = { nuclides: ['U235','U238'], reactions: ['fission','capture'], temperature: 294, index: null, allNuclides: [], reactionsMeta: [], plot: null, curves: [] };
+    const DOPPLER_TEMPS = [294, 600, 900, 1200];
+    const TEMP_COLORS = { 294:'#38bdf8', 600:'#f97316', 900:'#ef4444', 1200:'#a855f7' };
     const REACTION_COLORS = { total:'#94a3b8', elastic:'#38bdf8', fission:'#f97316', capture:'#a855f7', n2n:'#22c55e', inelastic:'#eab308' };
+
+    function resonanceIntegral(E, xs, emin, emax) {
+      emin = emin || 0.5; emax = emax || 1e6;
+      let sum = 0;
+      for (let i = 1; i < E.length; i++) {
+        const e0 = E[i-1], e1 = E[i];
+        if (e1 < emin || e0 > emax) continue;
+        const lo = Math.max(e0, emin), hi = Math.min(e1, emax);
+        if (hi <= lo) continue;
+        const y0 = xs[i-1], y1 = xs[i];
+        if (y0 <= 0 || y1 <= 0) continue;
+        sum += 0.5 * (y0/e0 + y1/e1) * (hi - lo);
+      }
+      return sum;
+    }
+    function bondarenko(xs, sigma0) {
+      if (sigma0 <= 0 || xs <= 0) return 1;
+      const t = sigma0 / xs;
+      return Math.log(1 + t) / t;
+    }
 
     function fmtLabel(n) { return n.replace(/^([A-Z][a-z]?)(\\d+)$/, '$1-$2'); }
 
@@ -277,51 +328,110 @@ export class AllenPanel {
         return;
       }
 
-      const Esets = curves.map(c => c.E);
-      let E = Esets[0];
-      for (const e of Esets) if (e.length > E.length) E = e;
+      // Build one sorted, de-duplicated energy grid across every curve so each
+      // curve keeps its native sample points. Points outside a curve's own
+      // energy range become null so lines end cleanly (no vertical cliff to
+      // ~0 at the edges). These helpers mirror owen/src/allen/plotConfig.ts,
+      // which is unit-tested in src/test/suite/allenPlot.test.ts.
+      function unifiedGrid(cs) {
+        const set = new Set();
+        cs.forEach(c => c.E.forEach(e => { if (e > 0) set.add(e); }));
+        return [...set].sort((a, b) => a - b);
+      }
+      function interpLogLog(srcE, srcXs, e) {
+        const n = srcE.length;
+        if (n === 0 || e < srcE[0] || e > srcE[n - 1]) return null;
+        let lo = 0, hi = n - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (srcE[mid] <= e) lo = mid; else hi = mid; }
+        const x0 = srcE[lo], x1 = srcE[hi], y0 = srcXs[lo], y1 = srcXs[hi];
+        if (y0 <= 0 || y1 <= 0 || x0 <= 0 || x1 <= 0) {
+          const t = (e - x0) / (x1 - x0 || 1);
+          const y = y0 + (y1 - y0) * t;
+          return y > 0 ? y : null;
+        }
+        const lx0 = Math.log10(x0), lx1 = Math.log10(x1), le = Math.log10(e);
+        const t = (le - lx0) / (lx1 - lx0 || 1);
+        return Math.pow(10, Math.log10(y0) * (1 - t) + Math.log10(y1) * t);
+      }
+      function supExp(p) {
+        const m = { '-': '\u207b', '0': '\u2070', '1': '\u00b9', '2': '\u00b2', '3': '\u00b3', '4': '\u2074', '5': '\u2075', '6': '\u2076', '7': '\u2077', '8': '\u2078', '9': '\u2079' };
+        return String(p).split('').map(ch => m[ch] || ch).join('');
+      }
+      function logTickLabel(v) {
+        if (!(v > 0)) return '';
+        const l = Math.log10(v);
+        const r = Math.round(l);
+        return Math.abs(l - r) < 1e-6 ? '10' + supExp(r) : '';
+      }
 
-      const series = [E];
-      const labels = ['E (eV)'];
+      const E = unifiedGrid(curves);
+      const plotData = [E];
       const colors = [];
       curves.forEach(c => {
-        const logE = E.map(e => Math.log10(e));
-        const logXs = c.xs.map(x => Math.log10(Math.max(x, 1e-30)));
-        const srcLogE = c.E.map(e => Math.log10(e));
-        const ys = logE.map(le => {
-          let i = 0;
-          while (i < srcLogE.length - 1 && srcLogE[i+1] < le) i++;
-          const t = (le - srcLogE[i]) / (srcLogE[i+1] - srcLogE[i] + 1e-30);
-          return logXs[i] * (1-t) + logXs[i+1] * t;
-        });
-        series.push(ys);
-        labels.push(fmtLabel(c.nuclide) + ' ' + c.reaction + ' @ ' + c.temperature_K + 'K');
+        plotData.push(E.map(e => interpLogLog(c.E, c.xs, e)));
         colors.push(REACTION_COLORS[c.reaction] || '#e2e8f0');
       });
+
+      const readoutEl = document.getElementById('readout');
+      const defaultReadout = 'Hover chart for \u03c3(E) readout';
 
       state.plot = new uPlot({
         width: host.clientWidth,
         height: 420,
-        scales: { x: { time: false }, y: { time: false } },
+        legend: { show: false },
+        scales: { x: { distr: 3 }, y: { distr: 3 } },
         axes: [
-          { stroke: '#64748b', grid: { stroke: 'rgba(255,255,255,0.06)' }, values: (u, vals) => vals.map(v => '10^'+v.toFixed(0)) },
-          { stroke: '#64748b', grid: { stroke: 'rgba(255,255,255,0.06)' }, values: (u, vals) => vals.map(v => '10^'+v.toFixed(0)) },
+          {
+            scale: 'x',
+            stroke: '#94a3b8',
+            grid: { stroke: 'rgba(255,255,255,0.06)' },
+            ticks: { stroke: 'rgba(255,255,255,0.10)' },
+            font: '11px system-ui, sans-serif',
+            label: 'Neutron energy (eV)',
+            labelFont: '12px system-ui, sans-serif',
+            labelGap: 4,
+            size: 44,
+            values: (u, vals) => vals.map(logTickLabel),
+          },
+          {
+            scale: 'y',
+            stroke: '#94a3b8',
+            grid: { stroke: 'rgba(255,255,255,0.06)' },
+            ticks: { stroke: 'rgba(255,255,255,0.10)' },
+            font: '11px system-ui, sans-serif',
+            label: 'Cross section (barns)',
+            labelFont: '12px system-ui, sans-serif',
+            labelGap: 4,
+            size: 62,
+            values: (u, vals) => vals.map(logTickLabel),
+          },
         ],
-        series: [{}, ...colors.map(c => ({ stroke: c, width: 2 }))],
+        series: [
+          { label: 'E (eV)' },
+          ...curves.map((c, i) => ({
+            label: fmtLabel(c.nuclide) + ' ' + c.reaction,
+            stroke: colors[i],
+            width: 2,
+            points: { show: false },
+          })),
+        ],
         hooks: {
           setCursor: [(u) => {
             const idx = u.cursor.idx;
-            if (idx == null) return;
-            const e = Math.pow(10, u.data[0][idx]);
-            const parts = curves.map((c, si) => {
-              const y = u.data[si+1][idx];
-              const xs = y == null ? '—' : Math.pow(10, y).toExponential(3);
-              return fmtLabel(c.nuclide)+' '+c.reaction+': '+xs+' b';
+            if (idx == null) { readoutEl.textContent = defaultReadout; return; }
+            const e = u.data[0][idx];
+            if (e == null) { readoutEl.textContent = defaultReadout; return; }
+            const parts = [];
+            curves.forEach((c, si) => {
+              const y = u.data[si + 1][idx];
+              if (y == null) return;
+              parts.push(fmtLabel(c.nuclide) + ' ' + c.reaction + ': ' + Number(y).toExponential(3) + ' b');
             });
-            document.getElementById('readout').textContent = 'E = '+e.toExponential(3)+' eV · '+parts.join(' · ');
+            readoutEl.textContent = 'E = ' + Number(e).toExponential(3) + ' eV'
+              + (parts.length ? '    ' + parts.join('    \u00b7    ') : '');
           }],
         },
-      }, series, host);
+      }, plotData, host);
 
       const leg = document.getElementById('legend');
       leg.innerHTML = curves.map((c,i) =>
@@ -337,6 +447,39 @@ export class AllenPanel {
       } else cov.style.display = 'none';
     }
 
+    function buildDopplerPlot(curves, sigma0, nuclide, reaction) {
+      state.curves = curves;
+      const host = document.getElementById('chart');
+      if (state.plot) { state.plot.destroy(); state.plot = null; }
+      host.innerHTML = '';
+      if (!curves.length) { host.textContent = 'No multi-T curves for this selection.'; return; }
+      const plotCurves = [];
+      curves.forEach(c => {
+        plotCurves.push({ E: c.E, xs: c.xs, label: c.temperature_K + ' K', color: TEMP_COLORS[c.temperature_K] || '#e2e8f0' });
+        if (c.temperature_K === 294 && sigma0 > 0) {
+          plotCurves.push({ E: c.E, xs: c.xs.map(x => x * bondarenko(x, sigma0)), label: 'Shielded @294K', color: '#64748b', dash: [6,4] });
+        }
+      });
+      const E = unifiedGrid(plotCurves);
+      const plotData = [E];
+      const series = [{}];
+      plotCurves.forEach((c, i) => {
+        plotData.push(E.map(e => interpLogLog(c.E, c.xs, e)));
+        series.push({ label: fmtLabel(nuclide) + ' ' + reaction + ' ' + c.label, stroke: c.color, width: 2, dash: c.dash, points: { show: false } });
+      });
+      state.plot = new uPlot({
+        width: host.clientWidth, height: 420, legend: { show: true },
+        scales: { x: { distr: 3 }, y: { distr: 3 } },
+        axes: [
+          { scale: 'x', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' }, label: 'Neutron energy (eV)', values: (u,v) => v.map(logTickLabel) },
+          { scale: 'y', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' }, label: 'Cross section (barns)', values: (u,v) => v.map(logTickLabel) },
+        ],
+        series,
+      }, plotData, host);
+      const ri = curves.map(c => c.temperature_K + ' K: I=' + resonanceIntegral(c.E, c.xs).toExponential(3) + ' b').join(' · ');
+      document.getElementById('riReadout').textContent = 'Resonance integrals (0.5 eV–1 MeV): ' + ri;
+    }
+
     window.addEventListener('message', e => {
       const msg = e.data;
       if (msg.type === 'index') {
@@ -349,6 +492,11 @@ export class AllenPanel {
           state.temperature = msg.initial.temperature || 294;
         }
         renderPickers();
+        const dn = document.getElementById('dopNuclide');
+        if (dn) {
+          dn.innerHTML = '';
+          state.allNuclides.forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = fmtLabel(n); dn.appendChild(o); });
+        }
         requestCurves();
       } else if (msg.type === 'init') {
         if (msg.nuclides) state.nuclides = msg.nuclides;
@@ -358,6 +506,8 @@ export class AllenPanel {
         requestCurves();
       } else if (msg.type === 'curves') {
         buildPlot(msg.curves);
+      } else if (msg.type === 'dopplerCurves') {
+        buildDopplerPlot(msg.curves, msg.sigma0, msg.nuclide, msg.reaction);
       }
     });
 
@@ -367,6 +517,15 @@ export class AllenPanel {
     };
     document.getElementById('tempSelect').onchange = () => {
       state.temperature = parseInt(document.getElementById('tempSelect').value, 10);
+    };
+    document.getElementById('sigma0').oninput = (e) => {
+      document.getElementById('sigma0Val').textContent = e.target.value + ' b';
+    };
+    document.getElementById('dopBtn').onclick = () => {
+      const nuclide = document.getElementById('dopNuclide').value;
+      const reaction = document.getElementById('dopReaction').value;
+      const sigma0 = parseInt(document.getElementById('sigma0').value, 10);
+      vscode.postMessage({ command: 'loadDoppler', nuclide, reaction, temperatures: DOPPLER_TEMPS, sigma0 });
     };
 
     window.addEventListener('resize', () => {

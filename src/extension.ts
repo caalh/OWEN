@@ -15,6 +15,7 @@ import { registerDecorations } from './decorations';
 import { registerMcnpReferenceProviders } from './references/providers';
 import { registerMcnpReferencesView } from './references/referencesView';
 import { openAllenCrossSections } from './allen/panel';
+import { openResultsViewer } from './results/panel';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('OWEN extension activated');
@@ -36,6 +37,10 @@ export function activate(context: vscode.ExtensionContext) {
 
         vscode.commands.registerCommand('owen.openAllen', () => {
             openAllenCrossSections(context.extensionUri);
+        }),
+
+        vscode.commands.registerCommand('owen.openResults', () => {
+            openResultsViewer(context.extensionUri);
         }),
 
         vscode.commands.registerCommand('owen.validateInput', () => {
