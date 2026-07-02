@@ -50,6 +50,7 @@ switch to concentric pin layers, and slice through the core.
 | **Lattice Builder** | A visual grid editor that generates MCNP / OpenMC / Serpent / SCONE lattice code from a few clicks. |
 | **Input Builder** | Five-step wizard: pick code, add materials from an 18-entry library, pin-cell or lattice geometry, run settings, preview — then insert or open as a new file. |
 | **Prebuilt models** | `OWEN: Open Prebuilt Model…` opens bundled, offline reactor decks in a new editor with the correct language. Ships the **complete BEAVRS Cycle-1 full core** (all 193 assemblies, full axial pin stacks, baffle/barrel/shields/RPV) for **all four codes** — MCNP, OpenMC, Serpent, and SCONE — plus 17×17 PWR assembly starters. The SCONE deck is the author-verified source of truth; the MCNP/OpenMC/Serpent decks are geometry/materials-faithful translations of it. |
+| **Render with OpenMC** | `OWEN: Render with OpenMC (authoritative)` shells out to your actual OpenMC installation and shows OpenMC's own slice plots (xy/xz/yz, origin/width controls, material/cell coloring, optional 3D ray trace on OpenMC ≥ 0.15) in a panel — ground truth straight from OpenMC's geometry kernel, ideal for verifying OWEN's built-in preview or debugging geometry. Finds your interpreter automatically (settings → ms-python → PATH → WSL) and falls back to the built-in preview when OpenMC isn't installed. |
 | **3D geometry preview** | Three.js webview rendering of MCNP / OpenMC / Serpent / SCONE geometry with component / material / axial-layer toggles, slice planes, and a Disc/Layers fidelity control. Renders a **full BEAVRS core** (all 193 assemblies) across every code — including OpenMC cores whose lattices are built programmatically (comprehension/dict-driven assembly maps are statically expanded, no Python executed) — without dropping pins, and shows the **full axial stack** for OpenMC too — each pin is reconstructed as its real z-column from the deck's `_SHELLS`/`STACKS`/`R[key]` tables, so grid spacers, plena, end plugs and SS nozzles render with their own per-band shells/materials over the complete 0→460 cm assembly height, matching MCNP/Serpent/SCONE. Geometry is instanced (so draw calls stay low) and a configurable instance budget (`owen.preview.maxInstances`, default 1.5M) auto-simplifies detail (shells→discs, then collapses axial) instead of hiding pins when a deck is huge. **Hover** any part to read its layer, material, axial index, radius/diameter and z-range; **solo** a layer to isolate it; and **measure** distances (with Δx Δy Δz), included angles, and pin/shell radii directly in the view. |
 | **MCNP cross-reference tracker** | Role- and position-aware hover, Go-to-Definition, Find-All-References, occurrence highlight, and a **MCNP References** tree for MCNP decks. A number is resolved by *what it is and where it sits on the card* — cell id (1st field), material number (2nd field; `0` = void), geometry surface refs (signed entries), surface id (1st field of a surface card), `u=` universe, `fill`/`lat` (lattice fill arrays are decoded so universe references inside them resolve), `trcl`/`tr` transforms, and `mt`/`mx` material-data cards. Clicking surface `3` finds only the references to *surface 3* — never material 3, cell 3, or the digit `3` inside a `fill=` index. |
 | **Deep validation** | Language-aware diagnostics with codes — ZAID format, density/fraction sign conventions, `mt`/S(α,β) hydrogen checks, macrobody parameter counts (MCNP); `IndependentSource`/`RectangularPrism` API checks (OpenMC); `cuboid` vs `rect`, `trcl`, CLI `omp` (Serpent); `aceNeutronDatabase`, temperature-suffix matching, `pinUniverse` radii/fills (SCONE). |
@@ -92,6 +93,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | `OWEN: Run Simulation` | Launch the appropriate solver in a dedicated terminal |
 | `OWEN: Run Parameter Sweep` | Generate and run a JSON-described sweep |
 | `OWEN: Open 3D Geometry Preview` | Three.js webview — full-core BEAVRS, layer toggles, measurement tools |
+| `OWEN: Render with OpenMC (authoritative)` | Native OpenMC slice plots of the active OpenMC Python model (requires OpenMC installed) |
 | `OWEN: Open Prebuilt Model…` | Load a bundled BEAVRS full-core or assembly deck |
 | `OWEN: Show MCNP References` | Open the MCNP cross-reference tracker dock |
 | `OWEN: Open Tutorial` | Jump to a reactormc.net tutorial page |
@@ -108,7 +110,7 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.mcnp.executable` | `mcnp6` | Path to the MCNP executable |
 | `owen.serpent.executable` | `sss2` | Path to the Serpent executable |
 | `owen.openmc.executable` | `openmc` | Non-Python OpenMC entry point only |
-| `owen.openmc.pythonExecutable` | `python` | Interpreter for OpenMC model scripts |
+| `owen.openmc.pythonExecutable` | `python` | Interpreter for OpenMC model scripts; when explicitly set it is also the first candidate for `Render with OpenMC` |
 | `owen.scone.executable` | `scone` | On Windows, SCONE typically requires WSL |
 | `owen.preview.maxInstances` | `1500000` | Max cylinder instances in the 3D preview; auto-simplifies detail (not pins) above this. Raise (e.g. 4000000) for full shell+axial detail on a full core |
 | `owen.simulation.workingDirectory` | `""` | Empty = the input file's directory |
@@ -142,6 +144,12 @@ without any solver installed.
 | OpenMC (Python) | Via Python ext | Yes | Yes (deep) | `python <file>` |
 | Serpent | Yes | Yes | Yes (deep) | `sss2 <file>` |
 | SCONE | Yes | Yes | Yes (deep) | `scone <file>` (WSL on Windows) |
+
+## Acknowledgements
+
+OWEN integrates with **[OpenMC](https://openmc.org)** (MIT License, © OpenMC contributors) for
+the `Render with OpenMC (authoritative)` feature — the images in that panel are produced by your
+locally installed OpenMC, not by OWEN. OpenMC itself is not bundled or redistributed.
 
 ## Related
 

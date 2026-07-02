@@ -5,6 +5,45 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] — 2026-07-01
+
+**Render with OpenMC (authoritative)** — native OpenMC renders of your model, inside the editor.
+
+### Added
+
+- **`OWEN: Render with OpenMC (authoritative)`** (`owen.renderWithOpenmc`, editor title/context
+  menus for OpenMC Python files): runs your model through the locally installed OpenMC and shows
+  its native slice plots in a webview — basis (xy/xz/yz), origin, width, material/cell coloring,
+  and an optional **3D ray trace** when the installed OpenMC supports it (≥ 0.15). Every image
+  comes from OpenMC's own geometry kernel, so it is the ground truth for verifying OWEN's built-in
+  3D preview or debugging geometry. Each control change re-runs OpenMC (spinner shown; not
+  real-time). The built-in preview remains the default interactive renderer.
+- **Automatic interpreter discovery**: probes, in order, an explicitly set
+  `owen.openmc.pythonExecutable`, the ms-python extension's active interpreter, `python`/`python3`
+  on PATH, and (on Windows) Python installs under **WSL** — including common conda locations —
+  verifying each with a real `import openmc` before use. Paths are translated with `wslpath` when
+  the interpreter lives in WSL.
+- **Safe deck execution**: the render helper monkey-patches `openmc.run` / `Model.run` to no-ops
+  before executing the deck, so models that end in `model.run()` render without starting a
+  transport run; decks that only export XML (no in-memory `Model`) are rendered from the XML.
+- If OpenMC is not detected anywhere, the command says so and opens the built-in 3D Geometry
+  Preview instead.
+- README: OpenMC (MIT) attribution in a new Acknowledgements section; panel footer carries the
+  same notice.
+- Unit tests: `openmcNative.test.ts` (interpreter ordering, probe protocol, WSL discovery/path
+  translation, helper-script generation, result parsing); **157** total OWEN tests green.
+
+### Fixed
+
+- The packaged VSIX now includes `h5wasm`, so the Results Viewer's `statepoint.h5` parser works
+  in installed builds (the 0.3.3 VSIX shipped without it and silently fell back to stdout
+  parsing). VSIX size grows to ~4.2 MB as a result.
+
+### Notes
+
+- Marketplace/Open VSX publish deferred to maintainer. VSIX: `owen-neutronics-0.3.4.vsix`.
+- Verified end-to-end on Windows with OpenMC 0.15.3 under WSL (conda at `/opt/miniconda3`).
+
 ## [0.3.3] — 2026-06-29
 
 Strategy memo **Bet 1 + Bet 2**: Doppler Studio in ALLEN webview and Cross-Code Results Viewer.

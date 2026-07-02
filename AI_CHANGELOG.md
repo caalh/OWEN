@@ -12,6 +12,72 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-01 — v0.3.4 — Render with OpenMC (authoritative)
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+### Added
+
+- **`owen.renderWithOpenmc`** — "OWEN: Render with OpenMC (authoritative)". New module
+  `src/preview/openmcNative/`:
+  - **`core.ts`** (pure, headless-testable): interpreter candidate ordering
+    (`orderCandidates`: explicit setting → ms-python → PATH → WSL), probe sentinel protocol
+    (`OWEN_OPENMC <version>`), WSL discovery sh-script over common conda locations
+    (`buildWslDiscoveryScript`), `toWslPath` fallback, the generated Python helper script
+    (`buildHelperScript`), and `parseRenderResult` (rejects images with path separators).
+  - **`detect.ts`**: probes each candidate with `python -c "import openmc, …"` (15 s timeout).
+    ms-python via `extensions.getExtension('ms-python.python')` →
+    `exports.environments.getActiveEnvironmentPath()/resolveEnvironment` (fully guarded).
+    The explicit-setting candidate uses `WorkspaceConfiguration.inspect()` so the *default*
+    `"python"` value does not count as an explicit user choice.
+  - **`panel.ts`**: webview with basis/origin/width/color-by controls + optional ray-trace
+    checkbox (only shown when the helper reports `SolidRayTracePlot` availability); spinner per
+    round-trip; queued re-render if one is in flight; per-session temp dir under `os.tmpdir()`
+    (cleaned on dispose); OpenMC MIT attribution in the footer. Falls back to
+    `owen.openGeometryPreview` with an info message when no interpreter is found.
+
+### Key engineering notes / gotchas
+
+- **`wsl --exec` is mandatory.** Without it wsl.exe re-parses the command line through the login
+  shell and embedded quotes in `-c` payloads get mangled (discovery script silently failed).
+  Applies to the probe, `wslpath` calls, and the render invocation itself.
+- **WSL discovery goes beyond `wsl python3`**: non-interactive WSL shells don't activate conda,
+  so a `sh` one-liner probes `python3` + `/opt/miniconda3/bin/python`, `/opt/conda/...`,
+  `$HOME/{miniconda3,anaconda3,micromamba}/...` and reports back `sys.executable` of the first
+  interpreter that can `import openmc`. On this machine that found OpenMC 0.15.3 at
+  `/opt/miniconda3/bin/python`.
+- **Helper script safety**: deck executed via `runpy.run_path(run_name='__main__')` with
+  `openmc.run`/`Model.run` patched to no-ops (`Model.run` also captures the model instance);
+  cwd = throwaway out dir so `export_to_xml()` never clobbers user files; falls back to
+  namespace scan for `Model`/`Geometry`/`Materials`/`Settings`, then to deck-exported XML.
+  `Model(geometry=…)` often has an **empty** materials collection → derive
+  `openmc.Materials(geometry.get_all_materials().values())` (empty `materials.xml` aborts
+  `openmc --plot` with "Could not find material N").
+- **`openmc` binary discovery**: `plot_geometry()` is called with
+  `openmc_exec=<dir of sys.executable>/openmc` when that exists — conda's `openmc` is not on the
+  non-interactive PATH.
+- Helper script must stay **pure ASCII** (unit-test-enforced) and reports image *basenames* only.
+- Ray trace uses `SolidRayTracePlot` with `opaque_domains` = all material-filled cells (blank
+  image otherwise); guarded so pre-0.15 OpenMC never requires it.
+- **Tests: 157 passing** headless (`tsc --outDir out-test` + mocha; validator suite still needs
+  electron and is excluded as before). New: `openmcNative.test.ts` (21 tests). End-to-end
+  verified against real OpenMC 0.15.3 under WSL: pin-cell deck ending in `model.run()` produced
+  xy/xz slice PNGs + a ray trace without starting transport.
+
+### Packaging note
+
+- **0.3.4 VSIX is ~4.2 MB (was ~0.3 MB)** because it now actually ships `node_modules/h5wasm/`
+  as `.vscodeignore`'s `!node_modules/h5wasm/**` intends (h5wasm is `external` in esbuild — it
+  cannot be bundled). The 0.3.3 VSIX had only 36 entries and **no h5wasm** (apparently packaged
+  with `--no-dependencies`), so its statepoint.h5 parser silently fell back to stdout parsing.
+  Packaged with plain `vsce package` here, restoring the intended contents.
+
+### Version
+
+- `0.3.4` — VSIX built + installed locally; Marketplace publish deferred.
+
+---
+
 ## 2026-06-29 — v0.3.3 — Doppler Studio + Cross-Code Results Viewer
 
 **AI Agent:** claude-opus-4-8-thinking-high (Cursor IDE)

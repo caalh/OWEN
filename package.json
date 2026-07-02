@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: syntax highlighting (4 palettes), MCNP cross-reference tracker, ALLEN σ(E) cross-section viewer, 3D geometry preview (full-core BEAVRS, measurement tools), lattice builder, prebuilt BEAVRS models, deep validation, and simulation automation.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -52,6 +52,7 @@
     "onCommand:owen.validateInput",
     "onCommand:owen.runSimulation",
     "onCommand:owen.openGeometryPreview",
+    "onCommand:owen.renderWithOpenmc",
     "onCommand:owen.searchReactorLibrary",
     "onCommand:owen.openPrebuiltModel",
     "onCommand:owen.insertMaterial",
@@ -171,6 +172,12 @@
         "category": "OWEN"
       },
       {
+        "command": "owen.renderWithOpenmc",
+        "title": "OWEN: Render with OpenMC (authoritative)",
+        "category": "OWEN",
+        "icon": "$(symbol-color)"
+      },
+      {
         "command": "owen.searchReactorLibrary",
         "title": "OWEN: Search Reactor Library",
         "category": "OWEN"
@@ -285,6 +292,11 @@
           "group": "2_build@2"
         },
         {
+          "command": "owen.renderWithOpenmc",
+          "group": "2_build@3",
+          "when": "editorLangId == python"
+        },
+        {
           "command": "owen.openResults",
           "group": "3_run@3"
         },
@@ -355,6 +367,11 @@
           "group": "2_build@2"
         },
         {
+          "command": "owen.renderWithOpenmc",
+          "group": "2_build@3",
+          "when": "editorLangId == python"
+        },
+        {
           "command": "owen.openResults",
           "group": "3_run@3"
         },
@@ -387,6 +404,10 @@
         {
           "command": "owen.showMcnpReferences",
           "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.renderWithOpenmc",
+          "when": "editorLangId == python"
         }
       ],
       "view/title": [
@@ -408,7 +429,7 @@
         "owen.openmc.pythonExecutable": {
           "type": "string",
           "default": "python",
-          "description": "Python interpreter used to run OpenMC model scripts (e.g. build_model.py)."
+          "description": "Python interpreter used to run OpenMC model scripts (e.g. build_model.py). When explicitly set, it is also the first candidate probed by 'OWEN: Render with OpenMC (authoritative)'; otherwise that command falls back to the ms-python interpreter, python/python3 on PATH, then WSL."
         },
         "owen.mcnp.executable": {
           "type": "string",

@@ -9,6 +9,7 @@ import { registerOpenPrebuiltModel } from './commands/openPrebuiltModel';
 import { registerOpenTutorial } from './commands/openTutorial';
 import { registerSearchReactorLibrary } from './community/browser';
 import { registerGeometryPreview } from './preview/webview';
+import { registerOpenmcNativeRender } from './preview/openmcNative/panel';
 import { registerSnippetCompletions } from './completions/snippets';
 import { registerHighlightPalettes } from './highlight';
 import { registerDecorations } from './decorations';
@@ -58,6 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
         }),
 
         registerGeometryPreview(context),
+        registerOpenmcNativeRender(context),
         registerSearchReactorLibrary(),
         registerInsertMaterial(context),
         registerOpenPrebuiltModel(context),
