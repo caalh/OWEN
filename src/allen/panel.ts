@@ -256,7 +256,8 @@ export class AllenPanel {
     function bondarenko(xs, sigma0) {
       if (sigma0 <= 0 || xs <= 0) return 1;
       const t = sigma0 / xs;
-      return Math.log(1 + t) / t;
+      if (!Number.isFinite(t) || t === 0) return 1;
+      return Math.min(1, Math.max(0, Math.log1p(t) / t));
     }
 
     function fmtLabel(n) { return n.replace(/^([A-Z][a-z]?)(\\d+)$/, '$1-$2'); }

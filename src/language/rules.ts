@@ -112,6 +112,13 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
         if (mHead) {
             activeMat = { line: i, matNum: mHead[1], zaids: [], signs: new Set() };
             materials.set(mHead[1], activeMat);
+        } else if (activeMat && !/^\s/.test(raw)) {
+            // A new card starting at column 1 (cell, surface, fmesh, kcode, …)
+            // ends the material; only indented continuation lines extend it.
+            // Without this, e.g. `fmesh4:n … origin=-182.78` following an mN
+            // card fed its numbers into the sign check (false material-sign
+            // errors on the bundled BEAVRS deck).
+            activeMat = null;
         }
 
         if (activeMat) {
@@ -120,12 +127,20 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
             while ((zm = ZAID_RE.exec(raw)) !== null) {
                 activeMat.zaids.push(zm[1]);
             }
-            const fracs = raw.matchAll(/(?:\s|^)([-+]?\d+\.?\d*(?:[eE][-+]?\d+)?)\b/g);
-            const numericTokens: string[] = [];
-            for (const f of fracs) numericTokens.push(f[1]);
-            for (const tok of numericTokens) {
+            // Fraction signs: whole whitespace-delimited tokens only. A ZAID
+            // like `40000.80c` must not partially match as a positive number
+            // (that made every all-negative weight-fraction material look
+            // "mixed"), so skip ZAID/library tokens and require the token to
+            // be a complete standalone number.
+            const NUMBER_TOKEN = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+            const toks = raw.trim().split(/\s+/);
+            for (let t = 0; t < toks.length; t++) {
+                const tok = toks[t];
+                if (t === 0 && MATERIAL_HEADER_RE.test(tok + ' ')) continue; // mN header
+                if (/^\d{1,6}\.\d{2}[a-z]$/i.test(tok)) continue; // ZAID.TTc
+                if (!NUMBER_TOKEN.test(tok)) continue;
                 if (tok.startsWith('-')) activeMat.signs.add('-');
-                else if (/^\d|^\+/.test(tok)) activeMat.signs.add('+');
+                else activeMat.signs.add('+');
             }
         }
 

@@ -129,11 +129,18 @@ export function resonanceIntegral(
     return sum;
 }
 
-/** Bondarenko-style narrow-resonance shielding factor (teaching approximation). */
+/**
+ * Bondarenko-style narrow-resonance shielding factor (teaching approximation).
+ * Uses log1p for numerical stability: for tiny t, Math.log(1 + t)/t suffers
+ * catastrophic cancellation and returns values slightly ABOVE 1, which is
+ * unphysical (the factor is a probability-like ratio in [0, 1]).
+ */
 export function bondarenkoShieldingFactor(xs: number, sigma0: number): number {
     if (sigma0 <= 0 || xs <= 0) return 1;
     const t = sigma0 / xs;
-    return Math.log(1 + t) / t;
+    if (!Number.isFinite(t) || t === 0) return 1;
+    const f = Math.log1p(t) / t;
+    return Math.min(1, Math.max(0, f));
 }
 
 export function shieldedCurve(E: number[], xs: number[], sigma0: number): number[] {

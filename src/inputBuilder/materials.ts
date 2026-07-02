@@ -40,7 +40,16 @@ export const MATERIAL_LIBRARY: MaterialEntry[] = [
 
 export function renderMaterial(code: MonteCarloCode, mat: SelectedMaterial): string {
     const n = mat.mcnpNumber;
-    const label = mat.customName || mat.name;
+    // Newlines in a custom name would split a comment/name across lines in
+    // every generated deck; flatten them. For Python (OpenMC) the label lands
+    // inside a single-quoted string literal, so single quotes and backslashes
+    // in a hostile/accidental name would break the generated script — the
+    // label is display-only, so substitute safe lookalikes instead of relying
+    // on escape sequences.
+    const rawLabel = (mat.customName || mat.name).replace(/[\r\n]+/g, ' ');
+    const label = code === 'openmc'
+        ? rawLabel.replace(/\\/g, '/').replace(/'/g, '"')
+        : rawLabel;
     switch (mat.id) {
         case 'light-water':
             if (code === 'mcnp') return `c ${label}\nm${n}    1001.80c  6.69174e-2\n       8016.80c  3.34587e-2\nmt${n}   lwtr.20t`;

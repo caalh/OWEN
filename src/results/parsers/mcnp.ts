@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import type { RunResults, KeffHistory, TallyEntry, FluxSpectrum } from '../types';
+import { NUM, pushIfFinite } from './numeric';
 
 /** Parse MCNP ASCII mctal file for k-eff history and tally tables. */
 export function parseMctal(text: string, sourceFile?: string): RunResults {
@@ -10,24 +11,20 @@ export function parseMctal(text: string, sourceFile?: string): RunResults {
     const spectra: FluxSpectrum[] = [];
 
     // k-eff by cycle: "k  eff (c)  1.00000  0.00100" or "col 1  col 2  keff  1.0  0.01"
-    const keffLineRe = /k\s*eff\s*\([a-z]\)\s+([0-9.]+)\s+([0-9.]+)/gi;
+    const keffLineRe = new RegExp(String.raw`k\s*eff\s*\([a-z]\)\s+(${NUM})\s+(${NUM})`, 'gi');
     let m: RegExpExecArray | null;
     let idx = 0;
     while ((m = keffLineRe.exec(text)) !== null) {
         idx++;
-        cycles.push(idx);
-        mean.push(parseFloat(m[1]));
-        std.push(parseFloat(m[2]));
+        pushIfFinite(cycles, mean, std, idx, parseFloat(m[1]), parseFloat(m[2]));
     }
 
     // Alternate: "combined keff = 1.00000 0.00100"
     if (mean.length === 0) {
-        const altRe = /combined\s+keff\s*=?\s*([0-9.]+)\s+([0-9.]+)/gi;
+        const altRe = new RegExp(String.raw`combined\s+keff\s*=?\s*(${NUM})\s+(${NUM})`, 'gi');
         while ((m = altRe.exec(text)) !== null) {
             idx++;
-            cycles.push(idx);
-            mean.push(parseFloat(m[1]));
-            std.push(parseFloat(m[2]));
+            pushIfFinite(cycles, mean, std, idx, parseFloat(m[1]), parseFloat(m[2]));
         }
     }
 

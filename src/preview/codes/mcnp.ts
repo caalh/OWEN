@@ -302,11 +302,17 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         placePin(uid, cx, cy, label, zmid, height);
     };
 
-    const placeUniverse = (uid: number, cx: number, cy: number, label: string, depth: number): void => {
+    const placeUniverse = (uid: number, cx: number, cy: number, label: string, depth: number, ancestors: ReadonlySet<number> = new Set()): void => {
         if (depth > 12) return;
+        // Cycle guard: a fill array that (directly or mutually) references an
+        // ancestor lattice would otherwise recurse combinatorially (289^12
+        // visits for a self-referential 17×17 grid) and hang the host.
+        if (ancestors.has(uid)) return;
         if (cylinders.length >= maxInstances) { capped = true; return; }
         const lat = latUniverses.get(uid);
         if (lat) {
+            const nextAncestors = new Set(ancestors);
+            nextAncestors.add(uid);
             const { nx, ny, grid } = lat.fill;
             // Hex (lat=2): use real hex basis vectors a1=(p,0), a2=(p/2, p·√3/2)
             // so rows shear and stack at √3/2 spacing instead of a square grid.
@@ -328,7 +334,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                         px = x0sq + i * lat.pitchX;
                         py = y0sq + j * lat.pitchY;
                     }
-                    if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1);
+                    if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1, nextAncestors);
                     else placeEntry(sub, px, py, `${label}_r${j}c${i}`);
                 }
             }
@@ -637,7 +643,12 @@ function parseCell(card: string): MCNPCell | null {
         const key = rawKey.replace(/^\*/, '');
         const starred = rawKey.startsWith('*');
         const val = tok.slice(eq + 1);
-        if (key === 'u') u = parseInt(val, 10);
+        if (key === 'u') {
+            // MCNP allows a negative universe number (a "no truncation"
+            // promise); fill= references it by |n|, so key by absolute value.
+            u = parseInt(val, 10);
+            if (!Number.isNaN(u)) u = Math.abs(u);
+        }
         else if (key === 'lat') lat = parseInt(val, 10);
         else if (key === 'fill') {
             // Collect this token's value plus following tokens until the next 'key='.
@@ -728,14 +739,23 @@ function parseFill(tokens: string[]): FillSpec | null {
  *   - `nJ` / `j` — "jump" n default entries (emitted as 0 = background/no pin).
  * Anything else that parses as an integer is taken literally; unknown tokens
  * are ignored so stray text never aborts the array.
+ *
+ * The output is capped at MAX_FILL_ENTRIES: a hostile/typo'd repeat count
+ * (`1 2000000000r`) would otherwise allocate gigabytes and OOM the extension
+ * host before the nx*ny*nz grid guard ever runs. Anything a real deck needs
+ * fits well under the cap (a full BEAVRS core is ~5×10⁴ entries).
  */
+const MAX_FILL_ENTRIES = 1_000_000;
+
 function expandRepeats(tokens: string[]): number[] {
     const out: number[] = [];
     let pendingInterp = 0; // count of interpolated entries owed before the next value
     for (const tok of tokens) {
+        if (out.length >= MAX_FILL_ENTRIES) break;
+        const room = () => MAX_FILL_ENTRIES - out.length;
         const rep = tok.match(/^(\d+)[rR]$/);
         if (rep) {
-            const n = parseInt(rep[1], 10);
+            const n = Math.min(parseInt(rep[1], 10), room());
             const last = out.length ? out[out.length - 1] : 0;
             for (let k = 0; k < n; k++) out.push(last);
             continue;
@@ -747,7 +767,7 @@ function expandRepeats(tokens: string[]): number[] {
         }
         const jump = tok.match(/^(\d+)?[jJ]$/);
         if (jump) {
-            const n = jump[1] ? parseInt(jump[1], 10) : 1;
+            const n = Math.min(jump[1] ? parseInt(jump[1], 10) : 1, room());
             for (let k = 0; k < n; k++) out.push(0);
             continue;
         }
@@ -756,12 +776,13 @@ function expandRepeats(tokens: string[]): number[] {
         if (pendingInterp > 0 && out.length) {
             const start = out[out.length - 1];
             const steps = pendingInterp + 1;
-            for (let k = 1; k <= pendingInterp; k++) {
+            const emit = Math.min(pendingInterp, room());
+            for (let k = 1; k <= emit; k++) {
                 out.push(Math.round(start + ((n - start) * k) / steps));
             }
             pendingInterp = 0;
         }
-        out.push(n);
+        if (out.length < MAX_FILL_ENTRIES) out.push(n);
     }
     return out;
 }
@@ -870,15 +891,21 @@ function countPins(
     pinUniverses: Map<number, PinUniverse>,
     axialStacks: Map<number, AxialSegment[]>,
     depth = 0,
+    ancestors: ReadonlySet<number> = new Set(),
 ): number {
     if (topUid === null || depth > 12) return 0;
+    // Cycle guard (self- or mutually-referential lattices): without it a
+    // 17×17 self-grid explodes to 289^12 recursive visits.
+    if (ancestors.has(topUid)) return 0;
     const lat = latUniverses.get(topUid);
     if (!lat) return (pinUniverses.has(topUid) || axialStacks.has(topUid)) ? 1 : 0;
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(topUid);
     let total = 0;
     for (const row of lat.fill.grid) {
         for (const sub of row) {
             if (sub === 0) continue;
-            if (latUniverses.has(sub)) total += countPins(sub, latUniverses, pinUniverses, axialStacks, depth + 1);
+            if (latUniverses.has(sub)) total += countPins(sub, latUniverses, pinUniverses, axialStacks, depth + 1, nextAncestors);
             else if (pinUniverses.has(sub) || axialStacks.has(sub)) total += 1;
         }
     }

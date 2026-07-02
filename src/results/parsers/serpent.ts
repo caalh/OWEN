@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import type { RunResults, KeffHistory, TallyEntry, FluxSpectrum, MeshTally } from '../types';
+import { NUM, pushIfFinite } from './numeric';
 
 /** Parse Serpent _res.m / _det.m results files. */
 export function parseSerpentResults(text: string, sourceFile?: string): RunResults {
@@ -11,21 +12,17 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
     const meshTallies: MeshTally[] = [];
 
     // Cycle-wise: "1.000000E+00  0.001000E+00" in RESULTS table or explicit cycle lines
-    const cycleRe = /(?:cycle|gen|batch)\s*[=:]?\s*(\d+)[^\n]*?([0-9.]+)\s*[+/-]+\s*([0-9.]+)/gi;
+    const cycleRe = new RegExp(String.raw`(?:cycle|gen|batch)\s*[=:]?\s*(\d+)[^\n]*?(${NUM})\s*[+/-]+\s*(${NUM})`, 'gi');
     let m: RegExpExecArray | null;
     while ((m = cycleRe.exec(text)) !== null) {
-        cycles.push(parseInt(m[1], 10));
-        mean.push(parseFloat(m[2]));
-        std.push(parseFloat(m[3]));
+        pushIfFinite(cycles, mean, std, parseInt(m[1], 10), parseFloat(m[2]), parseFloat(m[3]));
     }
 
     // Final keff: "KEFF = 1.00000 0.00010" or "1.00000 +/- 0.00010"
     if (mean.length === 0) {
-        const keffRe = /(?:KEFF|k-?eff)\s*=?\s*([0-9.]+)\s*(?:[+/-]+|\+\/-)\s*([0-9.]+)/gi;
+        const keffRe = new RegExp(String.raw`(?:KEFF|k-?eff)\s*=?\s*(${NUM})\s*(?:[+/-]+|\+\/-)\s*(${NUM})`, 'gi');
         while ((m = keffRe.exec(text)) !== null) {
-            cycles.push(cycles.length + 1);
-            mean.push(parseFloat(m[1]));
-            std.push(parseFloat(m[2]));
+            pushIfFinite(cycles, mean, std, cycles.length + 1, parseFloat(m[1]), parseFloat(m[2]));
         }
     }
 

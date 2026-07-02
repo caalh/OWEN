@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import type { RunResults, KeffHistory, TallyEntry } from '../types';
+import { NUM, pushIfFinite } from './numeric';
 
 /** Parse SCONE ASCII stdout / .out files. */
 export function parseSconeOutput(text: string, sourceFile?: string): RunResults {
@@ -9,22 +10,18 @@ export function parseSconeOutput(text: string, sourceFile?: string): RunResults 
     const tallies: TallyEntry[] = [];
 
     // k_eff lines: "k_eff  1.000000  0.001000" or "k-eff = 1.0 +/- 0.001"
-    const keffRe = /k[_\s-]?eff\s*[=:]?\s*([0-9.]+)\s*(?:[+/-]+|\+\/-|\s+)\s*([0-9.]+)/gi;
+    const keffRe = new RegExp(String.raw`k[_\s-]?eff\s*[=:]?\s*(${NUM})\s*(?:[+/-]+|\+\/-|\s+)\s*(${NUM})`, 'gi');
     let m: RegExpExecArray | null;
     while ((m = keffRe.exec(text)) !== null) {
-        cycles.push(cycles.length + 1);
-        mean.push(parseFloat(m[1]));
-        std.push(parseFloat(m[2]));
+        pushIfFinite(cycles, mean, std, cycles.length + 1, parseFloat(m[1]), parseFloat(m[2]));
     }
 
     // Cycle-indexed: "cycle 10 k_eff 1.0 0.01"
-    const cycleRe = /cycle\s+(\d+)[^\n]*k[_\s-]?eff\s*([0-9.]+)\s*([0-9.]+)/gi;
+    const cycleRe = new RegExp(String.raw`cycle\s+(\d+)[^\n]*k[_\s-]?eff\s*(${NUM})\s*(${NUM})`, 'gi');
     while ((m = cycleRe.exec(text)) !== null) {
         const c = parseInt(m[1], 10);
         if (!cycles.includes(c)) {
-            cycles.push(c);
-            mean.push(parseFloat(m[2]));
-            std.push(parseFloat(m[3]));
+            pushIfFinite(cycles, mean, std, c, parseFloat(m[2]), parseFloat(m[3]));
         }
     }
 

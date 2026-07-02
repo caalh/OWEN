@@ -40,10 +40,13 @@ export interface SweepManifest {
 
 // k-eff scrapers, tried in order. Serpent's "final estimated … keff", OpenMC's
 // "Combined k-effective = …", then a generic "k-eff = …" fallback.
-export const KEFF_RE =
-    /final\s+estimated\s+combined\s+collision\s*\/\s*absorption\s*\/\s*track[-\s]length\s+keff[^=:\d]*[=:]?\s*([0-9.]+)/i;
-export const KEFF_OPENMC_RE = /Combined\s+k-?effective\s*=\s*([0-9.]+)/i;
-export const KEFF_FALLBACK_RE = /\bk-?eff\s*[=:]\s*([0-9.]+)/i;
+// NUM requires a real number (at least one digit) — the old `[0-9.]+` class
+// matched dots-only garbage ("...") and produced NaN k-eff values.
+const NUM = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`;
+export const KEFF_RE = new RegExp(
+    String.raw`final\s+estimated\s+combined\s+collision\s*\/\s*absorption\s*\/\s*track[-\s]length\s+keff[^=:\d]*[=:]?\s*(${NUM})`, 'i');
+export const KEFF_OPENMC_RE = new RegExp(String.raw`Combined\s+k-?effective\s*=\s*(${NUM})`, 'i');
+export const KEFF_FALLBACK_RE = new RegExp(String.raw`\bk-?eff\s*[=:]\s*(${NUM})`, 'i');
 
 /**
  * Extract a k-eff value from simulation stdout, or null when no recognizable

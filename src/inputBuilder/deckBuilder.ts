@@ -101,14 +101,24 @@ function buildOpenmc(state: InputBuilderState): string {
     const matVars = state.materials.map((m) => 'mat_' + m.id.replace(/[^a-z0-9]/gi, '_'));
     lines.push('', 'materials = openmc.Materials([' + matVars.join(', ') + '])', '');
     if (state.geometryMode === 'pin-cell') {
+        // With no materials selected, fill the cells with None (void) instead
+        // of interpolating `undefined` into the generated Python.
+        const fuelFill = matVars[0] ?? 'None';
+        const cladFill = matVars[1] ?? matVars[0] ?? 'None';
+        const modFill = matVars.find((_, i) => state.materials[i]?.id === 'light-water')
+            ?? matVars[matVars.length - 1] ?? 'None';
+        if (matVars.length === 0) {
+            lines.push('# NOTE: no materials selected — cells are filled with None (void).');
+            lines.push('#       Add materials in the Input Builder before running.');
+        }
         lines.push(
             '# --- Pin cell geometry ---',
             'fuel_or = openmc.ZCylinder(r=0.39218)',
             'clad_or = openmc.ZCylinder(r=0.45720)',
             'pin_bound = openmc.ZCylinder(r=0.63000, boundary_type="reflective")',
-            'fuel_cell = openmc.Cell(fill=' + (matVars[0] || 'materials[0]') + ', region=-fuel_or)',
-            'clad_cell = openmc.Cell(fill=' + (matVars[1] || matVars[0] || 'materials[0]') + ', region=+fuel_or & -clad_or)',
-            'mod_cell = openmc.Cell(fill=' + (matVars.find((_, i) => state.materials[i]?.id === 'light-water') ? 'mat_light_water' : matVars[matVars.length - 1]) + ', region=+clad_or & -pin_bound)',
+            'fuel_cell = openmc.Cell(fill=' + fuelFill + ', region=-fuel_or)',
+            'clad_cell = openmc.Cell(fill=' + cladFill + ', region=+fuel_or & -clad_or)',
+            'mod_cell = openmc.Cell(fill=' + modFill + ', region=+clad_or & -pin_bound)',
             'root = openmc.Universe(cells=[fuel_cell, clad_cell, mod_cell])',
             'geometry = openmc.Geometry(root)',
         );

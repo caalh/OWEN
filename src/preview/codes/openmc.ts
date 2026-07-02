@@ -930,8 +930,14 @@ function collectRadii(text: string, lines: string[]): NamedValue[] {
     return pool;
 }
 
+/** Strips a `#` comment so commented-out mentions never feed number scans. */
+function stripPyComment(line: string): string {
+    return line.replace(/#.*$/, '');
+}
+
 function findPitch(lines: string[]): [number, number] {
-    for (const line of lines) {
+    for (const raw of lines) {
+        const line = stripPyComment(raw);
         if (!/pitch/i.test(line) || !line.includes('=')) continue;
         const nums = extractNumbers(line.replace(/.*?=/, ''));
         if (nums.length >= 2) return [nums[0], nums[1]];
@@ -941,7 +947,8 @@ function findPitch(lines: string[]): [number, number] {
 }
 
 function findLowerLeft(lines: string[]): [number, number] | null {
-    for (const line of lines) {
+    for (const raw of lines) {
+        const line = stripPyComment(raw);
         if (!/lower_left/i.test(line) || !line.includes('=')) continue;
         const nums = extractNumbers(line.replace(/.*?=/, ''));
         if (nums.length >= 2) return [nums[0], nums[1]];
@@ -950,7 +957,8 @@ function findLowerLeft(lines: string[]): [number, number] | null {
 }
 
 function findHeight(lines: string[]): number {
-    for (const line of lines) {
+    for (const raw of lines) {
+        const line = stripPyComment(raw);
         const low = line.toLowerCase();
         if ((low.includes('fuel_height') || (low.includes('height') && low.includes('active'))) && line.includes('=')) {
             const nums = extractNumbers(line.replace(/.*?=/, ''));

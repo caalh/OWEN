@@ -19,6 +19,9 @@ import { emitLayers, materialColor, materialComponent, componentColor, resolveDe
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import { emitSerpentRadialStructure } from '../radialStructure';
 
+/** Grid-size ceiling shared with the MCNP fill guard (5M cells ≈ full core ×20). */
+const MAX_LAT_CELLS = 5_000_000;
+
 const SERPENT_KEYWORDS = new Set([
     'pin', 'surf', 'cell', 'lat', 'set', 'mat', 'det', 'dep', 'plot', 'mesh',
     'therm', 'include', 'trans', 'src', 'ene', 'dtrans', 'div', 'branch', 'coef',
@@ -276,7 +279,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     // Place a lattice entry: an axial stack (when axial detail is on) expands
     // into its z-segments; otherwise it collapses to its tallest segment over
     // the full model height. Non-stack entries resolve to a lattice or a pin.
-    const placeEntry = (name: string, cx: number, cy: number, label: string, depth: number): void => {
+    const placeEntry = (name: string, cx: number, cy: number, label: string, depth: number, ancestors: ReadonlySet<string> = new Set()): void => {
         const segs = axialStacks.get(name);
         if (segs) {
             if (axialOn) {
@@ -294,15 +297,20 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             return;
         }
         const resolved = resolveFill(name);
-        if (lats.has(resolved)) placeUniverse(resolved, cx, cy, label, depth + 1);
+        if (lats.has(resolved)) placeUniverse(resolved, cx, cy, label, depth + 1, ancestors);
         else placePin(resolved, cx, cy, label);
     };
 
-    const placeUniverse = (name: string, cx: number, cy: number, label: string, depth: number): void => {
+    const placeUniverse = (name: string, cx: number, cy: number, label: string, depth: number, ancestors: ReadonlySet<string> = new Set()): void => {
         if (depth > 12 || cylinders.length >= maxInstances) return;
         const resolved = resolveFill(name);
+        // Cycle guard: a lattice whose grid references itself (or an ancestor)
+        // would otherwise recurse combinatorially and hang the host.
+        if (ancestors.has(resolved)) return;
         const lat = lats.get(resolved);
         if (lat) {
+            const nextAncestors = new Set(ancestors);
+            nextAncestors.add(resolved);
             const hex = lat.type === 2 || lat.type === 3;
             const p = lat.pitch;
             const x0 = cx + lat.x0 - (lat.nx - 1) * lat.pitch / 2;
@@ -330,7 +338,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                         px = x0 + col * lat.pitch;
                         py = yTop - row * lat.pitch;
                     }
-                    placeEntry(entry, px, py, `${label}_r${row}c${col}`, depth);
+                    placeEntry(entry, px, py, `${label}_r${row}c${col}`, depth, nextAncestors);
                 }
             }
             return;
@@ -510,8 +518,10 @@ function parseLat(lines: string[], i: number, headerTokens: string[], lats: Map<
     const ny = parseInt(headerTokens[6], 10);
     const pitch = parseFloat(headerTokens[7]);
     if (!(nx > 0 && ny > 0) || Number.isNaN(pitch)) return i;
-
-    const need = nx * ny;
+    // A hostile/typo'd header ("lat core 1 0 0 1000000000 1000000000 1.26")
+    // must not drive the loops below: cap total cells at MAX_LAT_CELLS and
+    // never emit more rows than the deck actually provides data for.
+    const need = Math.min(nx * ny, MAX_LAT_CELLS);
     const flat: string[] = [];
     let j = i + 1;
     for (; j < lines.length && flat.length < need; j++) {
@@ -525,7 +535,8 @@ function parseLat(lines: string[], i: number, headerTokens: string[], lats: Map<
         }
     }
     const grid: string[][] = [];
-    for (let r = 0; r < ny; r++) {
+    const maxRows = Math.min(ny, Math.ceil(flat.length / nx));
+    for (let r = 0; r < maxRows; r++) {
         grid.push(flat.slice(r * nx, r * nx + nx));
     }
     lats.set(name, { name, type, x0, y0, nx, ny, pitch, grid });
@@ -538,15 +549,20 @@ function countPins(
     resolveFill: (u: string) => string,
     isPin: (u: string) => boolean,
     depth = 0,
+    ancestors: ReadonlySet<string> = new Set(),
 ): number {
     if (!coreLat || depth > 12) return isPin(coreLat ?? '') ? 1 : 0;
+    // Cycle guard for self-/mutually-referential lattices.
+    if (ancestors.has(coreLat)) return 0;
     const lat = lats.get(coreLat);
     if (!lat) return isPin(coreLat) ? 1 : 0;
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(coreLat);
     let total = 0;
     for (const row of lat.grid) {
         for (const entry of row) {
             const r = resolveFill(entry);
-            if (lats.has(r)) total += countPins(r, lats, resolveFill, isPin, depth + 1);
+            if (lats.has(r)) total += countPins(r, lats, resolveFill, isPin, depth + 1, nextAncestors);
             else if (isPin(r)) total += 1;
         }
     }

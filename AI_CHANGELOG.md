@@ -12,6 +12,102 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-02 — v0.3.7 — Adversarial audit: all 15 bugs fixed, 180-test suite ported
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+Hardening release driven by an adversarial test audit run against the v0.3.4 tag in a
+scratch clone. Developed in a **git worktree** (`BD-worktree-bugfix`, branch
+`fix/owen-adversarial`) off `origin/main` while 0.3.6 was shipping concurrently in the
+main working tree.
+
+### Crash-level fixes (OOM/hang from one malformed deck)
+
+- **`src/references/mcnpReferences.ts` + `src/preview/codes/mcnp.ts` `expandRepeats`** —
+  no cap on repeat counts: `fill= 1 2000000000r` allocated 2G entries. The references
+  index rebuilds on every edit, so this froze the extension host while *typing*. Both
+  copies now cap at `MAX_FILL_ENTRIES = 1_000_000` and bail gracefully.
+- **`mcnp.ts` `countPins`/`placeUniverse`** — depth limit existed but no cycle detection,
+  so `u=5` filled with 5 (or 5↔6 mutual) recursed ~289^12. Both walkers now thread an
+  `ancestors: Set<number>` and skip any universe already on the path.
+- **`serpent.ts` `placeEntry`/`placeUniverse`/`countPins`** — same self-reference hang
+  (`lat core` grid containing `core`); same ancestor-set fix (keyed by name).
+- **`serpent.ts` `parseLat`** — giant header (`lat 9 1 0 0 1000000000 1000000000 1.26`)
+  looped ny times regardless of actual data. Rows are now capped to the lines actually
+  present and total cells to `MAX_LAT_CELLS = 5_000_000`.
+- **`scone.ts`** — `shape (100000 100000 1)` built a 10G-cell grid; lattices with
+  `nx*ny > 5M` are now skipped with a warning (mirrors the MCNP guard).
+
+### Wrong-result fixes
+
+- **`src/language/rules.ts` `mcnp.material-sign`** (reported against the pre-LSP
+  `validator.ts`; rule lives in the shared rules layer since 0.3.5) — two causes:
+  (a) the fraction regex partially matched ZAID tokens (`40000.80c` → `40000.` counted
+  as a positive fraction); tokens are now split on whitespace, ZAID-shaped tokens are
+  skipped, and fractions must match a full strict number token. (b) `activeMat` was only
+  cleared on blank lines / new `m` cards, so `fmesh4:n ... origin=-182.78` after a
+  material card contributed "negative fractions". Any new non-continuation card now
+  clears the material context. Guarded by a regression test asserting **zero Errors on
+  every bundled prebuilt deck** (BEAVRS included) plus targeted false-positive cases.
+- **`mcnp.ts` `parseCell`** — `u=-5` (valid MCNP: "don't truncate by parent boundary")
+  was keyed signed, so `fill=5` found nothing. Universe keys are now `Math.abs(u)`.
+- **`openmc.ts` `findPitch`/`findLowerLeft`/`findHeight`** — scanned raw lines, so
+  `# the pitch = 999` in a comment won over the real assignment. New `stripPyComment`
+  helper applied before scanning.
+- **`src/results/parsers/*` + `src/workflows/sweepCore.ts`** — the `[0-9.]+` character
+  class matched dots-only garbage (`KEFF = ...` → NaN k-eff in the Results viewer) and
+  multi-dot strings (`1.2.3` → silently 1.2). New shared `src/results/parsers/numeric.ts`:
+  strict `NUM` pattern (digits required, optional exponent) + `pushIfFinite` so non-finite
+  samples never enter the k-eff history. Applied to all four parsers and the sweep
+  scrapers.
+- **`src/inputBuilder/deckBuilder.ts`** — empty material selection interpolated
+  `fill=undefined` into generated OpenMC Python. Now emits `None` fills plus an
+  explanatory comment (still-valid Python).
+- **`src/inputBuilder/materials.ts`** — `customName` containing `'` or `\` broke the
+  generated Python string literal. Labels are display-only, so hostile characters are
+  substituted with safe lookalikes (`'`→`"`, `\`→`/`) rather than escaped; newlines were
+  already flattened.
+
+### Cosmetic fixes
+
+- **`src/allen/plotConfig.ts` + `src/allen/panel.ts` (webview copy)
+  `bondarenkoShieldingFactor`** — `Math.log(1+t)/t` suffers catastrophic cancellation for
+  tiny t and returned values slightly above 1 (unphysical). Now `Math.log1p(t)/t`,
+  non-finite guard, clamped [0, 1]. **Same fix mirrored to the website's
+  `reactor-monte-carlo-guide/src/lib/xs/doppler.ts`.**
+- **`src/test/fixtures/sample_openmc.log`** — matched the public repo's `*.log` gitignore
+  so fresh clones failed the suite; renamed to `sample_openmc.log.txt`, reference updated,
+  `.gitignore` negation removed.
+
+### Adversarial suite ported
+
+- `src/test/suite/adv.{mcnp,serpent,scone,openmc}.extractor.test.ts`,
+  `adv.validator.test.ts`, `adv.results.test.ts`, `adv.sweep.lattice.input.test.ts`,
+  `adv.allen.native.measure.test.ts`, `adv.hangbombs.test.ts` (probe scripts recast as
+  bounded unit tests with wall-clock assertions). Validator tests adapted from the old
+  `runValidators` API to the pure `runLanguageRules` (headless, no vscode import).
+  Full suite: **423 passing** in the VS Code test host (post-merge with 0.3.6, whose
+  pin-cell decks are automatically covered by the prebuilt-deck validator sweep).
+
+### GROVES siblings (same audit classes checked, fixed where shared) — GROVES → 1.3.2
+
+- `groves/src/groves/mcnp_references.py expand_repeats` — same uncapped repeat bomb;
+  capped at 1M (`MAX_EXPANDED_TOKENS`).
+- `groves/src/groves/analysis.py` — MCNP `fill=` *range* grids (`-100000:100000 …`) and
+  SCONE `latUniverse` shapes were uncapped (OOM/hang); both now guarded at 5M cells.
+  OpenMC pitch scan read values out of `#` comments; comments now stripped.
+- `groves/src/groves/results/__init__.py` + `sweep_core.py` — `[0-9.]+` was *worse* in
+  Python: `float("...")` raises `ValueError`, crashing the parser. Same strict `NUM`
+  pattern + finite filtering ported.
+- `groves/src/groves/allen_panel.py _bondarenko` — same `log(1+t)/t` instability;
+  same `log1p` + [0,1] clamp fix.
+- Not shared: lattice recursion (GROVES parsers are flat, no universe recursion),
+  negative-universe keying, material-sign rule (GROVES validator has no such rule),
+  deckBuilder/materials escaping (no input builder).
+- New `groves/tests/test_adversarial.py` (16 tests); full pytest suite 65 passing.
+
+---
+
 ## 2026-07-02 — v0.3.6 — prebuilt-model audit + reflected pin-cell teaching decks
 
 **AI Agent:** Fable 5 (Cursor IDE)
@@ -73,6 +169,8 @@ to 1.3.1 for the bundle change.
   (`node ./out/test/runTest.js`) because `validator.test.js` imports `vscode`; plain
   mocha works for pure-logic suites only. `npx` still hangs on this machine — use
   `node_modules\.bin\*.cmd` or `node` directly.
+
+---
 
 ## 2026-07-01 — v0.3.5 — LSP, converter promotion, geometry verify, sweep dashboard
 

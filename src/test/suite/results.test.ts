@@ -37,7 +37,7 @@ suite('Results parsers', () => {
     });
 
     test('OpenMC stdout parses combined k-effective', () => {
-        const text = fs.readFileSync(path.join(FIX, 'sample_openmc.log'), 'utf8');
+        const text = fs.readFileSync(path.join(FIX, 'sample_openmc.log.txt'), 'utf8');
         const r = parseOpenmcStdout(text);
         assert.strictEqual(r.code, 'openmc');
         assert.ok(r.keff?.final);

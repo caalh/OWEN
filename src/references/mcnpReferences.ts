@@ -156,13 +156,20 @@ function classify(text: string): CardKind {
 // Fill-array shorthand expansion (nR / nI / nJ|j) — mirrors the geometry parser
 // ---------------------------------------------------------------------------
 
+// Cap on expanded fill-array entries. The index rebuilds on every edit, so a
+// hostile/typo'd repeat count (`1 2000000000r`) typed into a deck would OOM
+// the extension host without this. Real cores need ~10⁴–10⁵ entries.
+const MAX_FILL_ENTRIES = 1_000_000;
+
 function expandRepeats(tokens: string[]): number[] {
     const out: number[] = [];
     let pendingInterp = 0;
     for (const tok of tokens) {
+        if (out.length >= MAX_FILL_ENTRIES) break;
+        const room = () => MAX_FILL_ENTRIES - out.length;
         const rep = tok.match(/^(\d+)[rR]$/);
         if (rep) {
-            const n = parseInt(rep[1], 10);
+            const n = Math.min(parseInt(rep[1], 10), room());
             const last = out.length ? out[out.length - 1] : 0;
             for (let k = 0; k < n; k++) out.push(last);
             continue;
@@ -171,7 +178,7 @@ function expandRepeats(tokens: string[]): number[] {
         if (interp) { pendingInterp = parseInt(interp[1], 10); continue; }
         const jump = tok.match(/^(\d+)?[jJ]$/);
         if (jump) {
-            const n = jump[1] ? parseInt(jump[1], 10) : 1;
+            const n = Math.min(jump[1] ? parseInt(jump[1], 10) : 1, room());
             for (let k = 0; k < n; k++) out.push(0);
             continue;
         }
@@ -180,10 +187,11 @@ function expandRepeats(tokens: string[]): number[] {
         if (pendingInterp > 0 && out.length) {
             const start = out[out.length - 1];
             const steps = pendingInterp + 1;
-            for (let k = 1; k <= pendingInterp; k++) out.push(Math.round(start + ((n - start) * k) / steps));
+            const emit = Math.min(pendingInterp, room());
+            for (let k = 1; k <= emit; k++) out.push(Math.round(start + ((n - start) * k) / steps));
             pendingInterp = 0;
         }
-        out.push(n);
+        if (out.length < MAX_FILL_ENTRIES) out.push(n);
     }
     return out;
 }

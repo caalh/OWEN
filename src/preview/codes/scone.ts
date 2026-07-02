@@ -91,6 +91,13 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             if (pitchVals.length && shapeVals.length >= 2) {
                 const nx = Math.round(shapeVals[0]);
                 const ny = Math.round(shapeVals[1]);
+                // Mirror the MCNP 5M fill guard: a hostile/typo'd
+                // `shape (100000 100000 1)` would otherwise OOM the host
+                // building a 10¹⁰-cell grid.
+                if (!(nx > 0 && ny > 0) || nx * ny > 5_000_000) {
+                    warnings.push(`latUniverse "${block.name}" declares a ${nx}×${ny} shape — too large to expand (limit 5,000,000 cells); skipped.`);
+                    continue;
+                }
                 const grid: number[][] = [];
                 let idx = 0;
                 for (let row = 0; row < ny; row++) {

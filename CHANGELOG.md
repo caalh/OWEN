@@ -5,6 +5,53 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] — 2026-07-02
+
+Hardening release: all 15 bugs found by an adversarial test audit (run against v0.3.4)
+are fixed, and the audit's 180-test adversarial suite is now part of the shipped test suite.
+
+### Fixed
+
+- **Crash-level (extension-host OOM/hang from a single malformed deck):**
+  - MCNP repeat expansion (`fill= 1 2000000000r`) is now capped at 1M entries in both the
+    3D-preview extractor and the references index (which rebuilds on every edit, so this
+    was reachable just by typing).
+  - Self-referential and mutually-referential MCNP lattices (`u=5` whose fill contains 5,
+    or 5↔6) no longer recurse exponentially: cycle detection via an ancestor set in
+    `countPins`/`placeUniverse`. Same fix for Serpent lattices.
+  - SCONE `shape (100000 100000 1)` and Serpent giant `lat` headers
+    (`1000000000 1000000000`) no longer allocate unbounded grids: lattice size capped at
+    5M cells; Serpent rows are additionally capped to the data actually present.
+- **Wrong-result:**
+  - `mcnp.material-sign` validator rule no longer fires false Errors on valid decks
+    (including bundled BEAVRS): the fraction matcher no longer partially matches ZAIDs
+    like `40000.80c`, and the active-material context is cleared when any new card starts
+    (previously `fmesh4:n origin=-182.78` after an `m` card was read as a negative fraction).
+  - MCNP cells with negative universe IDs (`u=-5`, valid MCNP notation) are now keyed by
+    `abs(u)` so `fill=5` finds them in the 3D preview.
+  - OpenMC pitch detection no longer reads `pitch = 999` out of `#` comments.
+  - Results parsers (all four codes) and the sweep k-eff scrapers now require a proper
+    numeric token — dots-only garbage (`KEFF = ...`, `k-eff = .`) and multi-dot strings
+    (`1.2.3`) no longer surface as `k-eff = NaN` or silently truncated values; non-finite
+    samples are dropped at aggregation.
+  - Input Builder: generating an OpenMC deck with no materials selected no longer emits
+    literal `fill=undefined` Python; custom material names containing `'` or `\` no longer
+    break the generated Python string (sanitized to safe lookalikes).
+- **Cosmetic:**
+  - ALLEN `bondarenkoShieldingFactor` no longer returns values above 1 for tiny σ₀/σ
+    (catastrophic cancellation in `log(1+t)/t`) — now `log1p(t)/t`, clamped to [0, 1].
+    Fixed in both the plot config and the webview copy.
+  - `src/test/fixtures/sample_openmc.log` renamed to `.log.txt` so fresh clones of the
+    public repo (where `*.log` is gitignored) pass the test suite.
+
+### Added
+
+- **Adversarial test suite** ported from the audit into `src/test/suite/adv.*.test.ts`
+  (~180 tests): extractor edge cases for all four codes, validator false-positive
+  regressions (including a zero-Errors assertion over every bundled prebuilt deck),
+  results-parser garbage inputs, input-builder hostile names, ALLEN plot math edge cases,
+  measurement math, LOD budget, and bounded "hang bomb" repros for every crash bug above.
+
 ## [0.3.6] — 2026-07-02
 
 Prebuilt-model quality release: every bundled deck audited for syntax/physics

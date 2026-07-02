@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import type { RunResults, KeffHistory, FluxSpectrum, MeshTally } from '../types';
 import { parseKeff } from '../../workflows/sweepCore';
+import { NUM, pushIfFinite } from './numeric';
 
 /** Parse OpenMC stdout / owen-sweep.log for k-eff when HDF5 unavailable. */
 export function parseOpenmcStdout(text: string, sourceFile?: string): RunResults {
@@ -9,25 +10,23 @@ export function parseOpenmcStdout(text: string, sourceFile?: string): RunResults
     const mean: number[] = [];
     const std: number[] = [];
 
+    const combinedRe = new RegExp(String.raw`Combined\s+k-?effective\s*=\s*(${NUM})\s*\+\/-\s*(${NUM})`, 'i');
+    const batchRe = new RegExp(String.raw`Batch\s+(\d+)[^\n]*k\s*=\s*(${NUM})\s*\+\/-\s*(${NUM})`, 'i');
     for (const line of lines) {
-        const combined = /Combined\s+k-?effective\s*=\s*([0-9.]+)\s*\+\/-\s*([0-9.]+)/i.exec(line);
+        const combined = combinedRe.exec(line);
         if (combined) {
-            cycles.push(cycles.length + 1);
-            mean.push(parseFloat(combined[1]));
-            std.push(parseFloat(combined[2]));
+            pushIfFinite(cycles, mean, std, cycles.length + 1, parseFloat(combined[1]), parseFloat(combined[2]));
             continue;
         }
-        const batch = /Batch\s+(\d+)[^\n]*k\s*=\s*([0-9.]+)\s*\+\/-\s*([0-9.]+)/i.exec(line);
+        const batch = batchRe.exec(line);
         if (batch) {
-            cycles.push(parseInt(batch[1], 10));
-            mean.push(parseFloat(batch[2]));
-            std.push(parseFloat(batch[3]));
+            pushIfFinite(cycles, mean, std, parseInt(batch[1], 10), parseFloat(batch[2]), parseFloat(batch[3]));
         }
     }
 
     if (mean.length === 0) {
         const k = parseKeff(text);
-        if (k != null) {
+        if (k != null && Number.isFinite(k)) {
             cycles.push(1);
             mean.push(k);
             std.push(0);
