@@ -5,6 +5,53 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] — 2026-07-01
+
+Four roadmap items in one release: a real **Language Server** for the Monte Carlo languages,
+a promoted **cross-code converter** with a Rosetta diff view, **geometry verification** through
+OpenMC, and a **sweep results dashboard**.
+
+### Added
+
+- **MC Language Server (LSP)** for MCNP, Serpent, and SCONE. Diagnostics are now real-time
+  (on-type, debounced) instead of on-command: all previous validator rules plus MCNP
+  line-length and new **cross-reference diagnostics** — a cell referencing an undefined
+  surface/material/universe/transform is an error; defined-but-never-referenced entities are
+  faded hints. Hover, go-to-definition, find-references, occurrence highlight, and a grouped
+  document outline (Cells / Surfaces / Materials / Universes / Transforms / Tallies) are served
+  over LSP. The server ships as a self-contained `out/server.js` and can be reused by other
+  editors (Sublime LSP, Neovim) over stdio — see `AI_MAINTAINER_GUIDE.md`. OpenMC Python files
+  keep Pylance plus OWEN's manual validate command.
+- **`OWEN: Convert Deck… (Experimental)`** (`owen.convertDeck`): the previously hidden
+  MCNP↔OpenMC converter is now a visible command with a source→target picker, and grows two new
+  targets: **MCNP→Serpent** and **MCNP→SCONE** for the cleanly-mappable subset (cyl/plane/
+  sphere/RPP/RCC surfaces, cells, materials with per-code nuclide mapping, square lattices).
+  Anything that can't convert emits a clearly marked `TODO(owen-convert)` comment instead of
+  being dropped. Results open in a **Rosetta diff** webview: source and converted deck
+  side-by-side with aligned cells/surfaces/materials sections and TODO highlights.
+- **`OWEN: Verify Geometry with OpenMC`** (`owen.verifyGeometry`): for OpenMC decks, runs the
+  model through the locally installed OpenMC (reusing 0.3.4's interpreter discovery and WSL
+  handling) and checks for **overlapping cells** (slice plots with `show_overlaps=True` at
+  several sampled planes, red overlap pixels counted) and **lost particles** (a short capped
+  probe run). Results panel shows per-plane images with overlap highlights, the lost-particle
+  report, or a green all-clear with the honest caveat that sampled planes ≠ proof.
+- **`OWEN: View Sweep Results`** (`owen.viewSweepResults`): dashboard for completed parameter
+  sweeps — k-eff vs swept parameter with error bars (uPlot), per-run convergence
+  small-multiples, and a run table, aggregated from `sweep-manifest.json` plus each run's
+  outputs via the `src/results/` parsers.
+
+### Changed
+
+- `OWEN: Validate Input File` remains for on-demand checks (and is still the diagnostics path
+  for OpenMC Python files); MCNP/Serpent/SCONE diagnostics now update live via the LSP.
+- The VSIX now contains two bundles: `out/extension.js` and `out/server.js`.
+
+### Notes
+
+- Marketplace/Open VSX publish deferred to maintainer. VSIX: `owen-neutronics-0.3.5.vsix`.
+- Converter coverage is deliberately partial (documented per-construct with TODO markers) —
+  experimental labeling stays.
+
 ## [0.3.4] — 2026-07-01
 
 **Render with OpenMC (authoritative)** — native OpenMC renders of your model, inside the editor.

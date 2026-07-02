@@ -154,9 +154,14 @@ export async function runSweepFromConfig(configUri: vscode.Uri): Promise<void> {
     const tsv = buildSummaryTsv(parsed.parameters, records);
     await writeText(vscode.Uri.file(path.join(outDir, 'sweep-summary.tsv')), tsv + '\n');
 
-    vscode.window.showInformationMessage(
+    const choice = await vscode.window.showInformationMessage(
         `OWEN: parameter sweep complete (${records.length} runs). Manifest: ${manifestPath}`,
+        'View Sweep Dashboard',
     );
+    if (choice === 'View Sweep Dashboard') {
+        const { SweepDashboardPanel } = await import('./sweepDashboard');
+        await SweepDashboardPanel.createOrShow(outDir);
+    }
 }
 
 export function registerRunSweep(_context: vscode.ExtensionContext): vscode.Disposable {

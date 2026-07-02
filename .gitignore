@@ -4,4 +4,5 @@ out-test/
 *.vsix
 .vscode-test/
 *.log
+!src/test/fixtures/*.log
 .DS_Store

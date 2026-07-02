@@ -1,23 +1,13 @@
-// MCNP language providers backed by the cross-reference index.
+// Per-document MCNP reference-index cache.
 //
-// Hover, Go-to-Definition, and Find-All-References for cell / surface / material
-// / universe numbers in MCNP decks. All three resolve the number under the
-// cursor through the position-aware index in `./mcnpReferences.ts`, so hovering
-// a `fill=` entry says which universe it is and where that universe is defined.
+// The hover / definition / references / highlight providers that used to live
+// here were replaced by the MC language server (src/server/, bundled to
+// out/server.js) — the LSP serves the same data from the same index. What
+// remains client-side is this cache, used by the MCNP References tree view
+// (referencesView.ts), which is a UI feature rather than a language feature.
 
 import * as vscode from 'vscode';
-import {
-    McnpReferenceIndex,
-    buildMcnpReferenceIndex,
-    resolveAt,
-    getDefinition,
-    getReferences,
-    getHighlightOccurrences,
-    describeEntity,
-    Occurrence,
-} from './mcnpReferences';
-
-const MCNP_SELECTOR: vscode.DocumentSelector = { language: 'mcnp' };
+import { McnpReferenceIndex, buildMcnpReferenceIndex } from './mcnpReferences';
 
 // Per-document index cache keyed by URI, invalidated on version change.
 const cache = new Map<string, { version: number; index: McnpReferenceIndex }>();
@@ -31,78 +21,8 @@ export function getIndexFor(doc: vscode.TextDocument): McnpReferenceIndex {
     return index;
 }
 
-function spanToRange(occ: Occurrence): vscode.Range {
-    return new vscode.Range(occ.line, occ.startCol, occ.line, occ.endCol);
-}
-
-class McnpHoverProvider implements vscode.HoverProvider {
-    provideHover(doc: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
-        const index = getIndexFor(doc);
-        const occ = resolveAt(index, position.line, position.character);
-        if (!occ) return undefined;
-        const md = new vscode.MarkdownString(describeEntity(index, occ));
-        md.isTrusted = false;
-        return new vscode.Hover(md, spanToRange(occ));
-    }
-}
-
-class McnpDefinitionProvider implements vscode.DefinitionProvider {
-    provideDefinition(doc: vscode.TextDocument, position: vscode.Position): vscode.Definition | undefined {
-        const index = getIndexFor(doc);
-        const occ = resolveAt(index, position.line, position.character);
-        if (!occ) return undefined;
-        const def = getDefinition(index, occ.kind, occ.id);
-        if (!def) return undefined;
-        return new vscode.Location(doc.uri, new vscode.Range(def.line, def.startCol, def.line, def.endCol));
-    }
-}
-
-class McnpReferenceProvider implements vscode.ReferenceProvider {
-    provideReferences(
-        doc: vscode.TextDocument,
-        position: vscode.Position,
-        context: vscode.ReferenceContext,
-    ): vscode.Location[] {
-        const index = getIndexFor(doc);
-        const occ = resolveAt(index, position.line, position.character);
-        if (!occ) return [];
-        return getReferences(index, occ.kind, occ.id, context.includeDeclaration)
-            .map((r) => new vscode.Location(doc.uri, spanToRange(r)));
-    }
-}
-
-// Replaces VS Code's default word-based occurrence highlight (which lights up
-// every matching digit in the file — the "it just finds all the 1s" problem)
-// with a role-aware highlight: only the occurrences of THIS entity of THIS kind
-// are highlighted. The definition is marked Write, references Read.
-// Always returns an array (never undefined) so the provider chain stops and the
-// built-in word highlighter is not consulted; pair with configurationDefaults
-// for [mcnp]: occurrencesHighlight singleFile + selectionHighlight false.
-class McnpDocumentHighlightProvider implements vscode.DocumentHighlightProvider {
-    provideDocumentHighlights(
-        doc: vscode.TextDocument,
-        position: vscode.Position,
-    ): vscode.DocumentHighlight[] {
-        const index = getIndexFor(doc);
-        const refs = getHighlightOccurrences(index, position.line, position.character);
-        return refs.map(
-            (r) =>
-                new vscode.DocumentHighlight(
-                    spanToRange(r),
-                    r.isDefinition
-                        ? vscode.DocumentHighlightKind.Write
-                        : vscode.DocumentHighlightKind.Read,
-                ),
-        );
-    }
-}
-
-export function registerMcnpReferenceProviders(context: vscode.ExtensionContext): void {
+export function registerMcnpIndexCache(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
-        vscode.languages.registerHoverProvider(MCNP_SELECTOR, new McnpHoverProvider()),
-        vscode.languages.registerDefinitionProvider(MCNP_SELECTOR, new McnpDefinitionProvider()),
-        vscode.languages.registerReferenceProvider(MCNP_SELECTOR, new McnpReferenceProvider()),
-        vscode.languages.registerDocumentHighlightProvider(MCNP_SELECTOR, new McnpDocumentHighlightProvider()),
         vscode.workspace.onDidCloseTextDocument((d) => cache.delete(d.uri.toString())),
     );
 }

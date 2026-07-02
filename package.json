@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: syntax highlighting (4 palettes), MCNP cross-reference tracker, ALLEN σ(E) cross-section viewer, 3D geometry preview (full-core BEAVRS, measurement tools), lattice builder, prebuilt BEAVRS models, deep validation, and simulation automation.",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -53,11 +53,14 @@
     "onCommand:owen.runSimulation",
     "onCommand:owen.openGeometryPreview",
     "onCommand:owen.renderWithOpenmc",
+    "onCommand:owen.verifyGeometry",
     "onCommand:owen.searchReactorLibrary",
     "onCommand:owen.openPrebuiltModel",
     "onCommand:owen.insertMaterial",
     "onCommand:owen.openTutorial",
     "onCommand:owen.runSweep",
+    "onCommand:owen.viewSweepResults",
+    "onCommand:owen.convertDeck",
     "onCommand:owen.chooseHighlightPalette",
     "onCommand:owen.toggleInvisibleCharacters",
     "onCommand:owen.showMcnpReferences",
@@ -178,6 +181,12 @@
         "icon": "$(symbol-color)"
       },
       {
+        "command": "owen.verifyGeometry",
+        "title": "OWEN: Verify Geometry with OpenMC",
+        "category": "OWEN",
+        "icon": "$(check)"
+      },
+      {
         "command": "owen.searchReactorLibrary",
         "title": "OWEN: Search Reactor Library",
         "category": "OWEN"
@@ -201,6 +210,18 @@
         "command": "owen.runSweep",
         "title": "OWEN: Run Parameter Sweep",
         "category": "OWEN"
+      },
+      {
+        "command": "owen.viewSweepResults",
+        "title": "OWEN: View Sweep Results (Dashboard)",
+        "category": "OWEN",
+        "icon": "$(graph-scatter)"
+      },
+      {
+        "command": "owen.convertDeck",
+        "title": "OWEN: Convert Deck… (Experimental)",
+        "category": "OWEN",
+        "icon": "$(arrow-swap)"
       },
       {
         "command": "owen.chooseHighlightPalette",
@@ -297,6 +318,15 @@
           "when": "editorLangId == python"
         },
         {
+          "command": "owen.verifyGeometry",
+          "group": "2_build@4",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "owen.convertDeck",
+          "group": "2_build@5"
+        },
+        {
           "command": "owen.openResults",
           "group": "3_run@3"
         },
@@ -307,6 +337,10 @@
         {
           "command": "owen.runSweep",
           "group": "3_run@2"
+        },
+        {
+          "command": "owen.viewSweepResults",
+          "group": "3_run@4"
         },
         {
           "command": "owen.toggleInvisibleCharacters",
@@ -372,6 +406,15 @@
           "when": "editorLangId == python"
         },
         {
+          "command": "owen.verifyGeometry",
+          "group": "2_build@4",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "owen.convertDeck",
+          "group": "2_build@5"
+        },
+        {
           "command": "owen.openResults",
           "group": "3_run@3"
         },
@@ -382,6 +425,10 @@
         {
           "command": "owen.runSweep",
           "group": "3_run@2"
+        },
+        {
+          "command": "owen.viewSweepResults",
+          "group": "3_run@4"
         },
         {
           "command": "owen.openTutorial",
@@ -407,6 +454,10 @@
         },
         {
           "command": "owen.renderWithOpenmc",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "owen.verifyGeometry",
           "when": "editorLangId == python"
         }
       ],
@@ -612,6 +663,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "h5wasm": "^0.7.9"
+    "h5wasm": "^0.7.9",
+    "vscode-languageclient": "^10.1.0",
+    "vscode-languageserver": "^10.1.0",
+    "vscode-languageserver-textdocument": "^1.0.13"
   }
 }

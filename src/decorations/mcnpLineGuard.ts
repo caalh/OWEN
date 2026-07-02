@@ -5,11 +5,11 @@ import { findOverlengthLines, MCNP_DEFAULT_LINE_LIMIT } from './lineLength';
 // Two reinforcing signals:
 //   1. A language-scoped editor ruler at the limit ([mcnp].editor.rulers), so
 //      the user sees the boundary while typing.
-//   2. A DiagnosticCollection (Problems panel + squiggle) AND a background
-//      decoration on the overflowing tail, because past-limit characters are
-//      silently ignored by MCNP — a classic invisible bug.
-
-const DIAGNOSTIC_SOURCE = 'OWEN (MCNP)';
+//   2. A background decoration on the overflowing tail, because past-limit
+//      characters are silently ignored by MCNP — a classic invisible bug.
+// The Problems-panel diagnostic for the same condition is published by the MC
+// language server (code `mcnp.line-length`, same findOverlengthLines math), so
+// this module no longer keeps its own DiagnosticCollection.
 
 function lineLimit(): number {
     const n = vscode.workspace
@@ -38,30 +38,6 @@ async function ensureMcnpRuler(): Promise<void> {
     }
 }
 
-function refreshDiagnostics(
-    doc: vscode.TextDocument,
-    collection: vscode.DiagnosticCollection,
-): void {
-    if (doc.languageId !== 'mcnp') {
-        collection.delete(doc.uri);
-        return;
-    }
-    const limit = lineLimit();
-    const diagnostics: vscode.Diagnostic[] = findOverlengthLines(doc.getText(), limit).map((o) => {
-        const range = new vscode.Range(o.line, o.startCol, o.line, doc.lineAt(o.line).text.length);
-        const diag = new vscode.Diagnostic(
-            range,
-            `MCNP card image exceeds ${limit} columns (line is ${o.expandedLength} columns after tab expansion). ` +
-                `Characters past column ${limit} are silently ignored by MCNP — split onto a continuation line.`,
-            vscode.DiagnosticSeverity.Warning,
-        );
-        diag.source = DIAGNOSTIC_SOURCE;
-        diag.code = 'mcnp-line-too-long';
-        return diag;
-    });
-    collection.set(doc.uri, diagnostics);
-}
-
 function refreshDecorations(
     editor: vscode.TextEditor,
     decoration: vscode.TextEditorDecorationType,
@@ -79,14 +55,12 @@ function refreshDecorations(
 }
 
 /**
- * Register the MCNP card-image line-length guard: the language-scoped ruler, a
- * diagnostics collection, and a tail decoration, kept in sync with edits and
- * the active editor.
+ * Register the MCNP card-image line-length guard: the language-scoped ruler
+ * and a tail decoration, kept in sync with edits and the active editor.
  */
 export function registerMcnpLineGuard(context: vscode.ExtensionContext): void {
     void ensureMcnpRuler();
 
-    const collection = vscode.languages.createDiagnosticCollection('owen-mcnp-line-length');
     const decoration = vscode.window.createTextEditorDecorationType({
         backgroundColor: new vscode.ThemeColor('editorError.background'),
         border: '1px solid',
@@ -95,11 +69,10 @@ export function registerMcnpLineGuard(context: vscode.ExtensionContext): void {
         overviewRulerLane: vscode.OverviewRulerLane.Right,
     });
 
-    context.subscriptions.push(collection, decoration);
+    context.subscriptions.push(decoration);
 
     const refreshEditor = (editor: vscode.TextEditor | undefined) => {
         if (!editor) return;
-        refreshDiagnostics(editor.document, collection);
         refreshDecorations(editor, decoration);
     };
 
@@ -114,12 +87,8 @@ export function registerMcnpLineGuard(context: vscode.ExtensionContext): void {
             const editor = vscode.window.activeTextEditor;
             if (editor && e.document === editor.document) {
                 refreshEditor(editor);
-            } else {
-                refreshDiagnostics(e.document, collection);
             }
         }),
-        vscode.workspace.onDidOpenTextDocument((doc) => refreshDiagnostics(doc, collection)),
-        vscode.workspace.onDidCloseTextDocument((doc) => collection.delete(doc.uri)),
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('owen.mcnp.lineLengthLimit')) {
                 void ensureMcnpRuler();

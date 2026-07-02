@@ -7,25 +7,33 @@ const esbuild = require('esbuild');
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
+// Two bundles ship in the VSIX: the extension host bundle and the MC language
+// server (spawned as a separate node process over IPC/stdio).
+const builds = [
+    { entryPoints: ['src/extension.ts'], outfile: 'out/extension.js' },
+    { entryPoints: ['src/server/main.ts'], outfile: 'out/server.js' },
+];
+
 async function main() {
-    const ctx = await esbuild.context({
-        entryPoints: ['src/extension.ts'],
-        bundle: true,
-        outfile: 'out/extension.js',
-        platform: 'node',
-        format: 'cjs',
-        target: 'node18',
-        external: ['vscode', 'h5wasm'],
-        sourcemap: !production,
-        minify: production,
-        logLevel: 'info',
-    });
+    const contexts = await Promise.all(builds.map((b) =>
+        esbuild.context({
+            ...b,
+            bundle: true,
+            platform: 'node',
+            format: 'cjs',
+            target: 'node18',
+            external: ['vscode', 'h5wasm'],
+            sourcemap: !production,
+            minify: production,
+            logLevel: 'info',
+        }),
+    ));
 
     if (watch) {
-        await ctx.watch();
+        await Promise.all(contexts.map((ctx) => ctx.watch()));
     } else {
-        await ctx.rebuild();
-        await ctx.dispose();
+        await Promise.all(contexts.map((ctx) => ctx.rebuild()));
+        await Promise.all(contexts.map((ctx) => ctx.dispose()));
     }
 }
 

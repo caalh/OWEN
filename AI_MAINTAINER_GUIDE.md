@@ -76,13 +76,61 @@ that can fail at load time (see §6). Language detection for every command flows
 `'mcnp' | 'openmc' | 'serpent' | 'scone'`. OpenMC has no VS Code language id, so Python
 files are sniffed for an `openmc` import.
 
+### The MC Language Server (since 0.3.5)
+
+Real-time diagnostics and language features for **mcnp / serpent / scone** come from a
+real LSP server, bundled separately to `out/server.js` and spawned by
+`src/lsp/client.ts` (`vscode-languageclient`, node IPC). Design record:
+`docs/LSP_DESIGN.md`.
+
+```
+out/extension.js (extension host)          out/server.js (child node process)
+  src/lsp/client.ts  ── IPC (LSP) ──►  src/server/main.ts → src/server/server.ts
+                                            │
+                                            ├─ diagnostics = src/language/rules.ts
+                                            │   (+ src/language/crossReference.ts for MCNP)
+                                            ├─ hover / def / refs / highlight
+                                            │   = src/references/mcnpReferences.ts
+                                            └─ document symbols = src/server/symbols.ts
+```
+
+- **Shared rules layer** `src/language/rules.ts`: every validation rule as a pure
+  function (`PlainDiagnostic[]`). Both the server (real-time, 300 ms debounce) and the
+  manual `owen.validateInput` command call this — the two can never disagree.
+- **Cross-reference diagnostics** (MCNP, server-only): undefined surface/material/
+  universe/transform referenced by a cell → Error; defined-but-unreferenced entity →
+  Hint tagged Unnecessary (rendered faded).
+- **OpenMC/.py stays client-side** (Pylance owns Python); the OpenMC gotcha rules run
+  via the manual validate command as before.
+- **Completion stays client-side** (declarative snippets in `package.json`).
+- The old client-side MCNP hover/definition/references/highlight providers were removed
+  in favor of the LSP; the MCNP References **tree view** stays client-side (UI feature).
+
+**Multi-editor use** — the strategic point of LSP: `out/server.js` is self-contained
+(bundled, no `vscode` dependency) and `createConnection(ProposedFeatures.all)`
+auto-detects the transport, so any LSP client can run it over stdio:
+
+```
+node <owen install dir>/out/server.js --stdio
+```
+
+- *Sublime Text (LSP package)*: add a client with `"command": ["node", ".../out/server.js", "--stdio"]`
+  and `"selector": "source.mcnp | source.serpent | source.scone"`.
+- *Neovim*: `vim.lsp.start({ name = 'owen-mc', cmd = { 'node', '.../out/server.js', '--stdio' } })`
+  for the matching filetypes.
+- The server keys its behavior off the `languageId` sent in `didOpen` — clients must
+  send `mcnp`, `serpent`, or `scone`.
+
 ### Module map
 
 | Area | File(s) | Responsibility |
 |------|---------|----------------|
 | Entry | `src/extension.ts` | `activate` / `deactivate`, command registration |
+| LSP client | `src/lsp/client.ts` | spawns `out/server.js` over IPC for mcnp/serpent/scone |
+| LSP server | `src/server/{main,server,symbols}.ts` | diagnostics, hover, def, refs, highlight, symbols |
+| Rules | `src/language/{rules,crossReference,types}.ts` | pure validation rules shared by server + command |
 | Lattice builder | `src/panels/latticeBuilder.ts` | webview grid → MCNP/OpenMC/Serpent code |
-| Validation | `src/validation/validator.ts` | per-language diagnostics with codes |
+| Validation | `src/validation/validator.ts` | manual validate command (thin wrapper over `language/rules`) |
 | Runner | `src/workflows/runner.ts` | `planLaunch()` + launch solver in a terminal |
 | Sweep | `src/workflows/sweep.ts` | cartesian param sweep, per-run mutation, k-eff parse, manifest + TSV |
 | Geometry | `src/preview/extractor.ts` | deck → `CylinderSpec[]` (ports GROVES `analysis.py`) |
@@ -102,14 +150,21 @@ files are sniffed for an `openmc` import.
 
 ## 4. esbuild Bundling — and Why It Matters
 
-OWEN ships as a **single bundled file** (`out/extension.js`) produced by `esbuild.js`:
+OWEN ships as **two bundled files** produced by `esbuild.js`: `out/extension.js` (the
+extension host bundle) and `out/server.js` (the MC language server, spawned as a child
+node process):
 
 - `bundle: true`, `format: 'cjs'`, `platform: 'node'`, `target: 'node18'`.
 - `external: ['vscode']` — the `vscode` module is provided by the host and must never be
   bundled.
 - `.vscodeignore` excludes `node_modules/**` and `src/**` from the VSIX, so **runtime
-  dependencies only ship if they are bundled into `out/extension.js`.** This is why
-  `@supabase/supabase-js` (a real runtime dependency) must be reachable by esbuild.
+  dependencies only ship if they are bundled into the two `out/*.js` files.** This is why
+  `@supabase/supabase-js` (a real runtime dependency) must be reachable by esbuild, and
+  why `.vscodeignore` whitelists BOTH `!out/extension.js` and `!out/server.js` — verify
+  with `vsce ls` after packaging changes.
+- `tsconfig.json` carries `paths` mappings for the `vscode-languageserver*` packages:
+  they only expose entry points through package `exports` maps, which tsc's classic
+  node10 resolution cannot see (esbuild and Node resolve them natively).
 
 Build commands (`package.json` scripts):
 
@@ -165,12 +220,15 @@ is also opt-in (`owen.community.enabled`, off by default) and ships with no cred
 
 ## 7. Validation, Preview, Sweep — Behavior Notes
 
-- **Validation** (`validation/validator.ts`) emits diagnostics keyed by code. It encodes
+- **Validation** rules live in `src/language/rules.ts` (pure, keyed by code) and encode
   the nuclear-physics gotchas: ZAID format, density/fraction sign conventions, `mt`/S(α,β)
-  only on hydrogen-bearing materials (MCNP); `IndependentSource`/`RectangularPrism` (OpenMC);
-  `cuboid` vs `rect`, `trcl`, CLI `omp` (Serpent); `aceNeutronDatabase`, temperature-suffix
-  matching, `pinUniverse` radii/fills (SCONE). `dispatch()` returns the array so tests can
-  introspect without the UI.
+  only on hydrogen-bearing materials, card-image line length (MCNP);
+  `IndependentSource`/`RectangularPrism` (OpenMC); `cuboid` vs `rect`, `trcl`, CLI `omp`
+  (Serpent); `aceNeutronDatabase`, temperature-suffix matching, `pinUniverse` radii/fills,
+  ASCII-only (SCONE). The LSP server applies them in real time for mcnp/serpent/scone;
+  `validation/validator.ts` is the manual-command wrapper (`runValidators()` keeps the
+  old test-facing API). `dispatch()` returns the array so tests can introspect without
+  the UI.
 - **Geometry extractor** (`preview/extractor.ts`) is a deliberate TypeScript port of GROVES'
   `analysis.py`. The design goal is **parity** with GROVES, not "best possible parsing" —
   if you change geometry behavior, change `groves/src/groves/analysis.py` too (or document

@@ -12,6 +12,81 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-01 — v0.3.5 — LSP, converter promotion, geometry verify, sweep dashboard
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+Four roadmap items in one release. Developed in a **git worktree** (`BD-worktree-ideas`) off
+`origin/main` to avoid colliding with the concurrent 0.3.4 work; 0.3.4 was merged into the
+feature branch when it landed (conflicts: `package.json` menu groups, resolved by renumbering
+`2_build@3/4/5`).
+
+### Item 1 — LSP migration (`docs/LSP_DESIGN.md` is the design record)
+
+- **`src/language/`** — pure shared rules layer (no vscode imports): `rules.ts` holds every
+  old validator rule 1:1 plus the MCNP line-length rule; `crossReference.ts` derives
+  undefined-reference errors and unused-definition hints from `references/mcnpReferences.ts`.
+  `PlainDiagnostic` (types.ts) is the editor-agnostic diagnostic shape.
+- **`src/server/`** — the LSP server, bundled to `out/server.js`: `server.ts` is
+  `startLanguageServer(connection)` (testable with in-memory streams), `main.ts` is the entry
+  (`createConnection(ProposedFeatures.all)` — IPC from VS Code, `--stdio` for other editors),
+  `symbols.ts` builds the outline (MCNP grouped via the reference index + tally regex scan;
+  Serpent/SCONE regex outlines). Diagnostics recomputed on open/change with a **300 ms
+  debounce**; hover/def/refs/highlight ported from the old client-side providers.
+- **`src/lsp/client.ts`** — `vscode-languageclient` over node IPC for mcnp/serpent/scone;
+  forwards `owen.mcnp.lineLimit` via initializationOptions + didChangeConfiguration.
+- **Deliberate choices:** OpenMC/.py stays client-side (Pylance owns Python; OWEN's OpenMC
+  rules keep running through the manual validate command). Completion stays declarative
+  (snippets). `validator.ts` is now a thin wrapper over `language/rules.ts` so the manual
+  command and the LSP can never disagree. Old MCNP hover/def/refs providers deleted;
+  `mcnpLineGuard` keeps ruler + decoration but its DiagnosticCollection moved to the server.
+- **Gotcha:** `vscode-languageserver*` packages only expose entry points via `exports` maps,
+  invisible to tsc's node10 resolution — fixed with `tsconfig.json` `paths` mappings (esbuild
+  resolves them natively; do NOT switch the whole project to Node16 module resolution, it
+  breaks other deps).
+- **Tests:** `languageRules.test.ts` (rule parity + cross-reference), `lspServer.test.ts`
+  (real in-process server over PassThrough streams: initialize → didOpen → assert published
+  diagnostics, hover, definition, references, symbols).
+- **Fixed:** `owen/.gitignore` `*.log` was swallowing the test fixture
+  `src/test/fixtures/sample_openmc.log`; added a negation and committed the fixture.
+
+### Item 3 — Converter promoted + Serpent/SCONE targets + Rosetta diff
+
+- `src/converter/mcnpModel.ts`: MCNP deck → intermediate representation (cells, surfaces,
+  materials, lattices) used by all MCNP→X emitters. `mcnpToSerpent.ts` / `mcnpToScone.ts`
+  emit the cleanly-mappable subset; anything else becomes a `TODO(owen-convert)` comment —
+  honesty over completeness. Serpent: `cuboid` not `rect`, `trans` not `trcl`, MeV energies,
+  no `set omp` (CLI flag instead). SCONE: `key value;` dicts, ASCII-only, `aceNeutronDatabase`,
+  pinUniverse radii/fills length parity.
+- `owen.convertDeck` command with QuickPick source→target; output opens beside the source and
+  in the **Rosetta diff** webview (`src/converter/rosettaView.ts`) with aligned sections and
+  TODO highlighting.
+- Tests include a BEAVRS-assembly-scale deck asserting no crash + expected TODO markers.
+
+### Item 2 — Verify Geometry with OpenMC
+
+- `src/verify/core.ts` (pure): default sampled planes (xy/xz/yz), request builder, helper
+  script generator (ASCII-enforced; monkey-patches `openmc.run`/`Model.run` like the 0.3.4
+  renderer; overlap slice plots with `show_overlaps=True` + PIL red-pixel counting; short
+  capped-lost-particles probe run), result parser. `src/verify/panel.ts` reuses
+  `preview/openmcNative/detect.ts` (interpreter discovery + WSL) — zero duplication of B's
+  infra. Panel shows per-plane images, lost-particle report, or all-clear with sampling caveat.
+
+### Item 5 — Sweep results dashboard
+
+- `src/workflows/sweepDashboardCore.ts` (pure aggregation: reads `sweep-manifest.json`, then
+  re-parses each run dir with `src/results/` parsers for convergence series) +
+  `src/workflows/sweepDashboard.ts` (`owen.viewSweepResults` webview: k-eff vs parameter with
+  error bars in uPlot, per-run convergence small-multiples, run table).
+
+### Release
+
+- Version 0.3.4 → **0.3.5**; esbuild produces `out/extension.js` + `out/server.js`;
+  `.vscodeignore` whitelists both (verified with `vsce ls`). 220 headless tests green.
+  Publish deferred to maintainer, as with 0.3.2–0.3.4.
+
+---
+
 ## 2026-07-01 — v0.3.4 — Render with OpenMC (authoritative)
 
 **AI Agent:** Fable 5 (Cursor IDE)
