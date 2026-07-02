@@ -73,9 +73,9 @@ switch to concentric pin layers, and slice through the core.
 **From a VSIX** (available now via [GitHub Releases](https://github.com/caalh/owen/releases/latest)):
 
 ```bash
-code --install-extension owen-neutronics-0.3.2.vsix
+code --install-extension owen-neutronics-0.3.7.vsix
 # Cursor:
-cursor --install-extension owen-neutronics-0.3.2.vsix
+cursor --install-extension owen-neutronics-0.3.7.vsix
 ```
 
 Or in the editor: Extensions view → `...` menu → **Install from VSIX…**.
