@@ -1,0 +1,86 @@
+% BEAVRS 3.1 wt% UO2 pin cell, reflected (k-infinity) - OWEN teaching deck
+% =====================================================================
+% "Hello world" PWR pin cell: a single BEAVRS-spec fuel pin in a
+% 1.26 cm square water cell with REFLECTIVE boundaries on all six
+% faces (set bc 2), so the eigenvalue run converges to k-inf.
+%
+% GEOMETRY (BEAVRS rev 2.0.2 fuel pin):
+%   fuel pellet r 0.39218 / clad inner r 0.40005 / clad outer r 0.45720
+%   pin pitch 1.26 cm; active height 365.76 cm (z = 0 -> 365.76)
+% MATERIALS: number densities identical to the BEAVRS full-core deck
+%   (3.1 wt% UO2, He gap, Zircaloy-4, 975 ppm borated water, HFP 600 K).
+%   ZAID suffix .06c assumed to mean 600 K (JEF-3.1.1 style); point
+%   'set acelib' at a library whose 600 K suffix matches. Energies MeV.
+%   S(a,b) (therm lwtr) is on WATER ONLY, never on UO2/structure.
+% EXPECTED k-inf: ~1.23 +/- 0.02. Companion OpenMC deck
+%   (pincell_openmc.py) gives 1.2256 +/- 0.0010 with ENDF/B-VIII.0
+%   (600 K neutron data); this Serpent deck is spec-derived and NOT
+%   run-verified.
+% Run: sss2 -omp N pincell_serpent.sss
+% =====================================================================
+
+set title "BEAVRS 3.1 wt% UO2 pin cell (reflected, k-inf teaching deck)"
+
+% ===================== MATERIALS (atoms/b-cm) =====================
+mat fuel sum tmp 600   % UO2-31
+8016.06c  4.58530e-2
+8017.06c  1.74200e-5
+92234.06c  5.79870e-6
+92235.06c  7.21750e-4
+92238.06c  2.22530e-2
+mat helium sum tmp 600   % Helium
+2003.06c  4.80890e-10
+2004.06c  2.40440e-4
+mat zirc sum tmp 600   % Zircaloy
+24050.06c  3.29620e-6
+24052.06c  6.35640e-5
+24053.06c  7.20760e-6
+24054.06c  1.79410e-6
+26054.06c  8.66980e-6
+26056.06c  1.36100e-4
+26057.06c  3.14310e-6
+26058.06c  4.18290e-7
+8016.06c  3.07440e-4
+8017.06c  1.16800e-7
+50112.06c  4.67350e-6
+50114.06c  3.17990e-6
+50115.06c  1.63810e-6
+50116.06c  7.00550e-5
+50117.06c  3.70030e-5
+50118.06c  1.16690e-4
+50119.06c  4.13870e-5
+50120.06c  1.56970e-4
+50122.06c  2.23080e-5
+50124.06c  2.78970e-5
+40090.06c  2.18280e-2
+40091.06c  4.76010e-3
+40092.06c  7.27590e-3
+40094.06c  7.37340e-3
+40096.06c  1.18790e-3
+mat water sum tmp 600 moder lwtr 1001   % borated water, 975 ppm
+1001.06c  4.94560e-2
+5010.06c  7.97140e-6
+5011.06c  3.22470e-5
+1002.06c  7.70350e-6
+8016.06c  2.46730e-2
+8017.06c  9.37340e-6
+therm lwtr lwj3.11t   % H-in-H2O S(a,b); match to your acelib
+
+% ===================== GEOMETRY =====================
+% Pin universe: pellet / gap / clad / coolant (radii in cm)
+pin p1
+fuel    0.39218
+helium  0.40005
+zirc    0.45720
+water
+
+% 1.26 cm square cell over the active fuel height
+surf sBox cuboid -0.63 0.63 -0.63 0.63 0.0 365.76
+cell cPin 0 fill p1  -sBox
+cell cOut 0 outside   sBox
+
+% ===================== RUN SETTINGS =====================
+set pop 5000 250 50       % neutrons/cycle, active, inactive
+set bc 2                  % reflective on all outer boundaries -> k-inf
+set ures 1
+% set acelib "/path/to/jeff311.xsdir"   % <- set your library (600 K suffix)

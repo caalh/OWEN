@@ -3,7 +3,7 @@
 # Westinghouse-style 17x17 PWR assembly: 264 UO2 fuel pins + 25 guide/
 # instrument tubes, 1.26 cm pitch, reflective outer boundary.
 # Built from OWEN's `omc_assembly_script` snippet (OpenMC >= 0.13 API:
-# IndependentSource, model.model.RectangularPrism class, model.run()).
+# IndependentSource, openmc.model.RectangularPrism class, model.run()).
 # NOT a converged/validated benchmark - materials & geometry are
 # physically sane but settings are nominal. Cross sections assumed from
 # your configured OPENMC_CROSS_SECTIONS (e.g. ENDF/B-VII.1).
@@ -40,10 +40,12 @@ def fuel_pin():
     return openmc.Universe(cells=[c1, c2, c3])
 
 def guide_tube():
-    g = openmc.ZCylinder(r=0.6020)
-    c1 = openmc.Cell(fill=water, region=-g)
-    c2 = openmc.Cell(fill=water, region=+g)
-    return openmc.Universe(cells=[c1, c2])
+    inner = openmc.ZCylinder(r=0.5610)
+    outer = openmc.ZCylinder(r=0.6020)
+    c1 = openmc.Cell(fill=water, region=-inner)
+    c2 = openmc.Cell(fill=zr,    region=+inner & -outer)
+    c3 = openmc.Cell(fill=water, region=+outer)
+    return openmc.Universe(cells=[c1, c2, c3])
 
 F = fuel_pin()
 G = guide_tube()
@@ -53,10 +55,13 @@ lat = openmc.RectLattice(name='PWR-17x17')
 lat.pitch = (1.26, 1.26)
 lat.lower_left = (-10.71, -10.71)
 univ_map = np.full((17, 17), F, dtype=object)
-for (i, j) in [(2,5),(2,8),(2,11), (5,2),(5,5),(5,8),(5,11),(5,14),
+# Standard Westinghouse 17x17 pattern: 24 guide tubes + centre instrument
+# position (8,8) = 25 tube positions.
+for (i, j) in [(2,5),(2,8),(2,11), (3,3),(3,13),
+               (5,2),(5,5),(5,8),(5,11),(5,14),
                (8,2),(8,5),(8,8),(8,11),(8,14),
                (11,2),(11,5),(11,8),(11,11),(11,14),
-               (14,5),(14,8),(14,11)]:
+               (13,3),(13,13), (14,5),(14,8),(14,11)]:
     univ_map[i, j] = G
 lat.universes = univ_map.tolist()
 

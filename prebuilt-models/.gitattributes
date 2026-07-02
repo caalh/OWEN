@@ -1,0 +1,4 @@
+# Prebuilt model decks must keep UNIX (LF) line endings on every platform.
+# SCONE hard-requires LF; the other codes tolerate it, and it keeps the
+# GROVES bundle and the caalh/owen public mirror byte-identical.
+* text eol=lf

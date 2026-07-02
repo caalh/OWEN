@@ -12,6 +12,68 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-02 — v0.3.6 — prebuilt-model audit + reflected pin-cell teaching decks
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+Full correctness audit of `prebuilt-models/` plus one new model per code. GROVES's
+`groves/prebuilt-models/` mirror is byte-identical (verified by SHA-256); GROVES bumped
+to 1.3.1 for the bundle change.
+
+### Verification findings (all fixed)
+
+- **`beavrs_fullcore_mcnp.i` / `assembly_17x17_mcnp.i`:** `ksrc` at `(0,0)` = instrument
+  tube air → fatal in MCNP (source in non-fissile cell). Moved to a fuel pin at
+  `(1.26, 0)`. Also reformatted every line over 80 columns (22 in the full-core deck —
+  mostly core-lattice fill rows, fixed by collapsing padding; plus long comments).
+- **`assembly_17x17_serpent.sss`:** `therm lwtr 600 lwj3.11t` is invalid — with a
+  temperature the card is the interpolation form and needs two bracketing libraries.
+  Now the direct form `therm lwtr lwj3.11t` (same as the full-core deck).
+- **`assembly_17x17_openmc.py`:** univ_map placed only 21 of the claimed 25 tubes
+  (missing (3,3),(3,13),(13,3),(13,13)); guide tubes had no Zr wall (water-only).
+  Fixed in the deck AND in `snippets/openmc.json` (`omc_assembly_script`) it derives
+  from. Comment typo `model.model.RectangularPrism` → `openmc.model.RectangularPrism`.
+- **`beavrs_fullcore_scone.scone`:** shipped with CRLF; SCONE requires UNIX newlines.
+  All decks normalized to LF and pinned via `prebuilt-models/.gitattributes`
+  (`* text eol=lf`) in both owen/ and groves/ copies.
+- **Clean:** `beavrs_fullcore_openmc.py`, `beavrs_fullcore_serpent.sss` (long lines are
+  legal in Serpent), full-core SCONE deck content (H-1-on-moder-line design is
+  intentional and documented in its header).
+- **Website drift (reported, NOT fixed — repo contended):**
+  `reactor-monte-carlo-guide/mcnp-examples/beavrs_fullcore.i` now lags the fixed OWEN
+  copy (still has the fatal ksrc + >80-col lines). The OpenMC/Serpent/SCONE website
+  copies remain content-identical (SCONE copy still physically CRLF on the website side).
+
+### New model — Reflected UO2 Pin Cell (×4 codes)
+
+- `pincell_mcnp.i`, `pincell_openmc.py`, `pincell_serpent.sss`, `pincell_scone.scone`:
+  one BEAVRS 3.1 wt% pin (0.39218/0.40005/0.45720 cm, pitch 1.26, height 365.76,
+  600 K, 975 ppm borated water), reflective on all six faces → k-inf. Number densities
+  copied verbatim from the verified full-core decks, so the four decks are true twins.
+- **Reference k-inf 1.2256 ± 0.0010** — actually run: OpenMC 0.15.3 in WSL,
+  ENDF/B-VIII.0 (NNDC HDF5), 250×5000 histories, leakage 0.0. Neutron data at true 600 K;
+  the local library only has c_H_in_H2O S(a,b) at 294 K, so the reference run used
+  temperature tolerance for the thermal table (documented in the deck header — expect an
+  O(100 pcm) shift with a hot thermal library). The MCNP/Serpent/SCONE headers cite it
+  honestly as "cross-checked against the run-verified OpenMC twin, NOT run-verified".
+- SCONE pin cell includes H-1 as a free-gas composition entry (runnable out of the box,
+  unlike the full-core deck's commented moder line); header documents the moder swap and
+  the few-hundred-pcm S(a,b) caveat.
+- Registered in `prebuilt-models/index.json` (pin cells first — the "hello world" a new
+  user should see first). GROVES needs no code change (`prebuilt_models.py` reads the
+  manifest dynamically).
+
+### Tests / infra
+
+- New `src/test/suite/pincellModels.test.ts`: all four pin-cell decks render headlessly
+  through `buildScene` (fuel + clad shells, cross-code radius parity) and the three
+  17×17 assembly decks render full lattices with guide tubes (regression net the
+  assembly decks never had). Suite: **232 passing** (225 at 0.3.5 + 7 new).
+- Gotcha for future agents: full-suite runs need the electron harness
+  (`node ./out/test/runTest.js`) because `validator.test.js` imports `vscode`; plain
+  mocha works for pure-logic suites only. `npx` still hangs on this machine — use
+  `node_modules\.bin\*.cmd` or `node` directly.
+
 ## 2026-07-01 — v0.3.5 — LSP, converter promotion, geometry verify, sweep dashboard
 
 **AI Agent:** Fable 5 (Cursor IDE)

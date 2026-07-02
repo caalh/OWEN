@@ -61,7 +61,10 @@ mat Zr -6.55
 mat water -0.74 moder lwtr 1001
 1001.80c 2.0
 8016.80c 1.0
-therm lwtr 600 lwj3.11t
+% Direct S(a,b) library assignment: the "therm <name> <T> <lib1> <lib2>"
+% interpolation form needs TWO bracketing libraries; with one library the
+% deck must use the direct form (matches the full-core BEAVRS deck).
+therm lwtr lwj3.11t
 mat air -0.00120
 7014.80c 0.78
 8016.80c 0.21

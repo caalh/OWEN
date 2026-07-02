@@ -1,5 +1,41 @@
 [
   {
+    "id": "mcnp-pincell",
+    "name": "Reflected UO2 Pin Cell",
+    "code": "mcnp",
+    "scale": "pin-cell",
+    "provenance": "spec-derived teaching deck — k-inf cross-checked against run-verified OpenMC twin",
+    "description": "Classic \"hello world\" PWR pin cell: one BEAVRS-spec 3.1 wt% UO2 fuel pin (pellet 0.39218 / clad 0.40005-0.45720 cm, pitch 1.26 cm, active height 365.76 cm) in 975 ppm borated water with reflective boundaries on all six faces, so kcode converges to the infinite-lattice k-inf (~1.23). Same materials/dimensions as the OpenMC/Serpent/SCONE pin-cell twins.",
+    "filename": "pincell_mcnp.i"
+  },
+  {
+    "id": "openmc-pincell",
+    "name": "Reflected UO2 Pin Cell",
+    "code": "openmc",
+    "scale": "pin-cell",
+    "provenance": "run-verified (OpenMC 0.15.3, ENDF/B-VIII.0, k-inf 1.2256 +/- 0.0010)",
+    "description": "Classic \"hello world\" PWR pin cell for OpenMC (Python, modern API): one BEAVRS-spec 3.1 wt% UO2 fuel pin (pellet 0.39218 / clad 0.40005-0.45720 cm, pitch 1.26 cm, active height 365.76 cm) in 975 ppm borated water, reflective on all six faces -> k-inf. Temperature on cells (600 K), S(a,b) on water only. Same system as the MCNP/Serpent/SCONE pin-cell twins.",
+    "filename": "pincell_openmc.py"
+  },
+  {
+    "id": "serpent-pincell",
+    "name": "Reflected UO2 Pin Cell",
+    "code": "serpent",
+    "scale": "pin-cell",
+    "provenance": "spec-derived teaching deck — k-inf cross-checked against run-verified OpenMC twin",
+    "description": "Classic \"hello world\" PWR pin cell for Serpent 2: one BEAVRS-spec 3.1 wt% UO2 fuel pin (pellet 0.39218 / clad 0.40005-0.45720 cm, pitch 1.26 cm, active height 365.76 cm) in 975 ppm borated water, set bc 2 (reflective) -> k-inf (~1.23). Pin universe + cuboid cell, MeV energies. Same system as the MCNP/OpenMC/SCONE pin-cell twins.",
+    "filename": "pincell_serpent.sss"
+  },
+  {
+    "id": "scone-pincell",
+    "name": "Reflected UO2 Pin Cell",
+    "code": "scone",
+    "scale": "pin-cell",
+    "provenance": "spec-derived teaching deck — k-inf cross-checked against run-verified OpenMC twin",
+    "description": "Classic \"hello world\" PWR pin cell for SCONE: one BEAVRS-spec 3.1 wt% UO2 fuel pin (pellet 0.39218 / clad 0.40005-0.45720 cm, pitch 1.26 cm, active height 365.76 cm) in 975 ppm borated water, reflective boundary (1 1 1 1 1 1) -> k-inf (~1.23). pinUniverse + box root, H-1 included free-gas (moder swap documented in header). Same system as the MCNP/OpenMC/Serpent pin-cell twins.",
+    "filename": "pincell_scone.scone"
+  },
+  {
     "id": "mcnp-beavrs-fullcore",
     "name": "BEAVRS Full Core",
     "code": "mcnp",

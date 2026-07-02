@@ -11,7 +11,7 @@ c ----- Fuel pin (universe 1) -----
 1  1 -10.40    -1       u=1  imp:n=1   $ UO2 pellet
 2  2 -0.00159   1 -2    u=1  imp:n=1   $ He gap
 3  3 -6.55      2 -3    u=1  imp:n=1   $ Zircaloy clad
-4  4 -0.74      3       u=1  imp:n=1   $ borated water
+4  4 -0.74      3       u=1  imp:n=1   $ light water (HFP density)
 c ----- Guide tube (universe 2) -----
 5  4 -0.74     -4       u=2  imp:n=1   $ inner water
 6  3 -6.55      4 -5    u=2  imp:n=1   $ Zircaloy guide tube
@@ -64,11 +64,16 @@ c ===================== SURFACES =====================
 
 c ===================== DATA =====================
 mode n
-m1  92235.80c 0.03100 92238.80c 0.96900 8016.80c 2.0     $ UO2 3.1 wt% (atom fractions approx)
+c m1: UO2 3.1 wt% (atom fractions approx)
+m1  92235.80c 0.03100 92238.80c 0.96900 8016.80c 2.0
 m2  2004.80c 1.0                              $ helium gap
-m3  40090.80c 0.5145 40091.80c 0.1122 40092.80c 0.1715 40094.80c 0.1738 40096.80c 0.0280  $ Zircaloy-4 clad
+c m3: Zircaloy-4 clad (natural Zr isotopics)
+m3  40090.80c 0.5145 40091.80c 0.1122 40092.80c 0.1715
+    40094.80c 0.1738 40096.80c 0.0280
 m4  1001.80c 2.0 8016.80c 1.0                 $ light water
 mt4 lwtr.20t                                  $ S(a,b) H in H2O
 m5  7014.80c 0.78 8016.80c 0.21 18040.80c 0.01 $ air
 kcode 5000 1.0 30 130
-ksrc 0 0 0
+c Source point in a fuel pin one pitch off-centre: (0,0) is the
+c instrument tube (air) and MCNP rejects ksrc points in non-fissile cells.
+ksrc 1.26 0 0

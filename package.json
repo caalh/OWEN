@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: syntax highlighting (4 palettes), MCNP cross-reference tracker, ALLEN σ(E) cross-section viewer, 3D geometry preview (full-core BEAVRS, measurement tools), lattice builder, prebuilt BEAVRS models, deep validation, and simulation automation.",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",

@@ -135,7 +135,7 @@ c ----- Structural / plate / end-plug / plenum / water rods -----
 60 5  7.41863e-2    3      u=11 imp:n=1   $ water
 c ----- Water rod u=30 (reflector / lattice-outer positions) -----
 61 5  7.41863e-2          u=30 imp:n=1
-c ============== GRID-OVERLAY PIN UNIVERSES (Inconel square sleeve) ==============
+c ========== GRID-OVERLAY PIN UNIVERSES (Inconel square sleeve) ==========
 c Sleeve: water inside inner sq, Inconel annulus, water in corner.
 c ----- Fuel + grid: u=41 (1.6%), u=42 (2.4%), u=43 (3.1%) -----
 101 16 6.89175e-2 -1                       u=41 imp:n=1
@@ -369,7 +369,8 @@ c ----- Pyrex BA column u=160 -----
 342 0  729 -730 fill=30 u=160 imp:n=1   $ water
 c ============== ASSEMBLY LATTICES ==============
 c Per-assembly BA (Pyrex) clusters ported from the verified SCONE core:
-c   6/12/15/16/20-rod variants; 116/124/131=fuel col, 140=GT, 150=IT, 160=Pyrex BA.
+c   6/12/15/16/20-rod variants; 116/124/131=fuel col, 140=GT, 150=IT,
+c   160=Pyrex BA.
 c ----- A16 (1.6% , 0 BA) u=201 -----
 600 0  50 -51 52 -53  lat=1 u=201 imp:n=1
      fill=-8:8 -8:8 0:0
@@ -673,23 +674,23 @@ c ----- A31_BA15TL (3.1% , 15 BA) u=354 -----
 c ============== CORE LATTICE u=100 (assembly pitch 21.50364) ==============
 410 0  60 -61 62 -63  lat=1 u=100 imp:n=1
      fill=-8:8 -8:8 0:0
-        30   30   30   30  709  703  703  703  703  703  703  703  708   30   30   30   30
-        30   30  709  703  705  203  361  203  361  203  361  203  704  703  708   30   30
-        30  709  705  203  203  316  201  320  201  320  201  316  203  203  704  708   30
-        30  700  203  352  216  201  216  201  216  201  216  201  216  351  203  701   30
-       709  705  203  216  202  216  201  212  201  212  201  216  202  216  203  704  708
-       700  203  316  201  216  201  212  201  212  201  212  201  216  201  316  203  701
-       700  364  201  216  201  212  201  212  201  212  201  212  201  216  201  363  701
-       700  203  320  201  212  201  212  201  212  201  212  201  212  201  320  203  701
-       700  364  201  216  201  212  201  212  201  212  201  212  201  216  201  363  701
-       700  203  320  201  212  201  212  201  212  201  212  201  212  201  320  203  701
-       700  364  201  216  201  212  201  212  201  212  201  212  201  216  201  363  701
-       700  203  316  201  216  201  212  201  212  201  212  201  216  201  316  203  701
-       711  707  203  216  202  216  201  212  201  212  201  216  202  216  203  706  710
-        30  700  203  354  216  201  216  201  216  201  216  201  216  353  203  701   30
-        30  711  707  203  203  316  201  320  201  320  201  316  203  203  706  710   30
-        30   30  711  702  707  203  362  203  362  203  362  203  706  702  710   30   30
-        30   30   30   30  711  702  702  702  702  702  702  702  710   30   30   30   30
+      30 30 30 30 709 703 703 703 703 703 703 703 708 30 30 30 30
+      30 30 709 703 705 203 361 203 361 203 361 203 704 703 708 30 30
+      30 709 705 203 203 316 201 320 201 320 201 316 203 203 704 708 30
+      30 700 203 352 216 201 216 201 216 201 216 201 216 351 203 701 30
+      709 705 203 216 202 216 201 212 201 212 201 216 202 216 203 704 708
+      700 203 316 201 216 201 212 201 212 201 212 201 216 201 316 203 701
+      700 364 201 216 201 212 201 212 201 212 201 212 201 216 201 363 701
+      700 203 320 201 212 201 212 201 212 201 212 201 212 201 320 203 701
+      700 364 201 216 201 212 201 212 201 212 201 212 201 216 201 363 701
+      700 203 320 201 212 201 212 201 212 201 212 201 212 201 320 203 701
+      700 364 201 216 201 212 201 212 201 212 201 212 201 216 201 363 701
+      700 203 316 201 216 201 212 201 212 201 212 201 216 201 316 203 701
+      711 707 203 216 202 216 201 212 201 212 201 216 202 216 203 706 710
+      30 700 203 354 216 201 216 201 216 201 216 201 216 353 203 701 30
+      30 711 707 203 203 316 201 320 201 320 201 316 203 203 706 710 30
+      30 30 711 702 707 203 362 203 362 203 362 203 706 702 710 30 30
+      30 30 30 30 711 702 702 702 702 702 702 702 710 30 30 30 30
 c ============== BAFFLE / FORMER UNIVERSES ==============
 c SS304 baffle plates (m7) in the peripheral reflector lattice cells, ported
 c from the verified SCONE core: plate bands at local |x|,|y| in
@@ -727,8 +728,9 @@ c --- square outer corners ---
 7027 7 8.79322e-2  40 -45         u=711 imp:n=1   $ SQ_BR
 7028 5 7.41863e-2  #7027          u=711 imp:n=1
 c ============== CORE CONTAINER, REFLECTORS, BARREL, RPV ==============
-300 0          -80 700 -730  fill=100 imp:n=1   $ core (full-axial lattice; baffle in periphery)
-303 7 8.79322e-2  80 -81 700 -730       imp:n=1   $ core barrel SS304 (187.96-193.675)
+c core cell: full-axial lattice; baffle plates live in the periphery cells
+300 0          -80 700 -730  fill=100 imp:n=1
+303 7 8.79322e-2  80 -81 700 -730       imp:n=1   $ core barrel SS304
 350 5 7.41863e-2  81 -85 700 -730       imp:n=1   $ water 193.675-194.84
 c --- neutron-shield panels: 4 SS304 pads at the octant positions ---
 351 7 8.79322e-2  85 -86 -110 111 700 -730 imp:n=1   $ NS pad SW
@@ -736,7 +738,7 @@ c --- neutron-shield panels: 4 SS304 pads at the octant positions ---
 353 7 8.79322e-2  85 -86 -112 113 700 -730 imp:n=1   $ NS pad SE
 354 7 8.79322e-2  85 -86 112 -113 700 -730 imp:n=1   $ NS pad NW
 355 5 7.41863e-2  85 -86 700 -730 #351 #352 #353 #354 imp:n=1  $ NS water
-304 5 7.41863e-2  86 -82 700 -730       imp:n=1   $ downcomer water 201.63-219.150
+304 5 7.41863e-2  86 -82 700 -730       imp:n=1   $ downcomer water
 305 7 8.79322e-2  82 -83 700 -730       imp:n=1   $ RPV liner SS304
 306 8 8.50964e-2  83 -84 700 -730       imp:n=1   $ RPV (carbon steel)
 307 0          84 : -700 : 730       imp:n=0   $ graveyard
@@ -832,8 +834,11 @@ c ----- neutron-shield panel bounding planes (octant symmetry) -----
 c ===================== DATA =====================
 c kcode: neutrons/cycle  k-guess  inactive  total cycles
 kcode 20000 1.0 50 250
-c Initial source: centered on the active fuel column (z 36.748 -> 402.508).
-ksrc 0 0 219.628
+c Initial source: mid-height of the active fuel (z 36.748 -> 402.508), one
+c pin pitch off-centre in x. The exact core centre (0,0) is the central
+c assembly's instrument tube (air), and MCNP rejects ksrc points that are
+c not in fissile material; (1.26, 0) is a fuel pin of the centre assembly.
+ksrc 1.26 0 219.628
 c --- Materials (atom densities atoms/b-cm; ported from verified SCONE deck) ---
 c UO2-16  (atom density sum = 6.89175e-2 atoms/b-cm)
 m16   8016.80c     4.58970e-2

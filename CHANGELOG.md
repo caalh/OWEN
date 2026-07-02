@@ -5,6 +5,48 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] — 2026-07-02
+
+Prebuilt-model quality release: every bundled deck audited for syntax/physics
+correctness, and a new **Reflected UO2 Pin Cell** teaching model added in all
+four codes.
+
+### Added
+
+- **Reflected UO2 Pin Cell** prebuilt model in MCNP, OpenMC, Serpent, and SCONE — the
+  classic "hello world" geometry: one BEAVRS-spec 3.1 wt% fuel pin (pellet 0.39218 /
+  clad 0.40005–0.45720 cm, pitch 1.26 cm, active height 365.76 cm) in 975 ppm borated
+  water with reflective boundaries on all six faces, so the run converges to the
+  infinite-lattice k-inf. All four decks model the SAME system with the verified BEAVRS
+  number densities. The OpenMC twin is **run-verified**: k-inf 1.2256 ± 0.0010 (OpenMC
+  0.15.3, ENDF/B-VIII.0, 600 K neutron data); the other three are spec-derived with the
+  reference k-inf documented in their headers.
+- Extractor regression tests: all four pin-cell decks plus the three 17×17 assembly decks
+  now render headlessly in the test suite (fuel/clad shells, full lattices, guide tubes).
+
+### Fixed
+
+- **MCNP decks (both BEAVRS full-core and 17×17 assembly): `ksrc` sat in the instrument
+  tube** — the exact core/assembly centre `(0, 0)` is air, and MCNP rejects initial source
+  points in non-fissile cells, so the shipped kcode runs would die immediately. Moved one
+  pin pitch off-centre into a fuel pin (`1.26 0 …`).
+- **MCNP decks: lines over 80 columns** (long comments, core-lattice fill rows) reformatted
+  to satisfy the fixed-format MCNP5 line limit the LSP itself enforces.
+- **17×17 Serpent assembly: invalid `therm lwtr 600 lwj3.11t`** — the temperature-
+  interpolation form of the `therm` card requires TWO bracketing libraries; with a single
+  library Serpent errors out. Switched to the direct form (`therm lwtr lwj3.11t`), matching
+  the full-core deck.
+- **17×17 OpenMC assembly: only 21 of the advertised 25 guide/instrument tube positions**
+  were placed (the four (3,3)/(3,13)/(13,3)/(13,13) corner guide tubes were missing), and
+  guide tubes were water-only with no Zr tube wall. Both fixed (also in the
+  `omc_assembly_script` snippet the deck is derived from); comment typo
+  `model.model.RectangularPrism` corrected.
+- **Line endings: all bundled decks normalized to LF** and pinned with a
+  `prebuilt-models/.gitattributes` (`* text eol=lf`). SCONE hard-requires UNIX newlines —
+  the shipped SCONE full-core deck had CRLF.
+- 17×17 MCNP assembly: misleading "borated water" comment (the material is unborated
+  light water) corrected.
+
 ## [0.3.5] — 2026-07-01
 
 Four roadmap items in one release: a real **Language Server** for the Monte Carlo languages,
