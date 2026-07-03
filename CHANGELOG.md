@@ -5,6 +5,37 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] — 2026-07-02
+
+Marketplace metadata refresh — no code changes. The published 0.3.1 listing describes a
+feature set that is now many releases stale; this release makes the `description`,
+`README.md`, and keywords packaged inside the VSIX describe the current extension, so the
+VS Code Marketplace and Open VSX listings will be accurate on next publish.
+
+### Changed
+
+- **`package.json` description** rewritten to cover the 0.3.x feature set: MC Language
+  Server with real-time physics-aware diagnostics, native OpenMC rendering and geometry
+  verification, cross-code converter (MCNP↔OpenMC beta), Results Viewer, parametric sweep
+  dashboard, PNNL-15870 compendium (411 materials), and ALLEN Doppler Studio.
+- **Keywords** expanded 9 → 16 (added `language-server`, `3d`, `pnnl`, `cross-sections`,
+  `k-eff`, `criticality`, `beavrs`) — still well under the Marketplace's 30-tag cap
+  including vsce auto-tags.
+- **README** restructured: the flat features table is now grouped into Write / Build /
+  Visualize & verify / Run & analyze sections, adding the rows that post-dated the last
+  README pass — MC Language Server, Verify Geometry with OpenMC, Results Viewer, sweep
+  dashboard, cross-code converter (MCNP↔OpenMC beta + Rosetta diff), Doppler Studio,
+  PNNL compendium materials, and the Reflected UO2 Pin Cell prebuilt models. The commands
+  table now lists all 19 commands; the install section drops the stale "(once published)"
+  qualifier; the supported-languages table shows LSP real-time diagnostics; the
+  acknowledgements add the PNNL-15870 Rev. 2 citation; NICHOLS joins Related. Demo
+  GIFs/links unchanged.
+
+### Notes
+
+- Publishing this VSIX to the VS Code Marketplace and Open VSX is what actually updates
+  the public listings — publish remains deferred to the maintainer.
+
 ## [0.3.9] — 2026-07-02
 
 ### Added

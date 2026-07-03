@@ -12,6 +12,36 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-02 — v0.3.10 — Marketplace metadata refresh (description, keywords, README)
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+Developed in `BD-worktree-marketplace` (branch `chore/marketplace-metadata`) off
+`origin/main`, after the 0.3.8 (converter) and 0.3.9 (PNNL) releases landed. No product
+code changed — this release exists so the next Marketplace/Open VSX publish carries
+accurate listing metadata (the listings render the `description`, `README.md`, keywords,
+and icon from inside the published VSIX; the live 0.3.1 listing is ten releases stale).
+
+- **`package.json`:** `description` rewritten around the current headline features (LSP,
+  3D preview, Render/Verify with OpenMC, converter beta, Results Viewer, sweep dashboard,
+  PNNL compendium, ALLEN Doppler Studio); `keywords` 9 → 16 (`language-server`, `3d`,
+  `pnnl`, `cross-sections`, `k-eff`, `criticality`, `beavrs`) — the Marketplace caps
+  package.json keywords at 30 including some vsce auto-tags, so 16 manual leaves margin.
+  `displayName`, `publisher`, icon, `galleryBanner`, `qna` untouched (identity-stable
+  fields per AGENTS.md).
+- **`README.md`:** features table regrouped into Write / Build / Visualize & verify /
+  Run & analyze; new rows for the MC Language Server, Verify Geometry with OpenMC,
+  Results Viewer, sweep dashboard, cross-code converter (labels mirror 0.3.8's honest
+  choice: MCNP↔OpenMC **beta**, Serpent/SCONE **experimental**), ALLEN Doppler Studio
+  (JEFF-3.3 comparison described honestly as website-side), PNNL materials, and the
+  Reflected UO2 Pin Cell prebuilts; commands table covers all 19 commands; stale
+  "(once published)" install framing removed; demo GIF/MP4 links preserved byte-for-byte.
+- Packaging verified via `vsce ls` (README.md + assets/owen-icon.png in the VSIX file
+  list). Caveat for future agents: `npx` hangs in this environment — invoke vsce as
+  `node node_modules/@vscode/vsce/vsce`.
+
+---
+
 ## 2026-07-02 — v0.3.9 — PNNL-15870 Rev. 2 compendium (411 materials) in the Input Builder
 
 **AI Agent:** Fable 5 (Cursor IDE)
