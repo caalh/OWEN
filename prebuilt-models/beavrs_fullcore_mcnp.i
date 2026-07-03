@@ -729,8 +729,9 @@ c --- square outer corners ---
 7028 5 7.41863e-2  #7027          u=711 imp:n=1
 c ============== CORE CONTAINER, REFLECTORS, BARREL, RPV ==============
 c core cell: full-axial lattice; baffle plates live in the periphery cells
-300 0          -80 700 -730  fill=100 imp:n=1
-303 7 8.79322e-2  80 -81 700 -730       imp:n=1   $ core barrel SS304
+c (343-348: MCNP forbids reusing cell numbers; 300-307 belong to u=150)
+343 0          -80 700 -730  fill=100 imp:n=1
+344 7 8.79322e-2  80 -81 700 -730       imp:n=1   $ core barrel SS304
 350 5 7.41863e-2  81 -85 700 -730       imp:n=1   $ water 193.675-194.84
 c --- neutron-shield panels: 4 SS304 pads at the octant positions ---
 351 7 8.79322e-2  85 -86 -110 111 700 -730 imp:n=1   $ NS pad SW
@@ -738,10 +739,10 @@ c --- neutron-shield panels: 4 SS304 pads at the octant positions ---
 353 7 8.79322e-2  85 -86 -112 113 700 -730 imp:n=1   $ NS pad SE
 354 7 8.79322e-2  85 -86 112 -113 700 -730 imp:n=1   $ NS pad NW
 355 5 7.41863e-2  85 -86 700 -730 #351 #352 #353 #354 imp:n=1  $ NS water
-304 5 7.41863e-2  86 -82 700 -730       imp:n=1   $ downcomer water
-305 7 8.79322e-2  82 -83 700 -730       imp:n=1   $ RPV liner SS304
-306 8 8.50964e-2  83 -84 700 -730       imp:n=1   $ RPV (carbon steel)
-307 0          84 : -700 : 730       imp:n=0   $ graveyard
+345 5 7.41863e-2  86 -82 700 -730       imp:n=1   $ downcomer water
+346 7 8.79322e-2  82 -83 700 -730       imp:n=1   $ RPV liner SS304
+347 8 8.50964e-2  83 -84 700 -730       imp:n=1   $ RPV (carbon steel)
+348 0          84 : -700 : 730       imp:n=0   $ graveyard
 
 c ===================== SURFACES =====================
 1  cz 0.39218     $ fuel pellet

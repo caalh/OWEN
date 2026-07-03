@@ -79,11 +79,19 @@ suite('OWEN converter — MCNP → OpenMC', () => {
         assert.ok(r.output.includes('openmc.IndependentSource'));
     });
 
-    test('unknown surface types produce TODO markers, not silence', () => {
+    test('gq quadric surfaces convert to openmc.Quadric (v0.3.8)', () => {
         const text = 'deck\n1 0 -1 imp:n=1\n\n1 gq 1 2 3 4 5 6 7 8 9 10\n\nkcode 100 1.0 5 20\n';
         const r = mcnpToOpenmc(text);
+        assert.ok(r.output.includes('openmc.Quadric'), 'gq must map to openmc.Quadric');
+        assert.ok(!r.issues.some((i) => i.message.includes("type 'gq'")), 'gq is supported now');
+    });
+
+    test('unknown surface types produce TODO markers, not silence', () => {
+        // ARB (arbitrary polyhedron) has no OpenMC equivalent.
+        const text = 'deck\n1 0 -1 imp:n=1\n\n1 arb 0 0 0 1 0 0 1 1 0 0 1 0 0 0 1 1 0 1 1 1 1 0 1 1 1234 5678 1265 4378 1485 2376\n\nkcode 100 1.0 5 20\n';
+        const r = mcnpToOpenmc(text);
         assert.ok(r.output.includes(TODO_MARK), 'expected TODO marker in output');
-        assert.ok(r.issues.some((i) => i.message.includes("type 'gq'")));
+        assert.ok(r.issues.length > 0, 'unsupported surface must surface as an issue');
     });
 });
 
@@ -231,10 +239,12 @@ suite('OWEN converter — BEAVRS-assembly scale', () => {
         assert.ok(r.output.includes(TODO_MARK));
     });
 
-    test('17x17 assembly: OpenMC output flags the lattice as TODO', () => {
+    test('17x17 assembly: OpenMC output converts the lattice (v0.3.8)', () => {
         const r = mcnpToOpenmc(text);
-        assert.ok(r.issues.some((i) => i.message.includes('lattice')), 'lattice must surface as an issue');
-        assert.ok(r.output.includes(TODO_MARK));
+        assert.ok(r.output.includes('openmc.RectLattice'), 'lat=1 must convert to RectLattice');
+        assert.ok(r.output.includes('lat_'), 'lattice variable expected');
+        assert.ok(!r.issues.some((i) => /lattice.*not converted/i.test(i.message)),
+            'lattice must convert without a TODO issue');
         assert.ok(r.output.includes("mat_4.add_s_alpha_beta('c_H_in_H2O')"));
     });
 

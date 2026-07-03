@@ -22,18 +22,23 @@ export const ELEMENT_TO_Z: Record<string, number> = Object.fromEntries(
     Object.entries(Z_TO_ELEMENT).map(([z, e]) => [e, Number(z)]),
 );
 
-/** MCNP mt identifier -> OpenMC S(alpha,beta) name. */
+/** MCNP mt identifier -> OpenMC S(alpha,beta) name (ENDF/B-VII.1+ names). */
 export const MT_TO_SAB: Record<string, string> = {
     lwtr: 'c_H_in_H2O',
     hwtr: 'c_D_in_D2O',
-    grph: 'c_C_in_graphite',
-    poly: 'c_H_in_C5O2H8',
-    benz: 'c_H_in_C6H6',
-    'zr/h': 'c_H_in_ZrH',
-    be: 'c_Be_in_Be',
+    grph: 'c_Graphite',
+    poly: 'c_H_in_CH2',
+    benz: 'c_Benzene',
+    'h/zr': 'c_H_in_ZrH',
+    'zr/h': 'c_Zr_in_ZrH',
+    be: 'c_Be',
     beo: 'c_Be_in_BeO',
-    oice: 'c_O_in_ice',
-    sio2: 'c_O_in_SiO2',
+    'o-be': 'c_O_in_BeO',
+    oice: 'c_O_in_ice_Ih',
+    hice: 'c_H_in_ice_Ih',
+    sio2: 'c_SiO2_alpha',
+    uo2: 'c_U_in_UO2',
+    'o2/u': 'c_O_in_UO2',
 };
 
 export const SAB_TO_MT: Record<string, string> = Object.fromEntries(
@@ -57,20 +62,28 @@ export function zaidToNuclide(zaid: string): string {
     const elem = Z_TO_ELEMENT[z] ?? `Z${z}`;
     if (a === 0) return elem;
     if (a > 300) {
-        const m = Math.floor((a - 1) / 300);
-        const groundA = a - 300 * m;
-        return `${elem}${groundA}_m${m}`;
+        // metastable convention: a = A + 300 + 100*m; nearly all library
+        // metastables are m1, so pick the smallest m giving a plausible A.
+        for (let m = 1; m <= 4; m++) {
+            const groundA = a - 300 - 100 * m;
+            if (groundA >= z && groundA <= 3 * z + 60) return `${elem}${groundA}_m${m}`;
+        }
+        return `${elem}${a}`;
     }
     return `${elem}${a}`;
 }
 
-/** 'U235' -> '92235.80c'; element-only names return the natural ZAID. */
+/**
+ * 'U235' -> '92235.80c'; element-only names return the natural ZAID;
+ * metastable names ('Am242_m1') map to the MCNP A+300+100·m convention.
+ */
 export function nuclideToZaid(name: string): string {
-    const m = /^([A-Za-z]+)(\d*)/.exec(name);
+    const m = /^([A-Za-z]+)(\d*)(?:_m(\d+))?$/.exec(name);
     if (!m) return name;
     const z = ELEMENT_TO_Z[m[1]];
     if (z === undefined) return name;
-    const a = m[2] ? parseInt(m[2], 10) : 0;
+    let a = m[2] ? parseInt(m[2], 10) : 0;
+    if (m[3]) a += 300 + 100 * parseInt(m[3], 10);
     return `${z * 1000 + a}.80c`;
 }
 

@@ -200,14 +200,18 @@ export function emitMcnpRadialStructure(
 
     const getR = (id: number): number | undefined => czR.get(Math.abs(id));
 
-    // Named BEAVRS surfaces when present.
-    const barrelIn = getR(80);
-    const barrelOut = getR(81);
-    const linerIn = getR(82);
-    const rpvIn = getR(83);
-    const rpvOut = getR(84);
-    const nsIn = getR(85);
-    const nsOut = getR(86);
+    // Named BEAVRS surfaces when present. Only trust the 80–86 id convention
+    // when the radii are plausibly vessel-scale (decks with auto-numbered
+    // surfaces can have small pin cylinders at these ids).
+    const vesselScale = (r: number | undefined): number | undefined =>
+        r !== undefined && r > 50 ? r : undefined;
+    const barrelIn = vesselScale(getR(80));
+    const barrelOut = vesselScale(getR(81));
+    const linerIn = vesselScale(getR(82));
+    const rpvIn = vesselScale(getR(83));
+    const rpvOut = vesselScale(getR(84));
+    const nsIn = vesselScale(getR(85));
+    const nsOut = vesselScale(getR(86));
 
     if (barrelIn !== undefined && barrelOut !== undefined && barrelOut > barrelIn) {
         cylinders.push(annularShell('barrel', barrelIn, barrelOut, Component.Vessel, 'SS304', ctx, 0.45));

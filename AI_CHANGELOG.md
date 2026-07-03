@@ -12,6 +12,90 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-02 — v0.3.8 — High-fidelity MCNP↔OpenMC converter (beta), BEAVRS-gauntlet validated
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+Both MCNP↔OpenMC directions rewritten from scratch in a **git worktree**
+(`BD-worktree-converter`, branch `feat/converter-hifi`) while 0.3.6/0.3.7 shipped
+concurrently. MCNP↔OpenMC graduates to **beta**; Serpent/SCONE stay experimental.
+
+### MCNP → OpenMC (`mcnpModel.ts` + `mcnpToOpenmc.ts`, rewritten)
+
+- **`mcnpModel.ts`** — full deck IR: boolean region AST (`parseRegion`: unions,
+  `#cell`/`#()` complements, nested parens), keyword-split cell parsing
+  (`u/lat/fill/trcl/tmp/imp`, `*`-prefix handling), lattice fill-array decoding with
+  `nR` repeats and index ranges, `TRn`/`*TRn` cards, multi-point `ksrc`, `FMESH` and
+  `F4/F6/F7` capture, `&`-continuation support, surface TR-number detection.
+- **`mcnpToOpenmc.ts`** — all common surfaces (3-pt planes, GQ/SQ→Quadric, one-sided
+  cones, tori, RPP/RCC/BOX/RHP→`openmc.model` composites; composites emitted *after*
+  primitives so OpenMC's auto-id counter can't collide with explicit surface ids);
+  region AST → `&`/`|`/`~` with cell-complement inlining + cycle detection; graveyard
+  (`imp:n=0`) elimination → `boundary_type='vacuum'`; materials split per (id, cell
+  density), `add_element` for natural ZAIDs, metastable ZAIDs; universes + `lat=1`/
+  `lat=2` lattices (window from bounding planes, row flip, hex rings from rhombus
+  arrays via `hexFillToRings`, `outer=` edge-majority heuristic, topological ordering,
+  self-fill synthesis); `trcl`/fill transforms → translation/rotation; duplicate cell
+  ids renumbered defensively; explicit id allocators for all synthesized objects
+  (OpenMC lattice ids share the universe namespace in model.xml).
+- **`zaid.ts`** — metastable convention (A+300+100m) both ways; official OpenMC S(α,β)
+  names (`grph`→`c_Graphite`, `poly`→`c_H_in_CH2`, `h/zr`→`c_H_in_ZrH`,
+  `zr/h`→`c_Zr_in_ZrH`, `sio2`→`c_SiO2_alpha`, …).
+
+### OpenMC → MCNP (new: `tracedModel.ts` + `traceHarness.ts` + `openmcStatic.ts`)
+
+- **Architecture:** static TypeScript parser (`openmcStatic.ts`) for flat literal
+  scripts; pure-Python **trace harness** (`traceHarness.ts`, a stub `openmc` package —
+  no OpenMC install required) for dynamic scripts (loops/functions, e.g. native
+  BEAVRS), dumping a JSON `TracedModel` IR; single MCNP emitter (`tracedModel.ts`):
+  De Morgan region normalization (no `#()` in output), lattice cells with synthesized
+  window surfaces and one-ring `outer` padding, vacuum → synthesized graveyard +
+  `imp:n=0`, reflective → `*` prefix, S(α,β) → `mt`, K → `tmp=` (MeV), Settings →
+  `kcode`/`ksrc`, card wrapping at 78 cols.
+- VS Code command runs the static parser and reports when a script needs the trace
+  harness (CLI: `scripts/convert-cli.mjs openmc2mcnp|trace2mcnp|harness`).
+
+### Validation (BEAVRS gauntlet, WSL OpenMC 0.15.3 at /opt/miniconda3)
+
+- Forward: converted full core → `ast.parse` OK → executes → **327 cells / 62
+  universes / 16 lattices / 13 materials**, bbox ±241.3 × 0–460 cm →
+  `export_to_model_xml` + `Model.from_model_xml` OK → 4 000-point material sampling vs
+  native deck: **0 presence mismatches**, 1 density mismatch >2% (m10 borated water vs
+  the native script's different boron ppm — expected) → 100-particle transport smoke
+  test runs to statepoint (nuclides missing from the slim XS library auto-stripped).
+- Reverse: native procedural BEAVRS script traced → MCNP; extractor: **55 851 vs
+  55 849 instances (+0.004%)**, outer radius/z extents exact; validator **0 Errors**.
+- Round-trips: pin cell and 17×17 assembly MCNP→OpenMC→MCNP preserve model-cell count,
+  materials (incl. S(α,β)), lattice + universe structure, kcode settings.
+- `scripts/gauntlet.sh`, `reverse-gauntlet.mjs`, `native_stats.sh`, `zoo_check.sh`
+  (24-surface-type zoo verified in real OpenMC), `convert-cli.mjs` added for repeatable
+  runs.
+
+### Also
+
+- `beavrs_fullcore_mcnp.i`: root cells 300/303–307 reused pin cell ids from `u=150`
+  (illegal MCNP, broke strict importers + caused infinite recursion in traversal) —
+  renumbered 343–348 with an explanatory comment.
+- 52 new converter tests (`converterHifi.test.ts`) + 2 updated: per-construct both
+  directions, round-trips, adversarial (20-deep parens, complement chains/cycles,
+  duplicate ids, incomplete fills). Suite: **483 passing**.
+- GROVES parity: `groves/src/groves/converter_hifi.py` — full Python port of the
+  MCNP→OpenMC pipeline (same region AST/surfaces/lattices/graveyard/tallies), wired as
+  GROVES's `mcnp_to_openmc` with legacy fallback; GROVES BEAVRS output loads in real
+  OpenMC with identical statistics. GROVES → **v1.3.4**, pytest 79 passing.
+- Labels: command title, quick-pick descriptions, Rosetta badge now show **beta** for
+  MCNP↔OpenMC (EXPERIMENTAL retained for Serpent/SCONE).
+
+### Caveats
+
+- Tallies remain the honest gap: only FMESH type-4 and F4/F6/F7 cell tallies convert;
+  everything else is TODO-marked. `sdef` beyond point/box sources is TODO-marked.
+- OpenMC→MCNP `outer` padding adds one ring of fill entries (needed because MCNP has no
+  `outer` concept); harmless geometrically but visible in naive instance counts.
+- Surface TR transforms are flagged, not applied (OpenMC surfaces can't be transformed).
+
+---
+
 ## 2026-07-02 — v0.3.7 — Adversarial audit: all 15 bugs fixed, 180-test suite ported
 
 **AI Agent:** Fable 5 (Cursor IDE)

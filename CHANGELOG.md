@@ -5,6 +5,62 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] — 2026-07-02
+
+High-fidelity MCNP↔OpenMC converter: both directions rewritten from scratch and
+validated against the bundled BEAVRS full core in real OpenMC. The MCNP↔OpenMC
+directions graduate from **experimental** to **beta**; Serpent/SCONE targets stay
+experimental.
+
+### Changed
+
+- **MCNP → OpenMC (rewritten):**
+  - Full boolean region AST: intersections, unions, `#cell` and `#()` complements,
+    arbitrarily nested parentheses (with circular-complement detection).
+  - All common surface types: `p` (4-coeff + three-point), all spheres/cylinders/cones
+    (one- and two-sided via `openmc.model.*ConeOneSided`), tori, `GQ`, `SQ` (expanded to
+    `openmc.Quadric`), and macrobodies `RPP`/`RCC`/`BOX`/`RHP` as `openmc.model` composites
+    (composites emitted after primitives so auto-assigned internal surface ids never
+    collide with explicit ones).
+  - Multi-level universes and lattices: `lat=1` → `RectLattice` (window derived from the
+    bounding-plane pairs, MCNP bottom-up rows flipped to OpenMC top-first, `nR` repeats,
+    3D arrays, self-fill universes, `outer=` edge-majority heuristic), `lat=2` →
+    `HexLattice` rings (rhombus fill arrays reduced to the largest complete centered
+    hexagon), topologically sorted for nesting.
+  - `trcl=`/`*trcl=` and `fill=n (…)` transforms → `cell.translation`/`cell.rotation`;
+    `tmp=` (MeV) → `cell.temperature` (K).
+  - Graveyard elimination: `imp:n=0` root cells removed, their bounding surfaces become
+    `boundary_type='vacuum'`; `*`/`+` surfaces → reflective/periodic.
+  - Materials split per (material, cell density); natural ZAIDs → `add_element`; official
+    OpenMC S(α,β) names (`grph` → `c_Graphite`, etc.); metastable ZAIDs (A>300) → `_m1`…
+  - `kcode`/multi-point `ksrc` → `Settings`/`IndependentSource` list; `FMESH` →
+    `RegularMesh` tally; `F4/F6/F7` → cell tallies. Duplicate cell ids renumbered.
+- **OpenMC → MCNP (new architecture):** a static parser handles flat literal scripts
+  (everything OWEN's own converter emits plus typical hand-written decks); dynamic
+  scripts (loops/functions, e.g. native BEAVRS) run through a pure-Python **trace
+  harness** (stub `openmc` module, no OpenMC install needed) that captures the model as
+  JSON IR; one emitter turns the IR into MCNP (region normalization via De Morgan,
+  lattice windows as synthesized cards with `outer` padding, vacuum boundaries →
+  synthesized graveyard, S(α,β) → `mt` cards, temperatures → `tmp=`).
+- Converter UI labels: MCNP↔OpenMC picks show **beta**; Rosetta view badge is BETA for
+  MCNP↔OpenMC and EXPERIMENTAL for Serpent/SCONE.
+
+### Validated (BEAVRS gauntlet)
+
+- MCNP→OpenMC: converted full core loads in OpenMC 0.15.3 — 327 cells / 62 universes /
+  16 lattices / 13 materials; `Model.from_model_xml` round-trip OK; 4 000-point material
+  sampling vs the native BEAVRS deck: 0 presence mismatches; transport smoke test runs.
+- OpenMC→MCNP: native (procedural) BEAVRS script traced and emitted as MCNP; OWEN's
+  extractor sees 55 851 vs 55 849 instances (+0.004%), identical outer radius/height;
+  validator reports **zero Errors**.
+- Round-trips (pin cell, 17×17 assembly) preserve materials, S(α,β), lattice structure,
+  and settings. 52 new per-construct tests; suite total 483.
+
+### Fixed
+
+- `beavrs_fullcore_mcnp.i`: root cells 300/303–307 reused cell numbers already taken by
+  `u=150` pins (illegal in MCNP; broke any strict importer) — renumbered to 343–348.
+
 ## [0.3.7] — 2026-07-02
 
 Hardening release: all 15 bugs found by an adversarial test audit (run against v0.3.4)

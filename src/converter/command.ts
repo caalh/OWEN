@@ -1,6 +1,7 @@
-// OWEN: Convert Deck… — promotes the experimental converter to a visible
-// command with a source->target picker, and opens the Rosetta diff view
-// (source and converted output side-by-side with issues highlighted).
+// OWEN: Convert Deck… — source->target picker + Rosetta diff view (source and
+// converted output side-by-side with issues highlighted).
+// MCNP<->OpenMC is BETA (v0.3.8 hi-fi rewrite, BEAVRS-gauntlet tested);
+// Serpent/SCONE targets remain EXPERIMENTAL.
 
 import * as vscode from 'vscode';
 import {
@@ -39,14 +40,16 @@ export function registerConvertDeck(context: vscode.ExtensionContext): vscode.Di
         }
 
         const targets = CONVERSION_TARGETS[source];
+        const maturity = (t: TargetLanguage) =>
+            (t === 'openmc' || t === 'mcnp') ? 'beta' : 'experimental';
         const pick = await vscode.window.showQuickPick(
             targets.map((t) => ({
                 label: `${source!.toUpperCase()} → ${TARGET_LABELS[t]}`,
-                description: 'experimental',
+                description: maturity(t),
                 target: t,
             })),
             {
-                title: 'OWEN: Convert Deck (EXPERIMENTAL — always review the output)',
+                title: 'OWEN: Convert Deck (always review the output)',
                 placeHolder: `Convert this ${source.toUpperCase()} ${source === 'openmc' ? 'script' : 'deck'} to…`,
             },
         );
@@ -63,7 +66,7 @@ export function registerConvertDeck(context: vscode.ExtensionContext): vscode.Di
         const action = await vscode.window.showInformationMessage(
             `OWEN: converted ${source.toUpperCase()} → ${pick.target.toUpperCase()} with ` +
             `${result.issues.length} construct(s) needing manual attention. ` +
-            'This converter is EXPERIMENTAL — verify the physics before running.',
+            `This converter is ${maturity(pick.target).toUpperCase()} — verify the physics before running.`,
             'Open Rosetta Diff', 'Open Converted Only',
         );
 

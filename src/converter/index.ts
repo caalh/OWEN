@@ -1,15 +1,20 @@
-// Cross-code deck converter (EXPERIMENTAL) — public API.
+// Cross-code deck converter — public API.
 //
 // Directions: MCNP -> OpenMC / Serpent / SCONE, and OpenMC -> MCNP.
+// MCNP<->OpenMC is BETA as of v0.3.8 (hi-fi rewrite, validated against the
+// bundled BEAVRS full core in real OpenMC); Serpent/SCONE stay EXPERIMENTAL.
 // The design contract (shared with GROVES converter.py): where a construct
 // cannot be converted, emit a clearly-marked TODO comment in the output
 // rather than silently dropping it.
 
 export { mcnpToOpenmc } from './mcnpToOpenmc';
-export { openmcToMcnp } from './openmcToMcnp';
+export { openmcToMcnp, openmcTraceToMcnp, TRACE_HARNESS_PY } from './openmcToMcnp';
 export { mcnpToSerpent } from './mcnpToSerpent';
 export { mcnpToScone } from './mcnpToScone';
-export { parseMcnpDeck } from './mcnpModel';
+export { parseMcnpDeck, parseRegion } from './mcnpModel';
+export { emitMcnpFromTrace } from './tracedModel';
+export type { TracedModel } from './tracedModel';
+export { parseOpenmcStatic } from './openmcStatic';
 export type { ConversionDirection, ConversionResult, ConversionIssue } from './types';
 export { TODO_MARK } from './types';
 

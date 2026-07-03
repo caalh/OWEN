@@ -112,7 +112,9 @@ export function showRosettaDiff(
 <body>
   <header>
     <span class="badge">ROSETTA</span>
-    <span class="badge exp">EXPERIMENTAL</span>
+    ${target === 'openmc' || target === 'mcnp'
+        ? '<span class="badge">BETA</span>'
+        : '<span class="badge exp">EXPERIMENTAL</span>'}
     <h1>${source.toUpperCase()} → ${target.toUpperCase()}</h1>
     <div class="anchors" id="anchors"></div>
     <label><input type="checkbox" id="sync" checked /> sync scroll</label>
