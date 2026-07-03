@@ -48,7 +48,7 @@ switch to concentric pin layers, and slice through the core.
 | **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), and SCONE (`.scone`). OpenMC is detected from Python files that `import openmc`. |
 | **Snippets** | Ready-to-edit decks: PWR pin cell, 17×17 PWR assembly, criticality array, and shielding slab for MCNP; full OpenMC pin/assembly Python scripts; SCONE fuel pin, 5×5 assembly, and shielding tutorials. |
 | **Lattice Builder** | A visual grid editor that generates MCNP / OpenMC / Serpent / SCONE lattice code from a few clicks. |
-| **Input Builder** | Five-step wizard: pick code, add materials from an 18-entry library, pin-cell or lattice geometry, run settings, preview — then insert or open as a new file. |
+| **Input Builder** | Five-step wizard: pick code, add materials from an 18-entry curated library or the searchable PNNL-15870 Rev. 2 compendium (411 materials), pin-cell or lattice geometry, run settings, preview — then insert or open as a new file. |
 | **Prebuilt models** | `OWEN: Open Prebuilt Model…` opens bundled, offline reactor decks in a new editor with the correct language. Ships the **complete BEAVRS Cycle-1 full core** (all 193 assemblies, full axial pin stacks, baffle/barrel/shields/RPV) for **all four codes** — MCNP, OpenMC, Serpent, and SCONE — plus 17×17 PWR assembly starters. The SCONE deck is the author-verified source of truth; the MCNP/OpenMC/Serpent decks are geometry/materials-faithful translations of it. |
 | **Render with OpenMC** | `OWEN: Render with OpenMC (authoritative)` shells out to your actual OpenMC installation and shows OpenMC's own slice plots (xy/xz/yz, origin/width controls, material/cell coloring, optional 3D ray trace on OpenMC ≥ 0.15) in a panel — ground truth straight from OpenMC's geometry kernel, ideal for verifying OWEN's built-in preview or debugging geometry. Finds your interpreter automatically (settings → ms-python → PATH → WSL) and falls back to the built-in preview when OpenMC isn't installed. |
 | **3D geometry preview** | Three.js webview rendering of MCNP / OpenMC / Serpent / SCONE geometry with component / material / axial-layer toggles, slice planes, and a Disc/Layers fidelity control. Renders a **full BEAVRS core** (all 193 assemblies) across every code — including OpenMC cores whose lattices are built programmatically (comprehension/dict-driven assembly maps are statically expanded, no Python executed) — without dropping pins, and shows the **full axial stack** for OpenMC too — each pin is reconstructed as its real z-column from the deck's `_SHELLS`/`STACKS`/`R[key]` tables, so grid spacers, plena, end plugs and SS nozzles render with their own per-band shells/materials over the complete 0→460 cm assembly height, matching MCNP/Serpent/SCONE. Geometry is instanced (so draw calls stay low) and a configurable instance budget (`owen.preview.maxInstances`, default 1.5M) auto-simplifies detail (shells→discs, then collapses axial) instead of hiding pins when a deck is huge. **Hover** any part to read its layer, material, axial index, radius/diameter and z-range; **solo** a layer to isolate it; and **measure** distances (with Δx Δy Δz), included angles, and pin/shell radii directly in the view. |
@@ -73,9 +73,9 @@ switch to concentric pin layers, and slice through the core.
 **From a VSIX** (available now via [GitHub Releases](https://github.com/caalh/owen/releases/latest)):
 
 ```bash
-code --install-extension owen-neutronics-0.3.8.vsix
+code --install-extension owen-neutronics-0.3.9.vsix
 # Cursor:
-cursor --install-extension owen-neutronics-0.3.8.vsix
+cursor --install-extension owen-neutronics-0.3.9.vsix
 ```
 
 Or in the editor: Extensions view → `...` menu → **Install from VSIX…**.

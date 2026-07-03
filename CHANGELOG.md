@@ -5,6 +5,44 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] — 2026-07-02
+
+### Added
+
+- **PNNL-15870 Rev. 2 materials compendium (411 materials)** as a second material source,
+  alongside the curated featured set:
+  - **Input Builder:** new searchable "PNNL Compendium" section in the Materials step
+    (search by name, formula, acronym, or element symbol). The ~600 KB dataset ships as
+    `data/pnnl-materials.json` and is read from disk on demand — it is never injected
+    into the webview or the extension bundle. Selected compendium materials flow through
+    `buildDeck` for all four codes.
+  - **Insert Material command (`owen.insertMaterial`):** compendium entries appear in the
+    QuickPick after the curated NRDP set, rendered for the detected deck language.
+  - **Card generation** (`src/inputBuilder/pnnlCards.ts`, shared logic with
+    reactormc.net and GROVES): MCNP/Serpent emit isotopic ZAIDs with negative weight
+    fractions (carbon stays elemental `6000` — ENDF/B-VII.1 `.80c` has no isotopic C
+    tables); OpenMC uses `add_element(..., percent_type='wo')` for natural elements and
+    `add_nuclide(..., percent_type='wo')` for custom isotopics (enriched U/Pu/Li, D₂O);
+    SCONE compositions are atom densities (atoms/barn-cm) with `.03` ↔ `temp 300`.
+    S(α,β) thermal scattering is attached **only** to hydrogenous moderators
+    (light/heavy water, polyethylene) — never to fuels or metals.
+  - Citation shown wherever the data appears: PNNL-15870 Rev. 2 (April 2021),
+    R.S. Detwiler, R.J. McConn Jr., T.F. Grimes, S.A. Upton, E.J. Engel, *Compendium of
+    Material Composition Data for Radiation Transport Modeling*, PNNL.
+    https://doi.org/10.2172/1782721 — dataset derived from the PyNE
+    `materials-compendium` export (BSD-2-Clause) and spot-verified against the official
+    PDF tables.
+- 13 new tests (dataset sanity + spot checks, ZAID expansion, per-code card rules,
+  S(α,β) allow-list, full-library render smoke, Input Builder integration).
+
+### Changed
+
+- Widened timing budgets on two load-sensitive test groups (huge-deck MCNP indexing:
+  8 s → 30 s assert; BEAVRS axial-parity suite: 20 s → 120 s timeout). The indexing
+  build takes ~4 s in isolation but was observed at 9.7–16.4 s when the host runs
+  parallel workloads; the looser budgets still catch complexity regressions (an
+  O(n²) blowup takes minutes) without flaking under contention.
+
 ## [0.3.8] — 2026-07-02
 
 High-fidelity MCNP↔OpenMC converter: both directions rewritten from scratch and

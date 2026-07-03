@@ -12,6 +12,44 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-02 — v0.3.9 — PNNL-15870 Rev. 2 compendium (411 materials) in the Input Builder
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+Developed in `BD-worktree-pnnl` (branch `feat-pnnl-materials`) off `origin/main` while
+0.3.6–0.3.8 shipped concurrently; merged after the converter's v0.3.8 release landed.
+
+- **`src/inputBuilder/pnnlCards.ts`** (new): types + per-code card generators for the
+  compendium dataset — byte-identical logic to `src/lib/pnnlCards.ts` on
+  reactormc.net; GROVES carries a Python port (`groves/src/groves/pnnl_materials.py`).
+  Keep the three in sync. Rules: MCNP/Serpent → isotopic ZAIDs, negative weight
+  fractions, carbon collapses to `6000`; OpenMC → `add_element`/`add_nuclide` with
+  `percent_type='wo'` chosen by the per-element `natural` flag; SCONE → atom densities
+  with `.03`/`temp 300`. S(α,β) allow-list: water-liquid, water-heavy, both
+  polyethylenes — nothing else.
+- **`src/inputBuilder/pnnlData.ts`** (new): lazy disk loader (candidate paths cover the
+  esbuild bundle at `out/extension.js` and tsc-compiled tests at `out/inputBuilder/`)
+  plus capped search over name/id/formula/acronyms/element symbols.
+- **`data/pnnl-materials.json`** (new, ~600 KB): built by the website repo's
+  `scripts/build-pnnl-materials.mjs` from the PyNE `materials-compendium` export
+  (BSD-2-Clause). Provenance: PNNL-15870 Rev. 2 (April 2021), Detwiler/McConn/Grimes/
+  Upton/Engel, DOI 10.2172/1782721; spot-verified against the official PDF tables
+  (water, SS-304, Portland concrete, UO₂, air, Zircaloy-4, B₄C, graphite, lead, D₂O, Li).
+  Ships in the VSIX (`data/` is not in `.vscodeignore`).
+- **`src/inputBuilder/materials.ts`:** `SelectedMaterial.pnnl?: PnnlMaterial`;
+  `renderMaterial` dispatches to the compendium generators when present, so
+  `buildDeck` works unchanged for all four codes.
+- **`src/panels/inputBuilder.ts`:** "PNNL Compendium" section in the Materials step —
+  webview searches via `pnnlSearch`/`pnnlResults` messages (max 50 rows) and adds
+  materials via `pnnlAdd`/`pnnlMaterial`; the full dataset is never injected into the
+  webview HTML. Citation line rendered in the panel.
+- **`src/commands/insertMaterial.ts`:** compendium entries appended to the QuickPick
+  under a separator, rendered per detected language via the shared generators.
+- **Tests:** `src/test/suite/pnnlCards.test.ts` (13 tests). Suite: **443 passing**.
+- **Version:** 0.3.8 → 0.3.9 (`package.json`). Marketplace publish deferred per policy.
+
+---
+
 ## 2026-07-02 — v0.3.8 — High-fidelity MCNP↔OpenMC converter (beta), BEAVRS-gauntlet validated
 
 **AI Agent:** Fable 5 (Cursor IDE)

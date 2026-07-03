@@ -38,7 +38,13 @@ const DECKS: Record<'mcnp' | 'openmc' | 'serpent' | 'scone', string> = {
     scone: 'beavrs_fullcore_scone.scone',
 };
 
-suite('BEAVRS full-core axial parity (v0.2.9 OpenMC fix)', () => {
+suite('BEAVRS full-core axial parity (v0.2.9 OpenMC fix)', function () {
+    // Each full-core axial buildScene takes ~4s in isolation; tests below make
+    // up to six such calls and have hit the default 20s mocha timeout when the
+    // host is loaded by parallel agent/CI work. Correctness, not speed, is
+    // under test here, so give the suite generous headroom.
+    this.timeout(120000);
+
     test('OpenMC collapsed core spans the full assembly height (0 → 460 cm)', () => {
         const scene = buildScene(loadDeck(DECKS.openmc), 'openmc', { detail: 'disc', axial: false });
         const [zmin, zmax] = drawnZExtent(scene);

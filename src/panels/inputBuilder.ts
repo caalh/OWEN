@@ -5,6 +5,7 @@ import {
     type InputBuilderState,
 } from '../inputBuilder/deckBuilder';
 import { MATERIAL_LIBRARY } from '../inputBuilder/materials';
+import { searchPnnlMaterials, findPnnlMaterial, loadPnnlDataset } from '../inputBuilder/pnnlData';
 import {
     defaultPinTypes,
     defaultStructuralIds,
@@ -64,6 +65,15 @@ export class InputBuilderPanel {
                 await this._newFile(code, msg.codeLang);
             } else if (msg.command === 'openLattice') {
                 vscode.commands.executeCommand('owen.openLatticeBuilder');
+            } else if (msg.command === 'pnnlSearch') {
+                const results = searchPnnlMaterials(String(msg.query ?? ''), 50);
+                const total = loadPnnlDataset()?.materials.length ?? 0;
+                this._panel.webview.postMessage({ command: 'pnnlResults', results, total });
+            } else if (msg.command === 'pnnlAdd') {
+                const mat = findPnnlMaterial(String(msg.id ?? ''));
+                if (mat) {
+                    this._panel.webview.postMessage({ command: 'pnnlMaterial', material: mat });
+                }
             }
         }, null, this._disposables);
 
@@ -165,8 +175,13 @@ pre#preview { background: var(--vscode-textCodeBlock-background); padding: 10px;
 </div>
 
 <div class="panel" id="step1">
-  <label>Add from library (${String(MATERIAL_LIBRARY.length)} materials)</label>
+  <label>Featured library (${String(MATERIAL_LIBRARY.length)} curated materials)</label>
   <div class="mat-list" id="mat-lib"></div>
+  <label style="margin-top:14px">PNNL Compendium — PNNL-15870 Rev. 2 (411 materials)</label>
+  <input id="pnnl-search" placeholder="Search name, formula, acronym, or element symbol…">
+  <div class="mat-list" id="pnnl-lib"></div>
+  <p class="hint" id="pnnl-count"></p>
+  <p class="hint">Compositions from PNNL-15870 Rev. 2 (April 2021), Detwiler, McConn et al., <em>Compendium of Material Composition Data for Radiation Transport Modeling</em>, PNNL — doi.org/10.2172/1782721. S(α,β) is attached only to hydrogenous moderators.</p>
   <div class="chosen" id="chosen-mats"><span class="hint">Click materials above to add. Click a chip to remove.</span></div>
 </div>
 
@@ -236,8 +251,56 @@ function refreshPreview() {
 window.addEventListener('message', e => {
   if (e.data.command === 'previewResult') {
     document.getElementById('preview').textContent = e.data.code;
+  } else if (e.data.command === 'pnnlResults') {
+    renderPnnlResults(e.data.results, e.data.total);
+  } else if (e.data.command === 'pnnlMaterial') {
+    addPnnlMaterial(e.data.material);
   }
 });
+
+function renderPnnlResults(results, total) {
+  const el = document.getElementById('pnnl-lib');
+  el.innerHTML = '';
+  results.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'mat-row';
+    const btn = document.createElement('button');
+    btn.textContent = '+';
+    btn.className = 'btn secondary';
+    btn.style.width = '28px';
+    btn.onclick = () => vscode.postMessage({ command: 'pnnlAdd', id: m.id });
+    row.appendChild(btn);
+    const desc = m.name + ' — ρ=' + m.density + ' g/cm³' + (m.formula ? ' — ' + m.formula : '');
+    row.appendChild(document.createTextNode(desc));
+    row.title = m.elements;
+    el.appendChild(row);
+  });
+  document.getElementById('pnnl-count').textContent =
+    results.length + (results.length >= 50 ? '+ shown' : ' shown') + ' of ' + total + ' compendium materials';
+}
+
+function addPnnlMaterial(mat) {
+  if (chosen.some(c => c.id === mat.id)) return;
+  chosen.push({
+    id: mat.id,
+    name: mat.name,
+    category: 'PNNL compendium',
+    density: mat.density,
+    densityUnit: 'g/cm3',
+    description: 'PNNL-15870 Rev. 2',
+    pnnl: mat,
+    mcnpNumber: chosen.length + 1,
+  });
+  renderChosen();
+  refreshPreview();
+}
+
+let pnnlTimer = null;
+document.getElementById('pnnl-search').addEventListener('input', (e) => {
+  clearTimeout(pnnlTimer);
+  pnnlTimer = setTimeout(() => vscode.postMessage({ command: 'pnnlSearch', query: e.target.value }), 150);
+});
+vscode.postMessage({ command: 'pnnlSearch', query: '' });
 
 function renderLib() {
   const el = document.getElementById('mat-lib');

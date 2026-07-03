@@ -1,5 +1,13 @@
 import * as vscode from 'vscode';
 import { detectMonteCarloLanguage, MonteCarloLanguage } from '../util/detectLanguage';
+import { loadPnnlDataset } from '../inputBuilder/pnnlData';
+import {
+    pnnlMcnpCard,
+    pnnlOpenmcSnippet,
+    pnnlSerpentCard,
+    pnnlSconeEntry,
+    type PnnlMaterial,
+} from '../inputBuilder/pnnlCards';
 
 interface MaterialComposition {
     zaid: string;
@@ -115,13 +123,30 @@ export function registerInsertMaterial(context: vscode.ExtensionContext): vscode
             return;
         }
 
-        const items: vscode.QuickPickItem[] = materials
+        const items: (vscode.QuickPickItem & { pnnlId?: string })[] = materials
             .filter((m) => codeForLanguage(m, lang).trim().length > 0)
             .map((m) => ({
                 label: m.name,
                 description: m.formula ? `${m.formula} • ${m.category}` : m.category,
                 detail: m.description,
             }));
+
+        // PNNL-15870 Rev. 2 compendium (411 materials) after the curated set.
+        const pnnl = loadPnnlDataset();
+        if (pnnl) {
+            items.push({
+                label: 'PNNL-15870 Rev. 2 Compendium',
+                kind: vscode.QuickPickItemKind.Separator,
+            });
+            for (const m of pnnl.materials) {
+                items.push({
+                    label: m.name,
+                    description: `${m.formula ? m.formula + ' • ' : ''}ρ=${m.density} g/cm³ • PNNL compendium`,
+                    detail: m.elements.map((e) => e.sym).join(', '),
+                    pnnlId: m.id,
+                });
+            }
+        }
 
         const pick = await vscode.window.showQuickPick(items, {
             placeHolder: `Insert material (${lang ?? 'unknown language — defaults to MCNP'})`,
@@ -130,10 +155,20 @@ export function registerInsertMaterial(context: vscode.ExtensionContext): vscode
         });
         if (!pick) return;
 
-        const material = materials.find((m) => m.name === pick.label);
-        if (!material) return;
-
-        const snippet = codeForLanguage(material, lang);
+        let snippet: string;
+        if (pick.pnnlId) {
+            const mat = pnnl?.materials.find((m) => m.id === pick.pnnlId) as PnnlMaterial;
+            switch (lang) {
+                case 'openmc': snippet = pnnlOpenmcSnippet(mat); break;
+                case 'serpent': snippet = pnnlSerpentCard(mat); break;
+                case 'scone': snippet = pnnlSconeEntry(mat); break;
+                default: snippet = pnnlMcnpCard(mat, 1); break;
+            }
+        } else {
+            const material = materials.find((m) => m.name === pick.label);
+            if (!material) return;
+            snippet = codeForLanguage(material, lang);
+        }
         const padded = snippet.endsWith('\n') ? snippet : snippet + '\n';
         const insertText = (editor.selection.active.character > 0 ? '\n' : '') + padded;
 

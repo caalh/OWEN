@@ -1,5 +1,8 @@
 /** Curated reactor materials for the OWEN Input Builder (NRDP-aligned compositions). */
 
+import type { PnnlMaterial } from './pnnlCards';
+import { pnnlMcnpCard, pnnlOpenmcSnippet, pnnlSerpentCard, pnnlSconeEntry } from './pnnlCards';
+
 export type MonteCarloCode = 'mcnp' | 'openmc' | 'serpent' | 'scone';
 
 export interface MaterialEntry {
@@ -14,6 +17,8 @@ export interface MaterialEntry {
 export interface SelectedMaterial extends MaterialEntry {
     mcnpNumber: number;
     customName?: string;
+    /** Present when the entry comes from the PNNL-15870 Rev. 2 compendium. */
+    pnnl?: PnnlMaterial;
 }
 
 /** Bundled library (~18 common reactor materials). */
@@ -50,6 +55,13 @@ export function renderMaterial(code: MonteCarloCode, mat: SelectedMaterial): str
     const label = code === 'openmc'
         ? rawLabel.replace(/\\/g, '/').replace(/'/g, '"')
         : rawLabel;
+    if (mat.pnnl) {
+        // PNNL-15870 Rev. 2 compendium material — generated from composition data.
+        if (code === 'mcnp') return pnnlMcnpCard(mat.pnnl, n);
+        if (code === 'openmc') return pnnlOpenmcSnippet(mat.pnnl);
+        if (code === 'serpent') return pnnlSerpentCard(mat.pnnl);
+        return pnnlSconeEntry(mat.pnnl);
+    }
     switch (mat.id) {
         case 'light-water':
             if (code === 'mcnp') return `c ${label}\nm${n}    1001.80c  6.69174e-2\n       8016.80c  3.34587e-2\nmt${n}   lwtr.20t`;
