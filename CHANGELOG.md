@@ -5,6 +5,31 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-07-06
+
+OWEN graduates to **1.0.0** — the first stable major release. Everything shipped across the
+0.3.x line is now treated as production-ready: the Monte Carlo language server, full-core 3D
+geometry preview, native OpenMC render and verify, ALLEN Doppler Studio, Results Viewer,
+parametric sweep dashboard, PNNL-15870 compendium (411 materials), adversarial-hardened
+validation, and bundled BEAVRS teaching models.
+
+### Changed
+
+- **Version bump 0.3.10 → 1.0.0** — OWEN is no longer framed as beta or early access.
+- **MCNP ↔ OpenMC converter promoted to stable** — the hi-fi engine (boolean region AST,
+  multi-level universes, rect/hex lattices, transforms, graveyard handling, tally/source
+  mapping) passed the BEAVRS full-core gauntlet in real OpenMC. UI labels, Rosetta diff
+  badge, and generated deck headers no longer say "beta". Known limitations (tally gaps,
+  complex TR transforms, procedural OpenMC scripts requiring trace review) remain documented
+  via `TODO(owen-convert)` markers — honest caveats, not a beta disclaimer.
+- **MCNP → Serpent / SCONE** and **Community Library** (Supabase opt-in) stay
+  **experimental**.
+
+### Notes
+
+- VSIX built locally; VS Code Marketplace / Open VSX publish deferred to the maintainer
+  (live listing remains v0.3.1 until published). GitHub Release **v1.0.0** ships the VSIX.
+
 ## [0.3.10] — 2026-07-02
 
 Marketplace metadata refresh — no code changes. The published 0.3.1 listing describes a

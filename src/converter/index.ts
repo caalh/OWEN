@@ -1,7 +1,7 @@
 // Cross-code deck converter — public API.
 //
 // Directions: MCNP -> OpenMC / Serpent / SCONE, and OpenMC -> MCNP.
-// MCNP<->OpenMC is BETA as of v0.3.8 (hi-fi rewrite, validated against the
+// MCNP<->OpenMC is STABLE as of v1.0.0 (hi-fi rewrite, validated against the
 // bundled BEAVRS full core in real OpenMC); Serpent/SCONE stay EXPERIMENTAL.
 // The design contract (shared with GROVES converter.py): where a construct
 // cannot be converted, emit a clearly-marked TODO comment in the output

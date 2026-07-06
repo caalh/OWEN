@@ -31,7 +31,9 @@ webview (`src/allen/`), bundled prebuilt models (`prebuilt-models/`), deep per-l
 validation, a simulation runner, a JSON-driven parameter sweep, NRDP material insertion, and
 an opt-in community-library browser.
 
-Current release: **v0.3.1** (stable, VS Code Marketplace + Open VSX). **v0.3.10 is built locally (VSIX) but not yet published** — publish deferred to the maintainer.
+Current release: **v1.0.0** (stable, built locally as VSIX; GitHub Release v1.0.0).
+**v0.3.1 remains the published Marketplace / Open VSX version** until the maintainer
+publishes 1.0.0.
 
 ---
 

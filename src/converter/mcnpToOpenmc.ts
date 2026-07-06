@@ -483,7 +483,7 @@ export function mcnpToOpenmc(mcnpText: string): ConversionResult {
     const deck: McnpDeck = parseMcnpDeck(mcnpText);
     const issues: ConversionIssue[] = [];
     const out: string[] = [
-        '# Converted from MCNP by OWEN (BelvoirDynamics) — MCNP↔OpenMC converter (beta)',
+        '# Converted from MCNP by OWEN (BelvoirDynamics) — MCNP↔OpenMC converter',
         '# NOTE: Review and verify all converted output before production use.',
         `# Unconvertible constructs are marked with "${TODO_MARK}".`,
         'import openmc',

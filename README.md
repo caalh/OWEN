@@ -62,7 +62,7 @@ switch to concentric pin layers, and slice through the core.
 | **Input Builder** | Five-step wizard: pick code, add materials from an 18-entry curated library or the searchable **PNNL-15870 Rev. 2 compendium (411 materials)**, pin-cell or lattice geometry, run settings, preview — then insert or open as a new file. |
 | **Materials (NRDP + PNNL)** | `OWEN: Insert Material from Database` inserts reactor materials rendered for the detected deck language — the curated Nuclear Reactor Data Project set (bundled snapshot, optional live refresh from reactormc.net) plus the full PNNL-15870 Rev. 2 compendium with correct per-code conventions (isotopic ZAIDs with weight fractions for MCNP/Serpent, `add_element`/`add_nuclide` for OpenMC, atom densities for SCONE; S(α,β) only on hydrogenous moderators). |
 | **Prebuilt models** | `OWEN: Open Prebuilt Model…` opens bundled, offline reactor decks in a new editor with the correct language. Ships the **complete BEAVRS Cycle-1 full core** (all 193 assemblies, full axial pin stacks, baffle/barrel/shields/RPV) for **all four codes** — MCNP, OpenMC, Serpent, and SCONE — plus 17×17 PWR assembly starters and a **Reflected UO2 Pin Cell** teaching model in all four codes (the OpenMC twin is run-verified: k-inf 1.2256 ± 0.0010). The SCONE full-core deck is the author-verified source of truth; the MCNP/OpenMC/Serpent decks are geometry/materials-faithful translations of it. |
-| **Cross-code converter** | `OWEN: Convert Deck…` (`owen.convertDeck`) converts **MCNP ↔ OpenMC (beta)** — a high-fidelity engine with a full boolean region AST, multi-level universes and rect/hex lattices, transforms, graveyard handling, and tally/source mapping, validated against the bundled BEAVRS full core in real OpenMC — plus **MCNP → Serpent / SCONE (experimental)**. Anything that can't be mapped emits a clearly marked `TODO(owen-convert)` comment instead of being silently dropped, and results open in a **Rosetta diff** view — source and converted deck side-by-side with aligned cells/surfaces/materials sections and TODO highlights. |
+| **Cross-code converter** | `OWEN: Convert Deck…` (`owen.convertDeck`) converts **MCNP ↔ OpenMC** — a high-fidelity engine with a full boolean region AST, multi-level universes and rect/hex lattices, transforms, graveyard handling, and tally/source mapping, validated against the bundled BEAVRS full core in real OpenMC — plus **MCNP → Serpent / SCONE (experimental)**. Anything that can't be mapped emits a clearly marked `TODO(owen-convert)` comment instead of being silently dropped, and results open in a **Rosetta diff** view — source and converted deck side-by-side with aligned cells/surfaces/materials sections and TODO highlights. |
 
 ### Visualize & verify
 
@@ -95,9 +95,9 @@ switch to concentric pin layers, and slice through the core.
 **From a VSIX** ([GitHub Releases](https://github.com/caalh/owen/releases/latest)):
 
 ```bash
-code --install-extension owen-neutronics-0.3.10.vsix
+code --install-extension owen-neutronics-1.0.0.vsix
 # Cursor:
-cursor --install-extension owen-neutronics-0.3.10.vsix
+cursor --install-extension owen-neutronics-1.0.0.vsix
 ```
 
 Or in the editor: Extensions view → `...` menu → **Install from VSIX…**.
@@ -119,7 +119,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | `OWEN: Open 3D Geometry Preview` | Three.js webview — full-core BEAVRS, layer toggles, measurement tools |
 | `OWEN: Render with OpenMC (authoritative)` | Native OpenMC slice plots of the active OpenMC Python model (requires OpenMC installed) |
 | `OWEN: Verify Geometry with OpenMC` | Overlap + lost-particle checks through your local OpenMC |
-| `OWEN: Convert Deck… (MCNP↔OpenMC beta)` | MCNP ↔ OpenMC (beta), MCNP → Serpent / SCONE (experimental), with Rosetta diff view |
+| `OWEN: Convert Deck… (MCNP↔OpenMC)` | MCNP ↔ OpenMC (stable), MCNP → Serpent / SCONE (experimental), with Rosetta diff view |
 | `OWEN: Open Prebuilt Model…` | Load a bundled BEAVRS full-core, assembly, or pin-cell deck |
 | `OWEN: Show MCNP References` | Open the MCNP cross-reference tracker dock |
 | `OWEN: Insert Material from Database` | NRDP + PNNL-15870 material picker, language-aware |

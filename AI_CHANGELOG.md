@@ -12,6 +12,27 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-06 — v1.0.0 — Stable 1.0 release; MCNP↔OpenMC converter graduates from beta
+
+**AI Agent:** Auto (Cursor IDE)
+
+Major-version bump from 0.3.10. OWEN is no longer framed as beta or early access — the 0.3.x
+journey (MC Language Server, BEAVRS-scale 3D preview, Render/Verify with OpenMC, ALLEN Doppler
+Studio, Results Viewer, sweep dashboard, PNNL-15870 compendium, adversarial hardening, prebuilt
+models) ships as a cohesive **1.0.0** stable release.
+
+- **Version:** 0.3.10 → **1.0.0** (`package.json`, `package-lock.json`).
+- **MCNP ↔ OpenMC converter promoted to stable:** command title, quick-pick maturity label,
+  Rosetta badge (no BETA for mcnp/openmc targets), generated deck headers, README/CHANGELOG
+  framing. Known limitations (tally gaps, TR transforms) stay as `TODO(owen-convert)` markers.
+- **Still experimental:** MCNP → Serpent/SCONE; Community Library (Supabase opt-in).
+- **Docs:** `CHANGELOG.md`, `README.md`, `AGENTS.md`, `AI_MAINTAINER_GUIDE.md`, root
+  `AI_CHANGELOG.md`, `.cursor/rules/belvoirdynamics.mdc`.
+- **VSIX:** `owen-neutronics-1.0.0.vsix` built locally; Marketplace publish deferred (live
+  listing remains v0.3.1). GitHub Release **v1.0.0** on `caalh/owen`.
+
+---
+
 ## 2026-07-02 — v0.3.10 — Marketplace metadata refresh (description, keywords, README)
 
 **AI Agent:** Fable 5 (Cursor IDE)
