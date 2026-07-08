@@ -5,6 +5,82 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.0.1] — 2026-07-08
+
+Patch release after **1.0.0** — Input Builder snippet wizards and MCNP cross-file workspace
+validation. No breaking changes.
+
+### Added
+
+- **MCNP workspace validation (v1):** shared `@belvoirdynamics/mcnp-workspace` package;
+  LSP merges cross-file diagnostics when `owen.mcnp.projectRoot` is set; **Set MCNP Project
+  Root** command; settings `owen.mcnp.workspaceValidation.enabled` / `.warnUnused`.
+- **Tests:** `workspaceValidation.test.ts` — 2 integration tests against shared fixtures.
+- **Input Builder — Snippet Wizards:** Material (atom/weight density + fraction modes, S(α,β) picker
+  with hydrogen-only guard), Surface (RCC pin, RPP box, sphere), Cell (boolean intersection/union),
+  Lattice (square + hex stub), Source (kcode/ksrc), Settings (per-code run blocks).
+- **Input Builder UX:** searchable template library, recent templates (persisted), validation preview
+  before insert/new-file, `Ctrl+Shift+I` / `Cmd+Shift+I` keybinding.
+- **Tests:** `wizards.test.ts` — 12 new unit tests for wizard card generators and snippet validation.
+
+## [1.0.0] — 2026-07-06
+
+OWEN graduates to **1.0.0** — the first stable major release. Everything shipped across the
+0.3.x line is now treated as production-ready: the Monte Carlo language server, full-core 3D
+geometry preview, native OpenMC render and verify, ALLEN Doppler Studio, Results Viewer,
+parametric sweep dashboard, PNNL-15870 compendium (411 materials), adversarial-hardened
+validation, and bundled BEAVRS teaching models.
+
+### Changed
+
+- **Version bump 0.3.10 → 1.0.0** — OWEN is no longer framed as beta or early access.
+- **MCNP ↔ OpenMC converter promoted to stable** — the hi-fi engine (boolean region AST,
+  multi-level universes, rect/hex lattices, transforms, graveyard handling, tally/source
+  mapping) passed the BEAVRS full-core gauntlet in real OpenMC. UI labels, Rosetta diff
+  badge, and generated deck headers no longer say "beta". Known limitations (tally gaps,
+  complex TR transforms, procedural OpenMC scripts requiring trace review) remain documented
+  via `TODO(owen-convert)` markers — honest caveats, not a beta disclaimer.
+- **MCNP → Serpent / SCONE** and **Community Library** (Supabase opt-in) stay
+  **experimental**.
+
+### Notes
+
+- VSIX built locally; VS Code Marketplace / Open VSX publish deferred to the maintainer
+  (live listing remains v0.3.1 until published). GitHub Release **v1.0.0** ships the VSIX.
+
+## [0.3.10] — 2026-07-02
+
+Marketplace metadata refresh — no code changes. The published 0.3.1 listing describes a
+feature set that is now many releases stale; this release makes the `description`,
+`README.md`, and keywords packaged inside the VSIX describe the current extension, so the
+VS Code Marketplace and Open VSX listings will be accurate on next publish.
+
+### Changed
+
+- **`package.json` description** rewritten to cover the 0.3.x feature set: MC Language
+  Server with real-time physics-aware diagnostics, native OpenMC rendering and geometry
+  verification, cross-code converter (MCNP↔OpenMC beta), Results Viewer, parametric sweep
+  dashboard, PNNL-15870 compendium (411 materials), and ALLEN Doppler Studio.
+- **Keywords** expanded 9 → 16 (added `language-server`, `3d`, `pnnl`, `cross-sections`,
+  `k-eff`, `criticality`, `beavrs`) — still well under the Marketplace's 30-tag cap
+  including vsce auto-tags.
+- **README** restructured: the flat features table is now grouped into Write / Build /
+  Visualize & verify / Run & analyze sections, adding the rows that post-dated the last
+  README pass — MC Language Server, Verify Geometry with OpenMC, Results Viewer, sweep
+  dashboard, cross-code converter (MCNP↔OpenMC beta + Rosetta diff), Doppler Studio,
+  PNNL compendium materials, and the Reflected UO2 Pin Cell prebuilt models. The commands
+  table now lists all 19 commands; the install section drops the stale "(once published)"
+  qualifier; the supported-languages table shows LSP real-time diagnostics; the
+  acknowledgements add the PNNL-15870 Rev. 2 citation; NICHOLS joins Related. Demo
+  GIFs/links unchanged.
+
+### Notes
+
+- Publishing this VSIX to the VS Code Marketplace and Open VSX is what actually updates
+  the public listings — publish remains deferred to the maintainer.
+
 ## [0.3.9] — 2026-07-02
 
 ### Added

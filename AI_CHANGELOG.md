@@ -12,6 +12,77 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-08 — v1.0.1 — Input Builder wizards + MCNP workspace validation
+
+**AI Agent:** Auto (Cursor IDE)
+
+Patch release (1.0.0 → **1.0.1**). Two feature additions since the stable 1.0.0 ship; semver
+patch because both are additive and non-breaking.
+
+- **MCNP workspace validation (v1):** shared `@belvoirdynamics/mcnp-workspace`; LSP merges
+  cross-file diagnostics when `owen.mcnp.projectRoot` is set; `setMcnpProjectRoot` command;
+  settings `owen.mcnp.workspaceValidation.*`; `mcnpReferences` / `crossReference` re-exported
+  from package; 2 integration tests in `workspaceValidation.test.ts`.
+- **Input Builder — Snippet Wizards:** material/surface/cell/lattice/source/settings wizards;
+  validation preview, template library + recents, `Ctrl+Shift+I`; 12 tests in `wizards.test.ts`.
+- **Version:** 1.0.0 → **1.0.1** (`package.json`, `package-lock.json`).
+- **Docs:** `CHANGELOG.md`, `AI_CHANGELOG.md`, root `AI_CHANGELOG.md`, `.cursor/rules/belvoirdynamics.mdc`.
+- **VSIX:** `owen-neutronics-1.0.1.vsix`; GitHub Release **v1.0.1** on `caalh/owen`.
+  Marketplace publish deferred to maintainer.
+
+---
+
+## 2026-07-06 — v1.0.0 — Stable 1.0 release; MCNP↔OpenMC converter graduates from beta
+
+**AI Agent:** Auto (Cursor IDE)
+
+Major-version bump from 0.3.10. OWEN is no longer framed as beta or early access — the 0.3.x
+journey (MC Language Server, BEAVRS-scale 3D preview, Render/Verify with OpenMC, ALLEN Doppler
+Studio, Results Viewer, sweep dashboard, PNNL-15870 compendium, adversarial hardening, prebuilt
+models) ships as a cohesive **1.0.0** stable release.
+
+- **Version:** 0.3.10 → **1.0.0** (`package.json`, `package-lock.json`).
+- **MCNP ↔ OpenMC converter promoted to stable:** command title, quick-pick maturity label,
+  Rosetta badge (no BETA for mcnp/openmc targets), generated deck headers, README/CHANGELOG
+  framing. Known limitations (tally gaps, TR transforms) stay as `TODO(owen-convert)` markers.
+- **Still experimental:** MCNP → Serpent/SCONE; Community Library (Supabase opt-in).
+- **Docs:** `CHANGELOG.md`, `README.md`, `AGENTS.md`, `AI_MAINTAINER_GUIDE.md`, root
+  `AI_CHANGELOG.md`, `.cursor/rules/belvoirdynamics.mdc`.
+- **VSIX:** `owen-neutronics-1.0.0.vsix` built locally; Marketplace publish deferred (live
+  listing remains v0.3.1). GitHub Release **v1.0.0** on `caalh/owen`.
+
+---
+
+## 2026-07-02 — v0.3.10 — Marketplace metadata refresh (description, keywords, README)
+
+**AI Agent:** Fable 5 (Cursor IDE)
+
+Developed in `BD-worktree-marketplace` (branch `chore/marketplace-metadata`) off
+`origin/main`, after the 0.3.8 (converter) and 0.3.9 (PNNL) releases landed. No product
+code changed — this release exists so the next Marketplace/Open VSX publish carries
+accurate listing metadata (the listings render the `description`, `README.md`, keywords,
+and icon from inside the published VSIX; the live 0.3.1 listing is ten releases stale).
+
+- **`package.json`:** `description` rewritten around the current headline features (LSP,
+  3D preview, Render/Verify with OpenMC, converter beta, Results Viewer, sweep dashboard,
+  PNNL compendium, ALLEN Doppler Studio); `keywords` 9 → 16 (`language-server`, `3d`,
+  `pnnl`, `cross-sections`, `k-eff`, `criticality`, `beavrs`) — the Marketplace caps
+  package.json keywords at 30 including some vsce auto-tags, so 16 manual leaves margin.
+  `displayName`, `publisher`, icon, `galleryBanner`, `qna` untouched (identity-stable
+  fields per AGENTS.md).
+- **`README.md`:** features table regrouped into Write / Build / Visualize & verify /
+  Run & analyze; new rows for the MC Language Server, Verify Geometry with OpenMC,
+  Results Viewer, sweep dashboard, cross-code converter (labels mirror 0.3.8's honest
+  choice: MCNP↔OpenMC **beta**, Serpent/SCONE **experimental**), ALLEN Doppler Studio
+  (JEFF-3.3 comparison described honestly as website-side), PNNL materials, and the
+  Reflected UO2 Pin Cell prebuilts; commands table covers all 19 commands; stale
+  "(once published)" install framing removed; demo GIF/MP4 links preserved byte-for-byte.
+- Packaging verified via `vsce ls` (README.md + assets/owen-icon.png in the VSIX file
+  list). Caveat for future agents: `npx` hangs in this environment — invoke vsce as
+  `node node_modules/@vscode/vsce/vsce`.
+
+---
+
 ## 2026-07-02 — v0.3.9 — PNNL-15870 Rev. 2 compendium (411 materials) in the Input Builder
 
 **AI Agent:** Fable 5 (Cursor IDE)

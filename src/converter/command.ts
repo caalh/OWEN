@@ -1,6 +1,6 @@
 // OWEN: Convert Deck… — source->target picker + Rosetta diff view (source and
 // converted output side-by-side with issues highlighted).
-// MCNP<->OpenMC is BETA (v0.3.8 hi-fi rewrite, BEAVRS-gauntlet tested);
+// MCNP<->OpenMC is STABLE as of v1.0.0 (hi-fi rewrite, BEAVRS-gauntlet tested);
 // Serpent/SCONE targets remain EXPERIMENTAL.
 
 import * as vscode from 'vscode';
@@ -41,7 +41,7 @@ export function registerConvertDeck(context: vscode.ExtensionContext): vscode.Di
 
         const targets = CONVERSION_TARGETS[source];
         const maturity = (t: TargetLanguage) =>
-            (t === 'openmc' || t === 'mcnp') ? 'beta' : 'experimental';
+            (t === 'openmc' || t === 'mcnp') ? 'stable' : 'experimental';
         const pick = await vscode.window.showQuickPick(
             targets.map((t) => ({
                 label: `${source!.toUpperCase()} → ${TARGET_LABELS[t]}`,

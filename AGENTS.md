@@ -5,12 +5,13 @@ picture read `AI_MAINTAINER_GUIDE.md` and `PROJECT_STRUCTURE.md`. Record notable
 `AI_CHANGELOG.md` (engineering) and `CHANGELOG.md` (user-facing).
 
 OWEN — **Open Workspace for Engineered Neutronics** — is a VS Code / Cursor extension for
-MCNP, OpenMC, Serpent, and SCONE input files. Current release: **v0.3.1** (stable, published on
-the VS Code Marketplace and Open VSX); **v0.3.8 is built locally (VSIX) but not yet published**.
+MCNP, OpenMC, Serpent, and SCONE input files. Current release: **v1.0.1** (built
+locally as VSIX; GitHub Release v1.0.1). **v1.0.0 remains the published Marketplace /
+Open VSX version** until the maintainer publishes 1.0.1.
 It is a **BelvoirDynamics** product; its siblings are the **GROVES** desktop app (v1.3.4) and
 the **NICHOLS** Sublime Text / Notepad++ packages (v1.0.0, `caalh/nichols`).
 
-## Key modules (v0.3.x)
+## Key modules (v1.0)
 
 | Area | Path | Notes |
 |------|------|-------|

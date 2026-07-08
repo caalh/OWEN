@@ -21,6 +21,7 @@ import { registerMcnpReferencesView } from './references/referencesView';
 import { startLanguageClient, stopLanguageClient } from './lsp/client';
 import { openAllenCrossSections } from './allen/panel';
 import { openResultsViewer } from './results/panel';
+import { setMcnpProjectRoot } from './commands/setMcnpProjectRoot';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('OWEN extension activated');
@@ -59,6 +60,10 @@ export function activate(context: vscode.ExtensionContext) {
             if (editor) {
                 validateInputFile(editor.document);
             }
+        }),
+
+        vscode.commands.registerCommand('owen.setMcnpProjectRoot', () => {
+            void setMcnpProjectRoot();
         }),
 
         vscode.commands.registerCommand('owen.runSimulation', () => {

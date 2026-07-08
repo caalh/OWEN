@@ -10,12 +10,43 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
+import {
+    mcnpProjectRoot,
+    workspaceValidationEnabled,
+    workspaceWarnUnused,
+} from '../commands/setMcnpProjectRoot';
 
 let client: LanguageClient | undefined;
 
 function mcnpLineLimit(): number | undefined {
     const n = vscode.workspace.getConfiguration('owen').get<number>('mcnp.lineLengthLimit');
     return typeof n === 'number' && n > 0 ? Math.floor(n) : undefined;
+}
+
+function workspaceRoot(): string | undefined {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function buildWorkspaceSettings() {
+    return {
+        owen: {
+            mcnp: {
+                lineLengthLimit: mcnpLineLimit(),
+                projectRoot: mcnpProjectRoot(),
+                workspaceValidation: {
+                    enabled: workspaceValidationEnabled(),
+                    warnUnused: workspaceWarnUnused(),
+                },
+            },
+        },
+    };
+}
+
+export async function sendWorkspaceValidationConfig(): Promise<void> {
+    if (!client) return;
+    await client.sendNotification('workspace/didChangeConfiguration', {
+        settings: buildWorkspaceSettings(),
+    });
 }
 
 export function startLanguageClient(context: vscode.ExtensionContext): void {
@@ -38,6 +69,12 @@ export function startLanguageClient(context: vscode.ExtensionContext): void {
         ],
         initializationOptions: {
             mcnpLineLimit: mcnpLineLimit(),
+            workspaceRoot: workspaceRoot(),
+            workspaceValidation: {
+                enabled: workspaceValidationEnabled(),
+                projectRoot: mcnpProjectRoot(),
+                warnUnused: workspaceWarnUnused(),
+            },
         },
     };
 
@@ -46,11 +83,16 @@ export function startLanguageClient(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('owen.mcnp.lineLengthLimit') && client) {
-                void client.sendNotification('workspace/didChangeConfiguration', {
-                    settings: { owen: { mcnp: { lineLengthLimit: mcnpLineLimit() } } },
-                });
+            if (
+                e.affectsConfiguration('owen.mcnp.lineLengthLimit')
+                || e.affectsConfiguration('owen.mcnp.projectRoot')
+                || e.affectsConfiguration('owen.mcnp.workspaceValidation')
+            ) {
+                void sendWorkspaceValidationConfig();
             }
+        }),
+        vscode.workspace.onDidChangeWorkspaceFolders(() => {
+            void sendWorkspaceValidationConfig();
         }),
         { dispose: () => void stopLanguageClient() },
     );

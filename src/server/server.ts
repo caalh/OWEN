@@ -13,6 +13,7 @@
  * symbols. Serpent/SCONE get regex-outline document symbols.
  */
 
+import * as path from 'path';
 import {
     Connection,
     Diagnostic,
@@ -44,6 +45,19 @@ import {
     resolveAt,
 } from '../references/mcnpReferences';
 import { buildDocumentSymbols } from './symbols';
+import {
+    isInProject,
+    pathToUri,
+    resolveProjectRoot,
+    workspaceDiagnosticsForOpenDocs,
+    WorkspaceValidationConfig,
+} from './workspaceValidation';
+import {
+    getProjectDefinition,
+    getProjectReferences,
+    buildSymbolIndex,
+} from '../../packages/mcnp-workspace/src/symbolIndex';
+import { buildIncludeGraph } from '../../packages/mcnp-workspace/src/includeGraph';
 
 const VALIDATION_DEBOUNCE_MS = 300;
 
@@ -80,6 +94,9 @@ function toLspDiagnostic(d: PlainDiagnostic): Diagnostic {
 export interface ServerOptions {
     /** For tests: skip the debounce so diagnostics publish synchronously. */
     validationDebounceMs?: number;
+    /** Seed workspace validation (tests / initializationOptions). */
+    workspaceValidation?: Partial<WorkspaceValidationConfig>;
+    workspaceRoot?: string;
 }
 
 export function startLanguageServer(connection: Connection, options: ServerOptions = {}): void {
@@ -87,10 +104,19 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
     const debounceMs = options.validationDebounceMs ?? VALIDATION_DEBOUNCE_MS;
 
     let mcnpLineLimit: number | undefined;
+    let workspaceConfig: WorkspaceValidationConfig = {
+        enabled: options.workspaceValidation?.enabled ?? true,
+        projectRoot: options.workspaceValidation?.projectRoot ?? '',
+        warnUnused: options.workspaceValidation?.warnUnused ?? false,
+    };
+    let workspaceRoot = options.workspaceRoot ?? '';
+    let projectRootDeck: string | null = null;
+    let projectFilePaths: string[] = [];
 
     // Per-document MCNP index cache, invalidated by document version.
     const indexCache = new Map<string, { version: number; index: McnpReferenceIndex }>();
     const pendingValidation = new Map<string, ReturnType<typeof setTimeout>>();
+    let projectSymbolIndex: ReturnType<typeof buildSymbolIndex> | null = null;
 
     const indexFor = (doc: TextDocument): McnpReferenceIndex => {
         const hit = indexCache.get(doc.uri);
@@ -100,11 +126,41 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
         return index;
     };
 
+    const refreshProjectContext = (): void => {
+        projectRootDeck = workspaceConfig.enabled
+            ? resolveProjectRoot(workspaceConfig.projectRoot, workspaceRoot || undefined)
+            : null;
+        if (!projectRootDeck) {
+            projectFilePaths = [];
+            projectSymbolIndex = null;
+            return;
+        }
+        const graph = buildIncludeGraph(projectRootDeck);
+        projectFilePaths = [...graph.files.keys()];
+        const texts = new Map(graph.files);
+        for (const doc of documents.all()) {
+            if (doc.uri.startsWith('file:')) {
+                const fp = decodeURIComponent(doc.uri.replace(/^file:\/\//, ''));
+                if (texts.has(fp)) texts.set(fp, doc.getText());
+            }
+        }
+        projectSymbolIndex = buildSymbolIndex(texts);
+    };
+
     connection.onInitialize((params: InitializeParams): InitializeResult => {
-        const init = params.initializationOptions as { mcnpLineLimit?: number } | undefined;
+        const init = params.initializationOptions as {
+            mcnpLineLimit?: number;
+            workspaceValidation?: Partial<WorkspaceValidationConfig>;
+            workspaceRoot?: string;
+        } | undefined;
         if (init && typeof init.mcnpLineLimit === 'number') {
             mcnpLineLimit = init.mcnpLineLimit;
         }
+        if (init?.workspaceValidation) {
+            workspaceConfig = { ...workspaceConfig, ...init.workspaceValidation };
+        }
+        if (init?.workspaceRoot) workspaceRoot = init.workspaceRoot;
+        refreshProjectContext();
         return {
             capabilities: {
                 textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -118,9 +174,28 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
     });
 
     connection.onDidChangeConfiguration((change) => {
-        const settings = change.settings as { owen?: { mcnp?: { lineLengthLimit?: number } } } | undefined;
-        const limit = settings?.owen?.mcnp?.lineLengthLimit;
+        const settings = change.settings as {
+            owen?: {
+                mcnp?: {
+                    lineLengthLimit?: number;
+                    projectRoot?: string;
+                    workspaceValidation?: { enabled?: boolean; warnUnused?: boolean };
+                };
+            };
+        } | undefined;
+        const mcnp = settings?.owen?.mcnp;
+        const limit = mcnp?.lineLengthLimit;
         if (typeof limit === 'number' && limit > 0) mcnpLineLimit = limit;
+        if (mcnp) {
+            if (typeof mcnp.projectRoot === 'string') workspaceConfig.projectRoot = mcnp.projectRoot;
+            if (typeof mcnp.workspaceValidation?.enabled === 'boolean') {
+                workspaceConfig.enabled = mcnp.workspaceValidation.enabled;
+            }
+            if (typeof mcnp.workspaceValidation?.warnUnused === 'boolean') {
+                workspaceConfig.warnUnused = mcnp.workspaceValidation.warnUnused;
+            }
+            refreshProjectContext();
+        }
         for (const doc of documents.all()) scheduleValidation(doc);
     });
 
@@ -130,9 +205,54 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
         const text = doc.getText();
         const plain = runLanguageRules(lang, text, { mcnpLineLimit });
         if (lang === 'mcnp') {
-            plain.push(...mcnpCrossReferenceDiagnostics(text, indexFor(doc)));
+            if (projectRootDeck) {
+                const fp = decodeURIComponent(doc.uri.replace(/^file:\/\//, ''));
+                if (isInProject(fp, projectFilePaths)) {
+                    const ws = workspaceDiagnosticsForOpenDocs(
+                        projectRootDeck,
+                        documents.all(),
+                        workspaceConfig.warnUnused,
+                    );
+                    const fileDiags = ws.get(path.normalize(fp)) ?? [];
+                    plain.push(...fileDiags);
+                } else {
+                    plain.push(...mcnpCrossReferenceDiagnostics(text, indexFor(doc)));
+                }
+            } else {
+                plain.push(...mcnpCrossReferenceDiagnostics(text, indexFor(doc)));
+            }
         }
         return plain.map(toLspDiagnostic);
+    }
+
+    function publishProjectDiagnostics(): void {
+        if (!projectRootDeck) return;
+        const ws = workspaceDiagnosticsForOpenDocs(
+            projectRootDeck,
+            documents.all(),
+            workspaceConfig.warnUnused,
+        );
+        const published = new Set<string>();
+        for (const doc of documents.all()) {
+            if (doc.languageId !== 'mcnp' || !doc.uri.startsWith('file:')) continue;
+            const fp = path.normalize(decodeURIComponent(doc.uri.replace(/^file:\/\//, '')));
+            if (!isInProject(fp, projectFilePaths)) continue;
+            const plain = runLanguageRules('mcnp', doc.getText(), { mcnpLineLimit });
+            plain.push(...(ws.get(fp) ?? []));
+            void connection.sendDiagnostics({
+                uri: doc.uri,
+                version: doc.version,
+                diagnostics: plain.map(toLspDiagnostic),
+            });
+            published.add(doc.uri);
+        }
+        for (const [file, diags] of ws) {
+            const uri = pathToUri(file);
+            if (published.has(uri)) continue;
+            const open = documents.get(uri);
+            if (open) continue;
+            void connection.sendDiagnostics({ uri, diagnostics: diags.map(toLspDiagnostic) });
+        }
     }
 
     function scheduleValidation(doc: TextDocument): void {
@@ -142,7 +262,11 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
             doc.uri,
             setTimeout(() => {
                 pendingValidation.delete(doc.uri);
-                // The document may have been closed while the timer was pending.
+                if (projectRootDeck && doc.languageId === 'mcnp') {
+                    refreshProjectContext();
+                    publishProjectDiagnostics();
+                    return;
+                }
                 const current = documents.get(doc.uri);
                 if (!current) return;
                 void connection.sendDiagnostics({
@@ -187,6 +311,18 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
         const index = indexFor(doc);
         const occ = resolveAt(index, params.position.line, params.position.character);
         if (!occ) return null;
+        if (projectSymbolIndex) {
+            const pdef = getProjectDefinition(projectSymbolIndex, occ.kind, occ.id);
+            if (pdef) {
+                return {
+                    uri: pathToUri(pdef.file),
+                    range: {
+                        start: { line: pdef.line, character: pdef.startCol },
+                        end: { line: pdef.line, character: pdef.endCol },
+                    },
+                };
+            }
+        }
         const def = getDefinition(index, occ.kind, occ.id);
         if (!def) return null;
         return {
@@ -204,6 +340,20 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
         const index = indexFor(doc);
         const occ = resolveAt(index, params.position.line, params.position.character);
         if (!occ) return [];
+        if (projectSymbolIndex) {
+            return getProjectReferences(
+                projectSymbolIndex,
+                occ.kind,
+                occ.id,
+                params.context.includeDeclaration,
+            ).map((r) => ({
+                uri: pathToUri(r.file),
+                range: {
+                    start: { line: r.line, character: r.startCol },
+                    end: { line: r.line, character: r.endCol },
+                },
+            }));
+        }
         return getReferences(index, occ.kind, occ.id, params.context.includeDeclaration).map((r) => ({
             uri: doc.uri,
             range: {

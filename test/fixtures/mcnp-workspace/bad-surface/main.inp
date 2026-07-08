@@ -1,0 +1,7 @@
+c references surface 99 defined only in include — not in geom
+read geom.i
+
+1 1 -10.4 -1 -99 imp:n=1
+2 0      1 -2 imp:n=0
+
+kcode 1000 1.0 20 50

@@ -1,0 +1,3 @@
+read b.i
+
+1 0 0 imp:n=0

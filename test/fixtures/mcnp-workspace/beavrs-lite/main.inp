@@ -1,0 +1,8 @@
+c BEAVRS-lite multi-file
+read core_geom.i
+read core_mats.i
+
+1000 0  -101 -102 -103 -104 -105 -106 imp:n=0 fill=1
+1001 0  -201 -202 -203 -204 -205 -206 imp:n=0 u=1
+
+kcode 5000 1.0 20 120

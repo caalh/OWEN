@@ -605,7 +605,7 @@ export function emitMcnpFromTrace(model: TracedModel): ConversionResult {
 
     const wrapped = (cards: string[]) => cards.flatMap((c) => wrapCard(c));
     const out: string[] = [
-        'Converted from OpenMC by OWEN (BelvoirDynamics) - MCNP<->OpenMC converter (beta)',
+        'Converted from OpenMC by OWEN (BelvoirDynamics) - MCNP<->OpenMC converter',
         'c NOTE: Review all converted output before production use.',
         `c Unconvertible constructs are marked with "${TODO_MARK}".`,
         'c Cell Cards',

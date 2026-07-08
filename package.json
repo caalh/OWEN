@@ -1,8 +1,8 @@
 {
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
-  "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: syntax highlighting (4 palettes), MCNP cross-reference tracker, ALLEN σ(E) cross-section viewer, 3D geometry preview (full-core BEAVRS, measurement tools), lattice builder, prebuilt BEAVRS models, deep validation, and simulation automation.",
-  "version": "0.3.9",
+  "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: a Monte Carlo language server with real-time physics-aware diagnostics, full-core 3D geometry preview, native OpenMC rendering and geometry verification, a cross-code deck converter (MCNP↔OpenMC stable), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
+  "version": "1.0.1",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -38,7 +38,14 @@
     "monte-carlo",
     "reactor",
     "neutronics",
-    "lattice"
+    "lattice",
+    "language-server",
+    "3d",
+    "pnnl",
+    "cross-sections",
+    "k-eff",
+    "criticality",
+    "beavrs"
   ],
   "activationEvents": [
     "onLanguage:mcnp",
@@ -64,6 +71,7 @@
     "onCommand:owen.chooseHighlightPalette",
     "onCommand:owen.toggleInvisibleCharacters",
     "onCommand:owen.showMcnpReferences",
+    "onCommand:owen.setMcnpProjectRoot",
     "onView:owenMcnpReferences",
     "onStartupFinished"
   ],
@@ -219,7 +227,7 @@
       },
       {
         "command": "owen.convertDeck",
-        "title": "OWEN: Convert Deck… (MCNP↔OpenMC beta)",
+        "title": "OWEN: Convert Deck… (MCNP↔OpenMC)",
         "category": "OWEN",
         "icon": "$(arrow-swap)"
       },
@@ -238,6 +246,19 @@
         "title": "OWEN: Show MCNP References (Cross-Reference Tracker)",
         "category": "OWEN",
         "icon": "$(references)"
+      },
+      {
+        "command": "owen.setMcnpProjectRoot",
+        "title": "OWEN: Set MCNP Project Root",
+        "category": "OWEN"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "owen.openInputBuilder",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus && editorLangId =~ /^(mcnp|serpent|scone|python)$/"
       }
     ],
     "viewsContainers": {
@@ -492,6 +513,21 @@
           "default": 80,
           "minimum": 1,
           "description": "MCNP card-image column limit. Lines longer than this are flagged (Problems + an in-editor decoration) because characters past the limit are silently ignored by MCNP. The classic limit is 80 columns (MCNP5 / MCNP6.1 and earlier); set to 128 for MCNP6.2+. Also drives the language-scoped ruler shown in MCNP files."
+        },
+        "owen.mcnp.projectRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the MCNP project root (.inp file or directory containing the main deck). When set, OWEN validates cells/surfaces/materials/universes across read/copy includes."
+        },
+        "owen.mcnp.workspaceValidation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run cross-file MCNP workspace validation when owen.mcnp.projectRoot is set."
+        },
+        "owen.mcnp.workspaceValidation.warnUnused": {
+          "type": "boolean",
+          "default": false,
+          "description": "Emit unused-definition hints (mcnp.unused-*) project-wide during workspace validation."
         },
         "owen.serpent.executable": {
           "type": "string",
