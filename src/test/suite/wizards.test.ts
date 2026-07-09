@@ -10,6 +10,7 @@ import {
     surfaceWizardCard,
 } from '../../inputBuilder/wizards';
 import { validateSnippet } from '../../inputBuilder/snippetValidator';
+import { genMCNP, defaultPinTypes, defaultStructuralIds } from '../../panels/latticeCodegen';
 
 suite('Input Builder wizards', () => {
     test('materialWizardCard MCNP weight fractions are negative', () => {
@@ -111,6 +112,26 @@ suite('Input Builder wizards', () => {
         assert.match(card, /lat=1/);
         assert.match(card, /fill=-1:1 -1:1 0:0/);
         assert.match(card, /1 1 1/);
+    });
+
+    test('integrated lattice codegen produces MCNP fill from painted grid', () => {
+        const grid = [
+            [1, 1, 1],
+            [1, 2, 1],
+            [1, 1, 1],
+        ];
+        const spec = {
+            gridSize: 3,
+            pitch: 1.26,
+            grid,
+            pins: defaultPinTypes(),
+            structural: defaultStructuralIds(),
+        };
+        const out = genMCNP(spec);
+        assert.match(out, /lat=1/);
+        assert.ok(out.includes('1 2 1'), 'center guide tube should appear in fill row');
+        const issues = validateSnippet('mcnp', out);
+        assert.strictEqual(issues.filter((i) => i.severity === 'error').length, 0);
     });
 
     test('sourceWizardCard MCNP kcode and ksrc', () => {

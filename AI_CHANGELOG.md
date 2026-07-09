@@ -12,6 +12,23 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-08 — v1.0.2 — Input Builder integrated lattice editor
+
+**AI Agent:** Composer (Cursor IDE)
+
+Patch release (1.0.1 → **1.0.2**). Integrated visual lattice editor inside Input Builder; semver
+patch because it is additive and non-breaking.
+
+- **Input Builder — integrated Lattice tab:** full grid editor (paint pin types, W 17×17 / BWR
+  presets, editable identifiers) inside Snippet Wizards → Lattice; shared `latticeCodegen.ts`;
+  `owen.openLatticeBuilder` redirects to Input Builder on Lattice tab.
+- **Version:** 1.0.1 → **1.0.2** (`package.json`, `package-lock.json`).
+- **Docs:** `CHANGELOG.md`, `AI_CHANGELOG.md`, root `AI_CHANGELOG.md`, `.cursor/rules/belvoirdynamics.mdc`.
+- **VSIX:** `owen-neutronics-1.0.2.vsix`; GitHub Release **v1.0.2** on `caalh/owen`.
+- Marketplace / Open VSX publish deferred to maintainer.
+
+---
+
 ## 2026-07-08 — v1.0.1 — Input Builder wizards + MCNP workspace validation
 
 **AI Agent:** Auto (Cursor IDE)

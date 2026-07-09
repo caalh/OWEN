@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-07-08
+
+Patch release after **1.0.1** — integrated visual lattice editor inside Input Builder. No breaking
+changes.
+
+### Changed
+
+- **Input Builder — integrated Lattice tab:** full visual grid editor (paint pin types, W 17×17 / BWR
+  presets, editable identifiers) lives inside Input Builder → Snippet Wizards → Lattice. Preview,
+  validation, and insert use the same pipeline as other wizards. `owen.openLatticeBuilder` now opens
+  Input Builder focused on the Lattice tab (shortcut alias; separate webview removed from command path).
+- Full Deck lattice assembly uses the shared lattice map state from the integrated editor.
+
 ## [1.0.1] — 2026-07-08
 
 Patch release after **1.0.0** — Input Builder snippet wizards and MCNP cross-file workspace

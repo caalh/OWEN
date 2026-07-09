@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { validateMcnpProject, WorkspaceDiagnostic } from '../../packages/mcnp-workspace/src';
+import { validateMcnpProject, WorkspaceDiagnostic } from '../../../packages/mcnp-workspace/src';
 import { PlainDiagnostic } from '../language/types';
 
 export interface WorkspaceValidationConfig {

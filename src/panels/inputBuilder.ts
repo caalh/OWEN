@@ -25,6 +25,10 @@ import {
     type SurfaceWizardInput,
 } from '../inputBuilder/wizards';
 import {
+    genMCNP,
+    genOpenMC,
+    genSerpent,
+    genSCONE,
     defaultPinTypes,
     defaultStructuralIds,
     type LatticeSpec,
@@ -34,21 +38,27 @@ import { inputBuilderWebviewHtml } from './inputBuilderWebview';
 export class InputBuilderPanel {
     public static currentPanel: InputBuilderPanel | undefined;
     private static readonly viewType = 'owen.inputBuilder';
+    private static _pendingFocusTab: string | undefined;
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private _disposables: vscode.Disposable[] = [];
     private _targetEditor: vscode.TextEditor | undefined;
 
-    public static createOrShow(extensionUri: vscode.Uri) {
+    public static createOrShow(extensionUri: vscode.Uri, options?: { focusTab?: string }) {
         const activeEditor = vscode.window.activeTextEditor;
         const column = activeEditor ? activeEditor.viewColumn : undefined;
+
+        if (options?.focusTab) {
+            InputBuilderPanel._pendingFocusTab = options.focusTab;
+        }
 
         if (InputBuilderPanel.currentPanel) {
             if (activeEditor) {
                 InputBuilderPanel.currentPanel._targetEditor = activeEditor;
             }
             InputBuilderPanel.currentPanel._panel.reveal(column);
+            InputBuilderPanel.currentPanel._applyPendingFocus();
             return;
         }
 
@@ -61,6 +71,13 @@ export class InputBuilderPanel {
 
         InputBuilderPanel.currentPanel = new InputBuilderPanel(panel, extensionUri);
         InputBuilderPanel.currentPanel._targetEditor = activeEditor;
+        InputBuilderPanel.currentPanel._applyPendingFocus();
+    }
+
+    private _applyPendingFocus() {
+        const tab = InputBuilderPanel._pendingFocusTab;
+        if (!tab) return;
+        this._panel.webview.postMessage({ command: 'focusTab', tab });
     }
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
@@ -92,14 +109,28 @@ export class InputBuilderPanel {
                     validation: issues,
                     validationSummary: formatValidationSummary(issues),
                 });
+            } else if (msg.command === 'latticePreview') {
+                const spec = msg.spec as LatticeSpec;
+                const lang = String(msg.code ?? 'mcnp') as MonteCarloCode;
+                const code = this._latticeCode(lang, spec);
+                const issues = validateSnippet(lang, code);
+                this._panel.webview.postMessage({
+                    command: 'wizardPreviewResult',
+                    code,
+                    validation: issues,
+                    validationSummary: formatValidationSummary(issues),
+                });
             } else if (msg.command === 'insertCode') {
                 const code = msg.code || buildDeck(msg.state as InputBuilderState);
                 await this._insertCode(code);
             } else if (msg.command === 'newFile') {
                 const code = msg.code || buildDeck(msg.state as InputBuilderState);
                 await this._newFile(code, msg.codeLang);
-            } else if (msg.command === 'openLattice') {
-                vscode.commands.executeCommand('owen.openLatticeBuilder');
+            } else if (msg.command === 'ready' || msg.command === 'focusAck') {
+                if (msg.command === 'focusAck') {
+                    InputBuilderPanel._pendingFocusTab = undefined;
+                }
+                this._applyPendingFocus();
             } else if (msg.command === 'pnnlSearch') {
                 const results = searchPnnlMaterials(String(msg.query ?? ''), 50);
                 const total = loadPnnlDataset()?.materials.length ?? 0;
@@ -153,6 +184,16 @@ export class InputBuilderPanel {
         }
     }
 
+    private _latticeCode(code: MonteCarloCode, spec: LatticeSpec): string {
+        switch (code) {
+            case 'mcnp': return genMCNP(spec) + '\n';
+            case 'openmc': return genOpenMC(spec) + '\n';
+            case 'serpent': return genSerpent(spec) + '\n';
+            case 'scone': return genSCONE(spec) + '\n';
+            default: return genMCNP(spec) + '\n';
+        }
+    }
+
     private _buildWizardSnippet(wizard: string, state: Record<string, unknown>): string {
         switch (wizard) {
             case 'material':
@@ -178,6 +219,10 @@ export class InputBuilderPanel {
             'const DEFAULT_SETTINGS = ' + JSON.stringify(DEFAULT_SETTINGS) + ';',
             'const DEFAULT_PINS = ' + JSON.stringify(defaultPinTypes()) + ';',
             'const DEFAULT_STRUCT = ' + JSON.stringify(defaultStructuralIds()) + ';',
+            'const genMCNP = ' + genMCNP.toString() + ';',
+            'const genOpenMC = ' + genOpenMC.toString() + ';',
+            'const genSerpent = ' + genSerpent.toString() + ';',
+            'const genSCONE = ' + genSCONE.toString() + ';',
             'const INPUT_BUILDER_TEMPLATES = ' + JSON.stringify(INPUT_BUILDER_TEMPLATES) + ';',
             'const SAB_OPTIONS = ' + JSON.stringify(SAB_OPTIONS) + ';',
             'const SURFACE_TEMPLATES = ' + JSON.stringify(SURFACE_TEMPLATES) + ';',

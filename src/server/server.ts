@@ -56,8 +56,8 @@ import {
     getProjectDefinition,
     getProjectReferences,
     buildSymbolIndex,
-} from '../../packages/mcnp-workspace/src/symbolIndex';
-import { buildIncludeGraph } from '../../packages/mcnp-workspace/src/includeGraph';
+} from '../../../packages/mcnp-workspace/src/symbolIndex';
+import { buildIncludeGraph } from '../../../packages/mcnp-workspace/src/includeGraph';
 
 const VALIDATION_DEBOUNCE_MS = 300;
 

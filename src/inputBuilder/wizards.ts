@@ -113,7 +113,7 @@ export const INPUT_BUILDER_TEMPLATES: { id: string; label: string; category: str
     { id: 'rcc-pin-surf', label: 'RCC pin surface', category: 'Surfaces', wizard: 'surface', description: 'MCNP RCC macrobody for a fuel pin cylinder.' },
     { id: 'rpp-assembly', label: 'RPP assembly box', category: 'Surfaces', wizard: 'surface', description: 'Rectangular boundary for a lattice unit cell.' },
     { id: 'fuel-cell', label: 'Fuel cell (boolean)', category: 'Cells', wizard: 'cell', description: 'Intersection cell with material density and importance.' },
-    { id: 'square-lattice', label: 'Square lattice fill', category: 'Lattices', wizard: 'lattice', description: 'Uniform square lattice snippet (open Lattice Builder for custom maps).' },
+    { id: 'square-lattice', label: 'Square lattice fill', category: 'Lattices', wizard: 'lattice', description: 'Visual grid editor for custom pin maps (W 17×17, BWR presets).' },
     { id: 'kcode-source', label: 'kcode + ksrc source', category: 'Sources', wizard: 'source', description: 'Eigenvalue source block with point ksrc.' },
     { id: 'mcnp-settings', label: 'MCNP run settings', category: 'Settings', wizard: 'settings', description: 'mode n + kcode line for criticality.' },
 ];
@@ -339,10 +339,10 @@ export function latticeWizardCard(input: LatticeWizardInput): string {
             return [
                 `c --- Hex lattice (${n} rings) u=${uni} ---`,
                 `${cell} 0  lat=2 u=${uni} imp:n=1 fill=${input.fillValue}`,
-                `c Hex pitch = ${pitch.toFixed(4)} cm — customize fill in Lattice Builder`,
+                `c Hex pitch = ${pitch.toFixed(4)} cm — paint map in Input Builder Lattice tab`,
             ].join('\n');
         }
-        return `c hex lattice — open Lattice Builder for full hex map (pitch ${pitch} cm)`;
+        return `c hex lattice — paint map in Input Builder Lattice tab (pitch ${pitch} cm)`;
     }
 
     if (input.code === 'mcnp') {

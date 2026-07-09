@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { LatticeBuilderPanel } from './panels/latticeBuilder';
 import { InputBuilderPanel } from './panels/inputBuilder';
 import { validateInputFile } from './validation/validator';
 import { runSimulation } from './workflows/runner';
@@ -40,7 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('owen.openLatticeBuilder', () => {
-            LatticeBuilderPanel.createOrShow(context.extensionUri);
+            InputBuilderPanel.createOrShow(context.extensionUri, { focusTab: 'lattice' });
         }),
 
         vscode.commands.registerCommand('owen.openInputBuilder', () => {

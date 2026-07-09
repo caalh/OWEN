@@ -16,8 +16,8 @@
     // These paths give tsc the right .d.ts files; esbuild and Node itself
     // resolve the exports maps natively, so emit is unaffected.
     "paths": {
-      "@belvoirdynamics/mcnp-workspace": ["./packages/mcnp-workspace/src/index"],
-      "@belvoirdynamics/mcnp-workspace/*": ["./packages/mcnp-workspace/src/*"],
+      "@belvoirdynamics/mcnp-workspace": ["../packages/mcnp-workspace/src/index"],
+      "@belvoirdynamics/mcnp-workspace/*": ["../packages/mcnp-workspace/src/*"],
       "vscode-languageserver": ["node_modules/vscode-languageserver/lib/common/api"],
       "vscode-languageserver/node": ["node_modules/vscode-languageserver/lib/node/main"],
       "vscode-languageclient/node": ["node_modules/vscode-languageclient/lib/node/main"],

@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: a Monte Carlo language server with real-time physics-aware diagnostics, full-core 3D geometry preview, native OpenMC rendering and geometry verification, a cross-code deck converter (MCNP↔OpenMC stable), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -159,7 +159,7 @@
       },
       {
         "command": "owen.openLatticeBuilder",
-        "title": "OWEN: Open Lattice Builder",
+        "title": "OWEN: Open Input Builder (Lattice tab)",
         "category": "OWEN"
       },
       {

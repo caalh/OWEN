@@ -1,5 +1,7 @@
 /** Webview HTML/JS for the OWEN Input Builder panel (kept separate for maintainability). */
 
+import { latticeEditorScript, latticeExtraStyles, latticePanelHtml } from './latticeWebviewContent';
+
 export function inputBuilderWebviewHtml(injectedScript: string, materialCount: number): string {
     return `<!DOCTYPE html>
 <html lang="en">
@@ -29,6 +31,7 @@ pre#preview { background: var(--vscode-textCodeBlock-background); padding: 8px; 
 .wizard-only { display: none; }
 body.wizard-mode .deck-only { display: none; }
 body.wizard-mode .wizard-only { display: block; }
+${latticeExtraStyles()}
 </style>
 </head>
 <body>
@@ -64,7 +67,7 @@ body.wizard-mode .wizard-only { display: block; }
 <div class="panel" id="step2">
   <label>Geometry mode</label>
   <select id="geom-mode"><option value="pin-cell">Simple pin cell</option><option value="lattice">Lattice assembly</option></select>
-  <button class="btn secondary" id="open-lattice">Open Lattice Builder…</button>
+  <p class="hint" id="deck-lattice-hint" style="display:none">Lattice map is configured in Snippet Wizards → Lattice tab (shared state).</p>
 </div>
 <div class="panel" id="step3">
   <div class="grid2">
@@ -125,14 +128,7 @@ body.wizard-mode .wizard-only { display: block; }
     <label>Comment</label><input id="w-cell-cmt" value="fuel">
   </div>
   <div class="panel wiz-panel" id="wiz-lattice">
-    <div class="grid2">
-      <div><label>Grid</label><select id="w-lat-grid"><option value="square">Square</option><option value="hex">Hex</option></select></div>
-      <div><label>Pitch (cm)</label><input type="number" id="w-lat-pitch" step="0.0001" value="1.26"></div>
-      <div><label>nx</label><input type="number" id="w-lat-nx" value="17"></div>
-      <div><label>ny</label><input type="number" id="w-lat-ny" value="17"></div>
-      <div><label>Fill universe</label><input type="number" id="w-lat-fill" value="1"></div>
-    </div>
-    <button class="btn secondary" id="open-lattice2">Open Lattice Builder for custom maps…</button>
+    ${latticePanelHtml()}
   </div>
   <div class="panel wiz-panel" id="wiz-source">
     <div class="grid2">
@@ -184,6 +180,7 @@ function getCode() {
 }
 
 function defaultLatticeSpec() {
+  if (typeof buildLatticeSpec === 'function') return buildLatticeSpec();
   const n = 17, pitch = 1.26;
   const grid = Array.from({length:n}, () => Array(n).fill(1));
   [[2,5],[2,8],[8,8],[8,5]].forEach(([r,c]) => { grid[r][c] = 2; });
@@ -252,13 +249,7 @@ function buildWizardState(kind) {
     imp: parseInt(document.getElementById('w-cell-imp').value),
     comment: document.getElementById('w-cell-cmt').value,
   };
-  if (kind === 'lattice') return {
-    code, gridType: document.getElementById('w-lat-grid').value,
-    nx: parseInt(document.getElementById('w-lat-nx').value) || 17,
-    ny: parseInt(document.getElementById('w-lat-ny').value) || 17,
-    pitch: parseFloat(document.getElementById('w-lat-pitch').value) || 1.26,
-    fillValue: parseInt(document.getElementById('w-lat-fill').value) || 1,
-  };
+  if (kind === 'lattice') return buildLatticeSpec();
   if (kind === 'source') return {
     code, particles: parseInt(document.getElementById('w-src-n').value) || 10000,
     inactive: parseInt(document.getElementById('w-src-inact').value) || 50,
@@ -280,6 +271,9 @@ function buildWizardState(kind) {
 function refreshPreview() {
   if (mode === 'deck') {
     vscode.postMessage({ command: 'preview', state: buildDeckState() });
+  } else if (wizKind === 'lattice') {
+    const spec = buildLatticeSpec();
+    vscode.postMessage({ command: 'latticePreview', spec, code: getCode() });
   } else {
     vscode.postMessage({ command: 'wizardPreview', wizard: wizKind, state: buildWizardState(wizKind) });
   }
@@ -299,6 +293,12 @@ window.addEventListener('message', e => {
     showValidation(e.data.validationSummary, e.data.validation);
   } else if (e.data.command === 'pnnlResults') {
     renderPnnlResults(e.data.results, e.data.total);
+  } else if (e.data.command === 'focusTab') {
+    if (e.data.tab === 'lattice') {
+      document.querySelector('[data-mode="wizard"]')?.click();
+      document.querySelector('[data-wiz="lattice"]')?.click();
+    }
+    vscode.postMessage({ command: 'focusAck' });
   } else if (e.data.command === 'pnnlMaterial') {
     addPnnlMaterial(e.data.material);
   }
@@ -462,8 +462,8 @@ document.querySelectorAll('.wiz-tab').forEach(btn => {
   };
 });
 
-document.getElementById('open-lattice').onclick = () => vscode.postMessage({ command: 'openLattice' });
-document.getElementById('open-lattice2').onclick = () => vscode.postMessage({ command: 'openLattice' });
+document.getElementById('open-lattice')?.remove();
+document.getElementById('open-lattice2')?.remove();
 document.getElementById('btn-insert').onclick = () => {
   if (mode === 'deck') vscode.postMessage({ command: 'insertCode', state: buildDeckState(), code: previewCode });
   else vscode.postMessage({ command: 'insertCode', code: previewCode, codeLang: getCode() });
@@ -481,19 +481,29 @@ document.getElementById('pnnl-search').addEventListener('input', e => {
 
 ['code','title','particles','inactive','cycles','keff','geom-mode'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', refreshPreview);
+  document.getElementById(id)?.addEventListener('change', () => {
+    if (id === 'geom-mode') {
+      const hint = document.getElementById('deck-lattice-hint');
+      if (hint) hint.style.display = document.getElementById('geom-mode').value === 'lattice' ? 'block' : 'none';
+    }
+    refreshPreview();
+  });
 });
 document.querySelectorAll('#wizard-section input, #wizard-section select, #wizard-section textarea').forEach(el => {
   el.addEventListener('input', refreshPreview);
   el.addEventListener('change', refreshPreview);
 });
 
+${latticeEditorScript()}
 initSab();
 initSurfaceTpl();
+initLatticeEditor();
 renderLib();
 renderChosen();
 renderTemplates();
 vscode.postMessage({ command: 'pnnlSearch', query: '' });
 refreshPreview();
+vscode.postMessage({ command: 'ready' });
 </script>
 </body>
 </html>`;

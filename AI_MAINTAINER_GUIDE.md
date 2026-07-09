@@ -31,9 +31,9 @@ webview (`src/allen/`), bundled prebuilt models (`prebuilt-models/`), deep per-l
 validation, a simulation runner, a JSON-driven parameter sweep, NRDP material insertion, and
 an opt-in community-library browser.
 
-Current release: **v1.0.1** (built locally as VSIX; GitHub Release v1.0.1).
+Current release: **v1.0.2** (built locally as VSIX; GitHub Release v1.0.2).
 **v1.0.0 remains the published Marketplace / Open VSX version** until the maintainer
-publishes 1.0.1.
+publishes 1.0.2.
 
 ---
 
