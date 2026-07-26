@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-07-14
+
+Patch release — MCNP highlighting, material auto-numbering, ReactorMC in-editor search. No breaking changes.
+
+### Added
+
+- **Richer MCNP syntax highlighting:** line-context rules for cell/surface/macrobody lines, material vs `mt` cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry `#`; new palette roles `identifier` and `modifier` across all four highlight themes.
+- **Auto-number MCNP materials on insert:** NRDP, PNNL, and Input Builder material wizards assign the next free `mN` (and `mtN`) from the open deck.
+- **ReactorMC search panel:** `owen.openTutorial` opens an in-editor search webview over bundled (and optional live) ReactorMC index — tutorials, NRDP, reactors, and site tools open on reactormc.net.
+
+### Changed
+
+- Command title: **OWEN: Search ReactorMC (Tutorials & NRDP)** (was Open Tutorial).
+
+### Fixed
+
+- **`@belvoirdynamics/mcnp-workspace` paths** for standalone `caalh/owen` builds (`packages/mcnp-workspace` inside the repo, not a sibling monorepo path).
+
 ## [1.0.2] — 2026-07-08
 
 Patch release after **1.0.1** — integrated visual lattice editor inside Input Builder. No breaking

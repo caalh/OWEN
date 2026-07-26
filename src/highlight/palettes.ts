@@ -19,7 +19,9 @@ export type Role =
     | 'func'
     | 'number'
     | 'string'
-    | 'special';
+    | 'special'
+    | 'identifier'
+    | 'modifier';
 
 export interface TokenStyle {
     foreground: string;
@@ -70,16 +72,20 @@ const ROLE_COLORS: Record<PaletteId, Record<Role, TokenStyle>> = {
         number: { foreground: '#B5CEA8' },
         string: { foreground: '#CE9178' },
         special: { foreground: '#D7BA7D' },
+        identifier: { foreground: '#F44747' },
+        modifier: { foreground: '#CE9178' },
     },
     solarized: {
         comment: { foreground: '#657B83', fontStyle: 'italic' },
         keyword: { foreground: '#859900' },
-        type: { foreground: '#B58900' },
-        entity: { foreground: '#268BD2' },
+        type: { foreground: '#2AA198' },
+        entity: { foreground: '#B58900' },
         func: { foreground: '#6C71C4' },
-        number: { foreground: '#2AA198' },
+        number: { foreground: '#93A1A1' },
         string: { foreground: '#CB4B16' },
         special: { foreground: '#D33682' },
+        identifier: { foreground: '#DC322F' },
+        modifier: { foreground: '#CB4B16' },
     },
     highContrast: {
         comment: { foreground: '#7CA668', fontStyle: 'italic' },
@@ -90,6 +96,8 @@ const ROLE_COLORS: Record<PaletteId, Record<Role, TokenStyle>> = {
         number: { foreground: '#B5FF6B' },
         string: { foreground: '#FF9E64' },
         special: { foreground: '#FFE65C' },
+        identifier: { foreground: '#FF5555' },
+        modifier: { foreground: '#FF9E64' },
     },
     pastel: {
         comment: { foreground: '#A8B7AB', fontStyle: 'italic' },
@@ -100,6 +108,8 @@ const ROLE_COLORS: Record<PaletteId, Record<Role, TokenStyle>> = {
         number: { foreground: '#BFD9A8' },
         string: { foreground: '#E0B0A0' },
         special: { foreground: '#D8C49A' },
+        identifier: { foreground: '#E89898' },
+        modifier: { foreground: '#E0B0A0' },
     },
 };
 
@@ -109,11 +119,19 @@ const SCOPE_ROLES: Record<Language, Record<string, Role>> = {
     mcnp: {
         'comment.line.mcnp': 'comment',
         'keyword.control.mcnp': 'keyword',
-        'entity.name.material.mcnp': 'entity',
+        'keyword.other.particle.mcnp': 'modifier',
+        'keyword.operator.geometry.mcnp': 'modifier',
+        'entity.name.cell.mcnp': 'identifier',
+        'entity.name.surface-id.mcnp': 'identifier',
+        'entity.name.material-id.mcnp': 'type',
+        'entity.name.material.mcnp': 'func',
+        'entity.name.mt-card.mcnp': 'func',
         'support.function.tally.mcnp': 'func',
         'storage.type.surface.mcnp': 'type',
+        'storage.type.macrobody.mcnp': 'entity',
         'constant.numeric.mcnp': 'number',
         'constant.other.zaid.mcnp': 'special',
+        'constant.other.library.mcnp': 'special',
     },
     openmc: {
         'variable.language.openmc': 'keyword',

@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { validateMcnpProject } from '../../../../packages/mcnp-workspace/src/validate';
+import { validateMcnpProject } from '../../../packages/mcnp-workspace/src/validate';
 
 const FIXTURES = path.resolve(__dirname, '../../../../test/fixtures/mcnp-workspace');
 

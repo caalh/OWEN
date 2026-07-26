@@ -8,6 +8,10 @@ import {
     pnnlSconeEntry,
     type PnnlMaterial,
 } from '../inputBuilder/pnnlCards';
+import {
+    nextMcnpMaterialNumber,
+    remapMcnpMaterialCard,
+} from '../references/mcnpReferences';
 
 interface MaterialComposition {
     zaid: string;
@@ -155,6 +159,11 @@ export function registerInsertMaterial(context: vscode.ExtensionContext): vscode
         });
         if (!pick) return;
 
+        const mcnpLang = lang === 'mcnp' || lang === null;
+        const nextMatNum = mcnpLang
+            ? nextMcnpMaterialNumber(editor.document.getText())
+            : 1;
+
         let snippet: string;
         if (pick.pnnlId) {
             const mat = pnnl?.materials.find((m) => m.id === pick.pnnlId) as PnnlMaterial;
@@ -162,12 +171,15 @@ export function registerInsertMaterial(context: vscode.ExtensionContext): vscode
                 case 'openmc': snippet = pnnlOpenmcSnippet(mat); break;
                 case 'serpent': snippet = pnnlSerpentCard(mat); break;
                 case 'scone': snippet = pnnlSconeEntry(mat); break;
-                default: snippet = pnnlMcnpCard(mat, 1); break;
+                default: snippet = pnnlMcnpCard(mat, nextMatNum); break;
             }
         } else {
             const material = materials.find((m) => m.name === pick.label);
             if (!material) return;
             snippet = codeForLanguage(material, lang);
+            if (mcnpLang && snippet.trim()) {
+                snippet = remapMcnpMaterialCard(snippet, nextMatNum);
+            }
         }
         const padded = snippet.endsWith('\n') ? snippet : snippet + '\n';
         const insertText = (editor.selection.active.character > 0 ? '\n' : '') + padded;
@@ -175,5 +187,9 @@ export function registerInsertMaterial(context: vscode.ExtensionContext): vscode
         await editor.edit((eb) => {
             eb.insert(editor.selection.active, insertText);
         });
+
+        if (mcnpLang) {
+            void vscode.window.setStatusBarMessage(`OWEN: inserted material as m${nextMatNum}`, 3000);
+        }
     });
 }

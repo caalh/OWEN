@@ -6,6 +6,8 @@ import {
     getDefinition,
     getReferences,
     getHighlightOccurrences,
+    nextMcnpMaterialNumber,
+    remapMcnpMaterialCard,
 } from '../../references/mcnpReferences';
 
 // A compact 3×3 PWR-style lattice: fuel (u=1) + guide tube (u=2), placed by a
@@ -276,5 +278,29 @@ suite('OWEN MCNP reference tracker — transforms', () => {
         // Cell 1 geometry references only surface 1, not surface 5 (the trcl arg).
         const surf5 = getReferences(index, 'surface', 5, true);
         assert.strictEqual(surf5.length, 0, 'surface 5 should have no occurrences');
+    });
+
+    test('nextMcnpMaterialNumber returns max defined m-id plus one', () => {
+        const deck = [
+            '1 1 -10.4 -1',
+            'm1 92235.80c 0.04',
+            'm2 40090.80c 1.0',
+            'm4 1001.80c 2.0',
+        ].join('\n');
+        assert.strictEqual(nextMcnpMaterialNumber(deck), 5);
+        assert.strictEqual(nextMcnpMaterialNumber('c empty deck\nmode n'), 1);
+    });
+
+    test('remapMcnpMaterialCard renumbers m and mt lines', () => {
+        const catalog = [
+            'c Light Water',
+            'm16    1001.80c  0.666667',
+            '       8016.80c  0.333333',
+            'mt16  lwtr.20t',
+        ].join('\n');
+        const out = remapMcnpMaterialCard(catalog, 5);
+        assert.match(out, /^m5\s/m);
+        assert.match(out, /^mt5\s/m);
+        assert.doesNotMatch(out, /\bm16\b/);
     });
 });

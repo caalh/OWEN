@@ -29,14 +29,16 @@ function tk(text: string, scope?: string): SampleToken {
 // identical text exactly as the editor would. Kept short (~6–12 lines).
 const SAMPLES: Record<Language, SampleLine[]> = {
     mcnp: [
-        [tk('c PWR fuel pin: cells, surfaces, material (MCNP)', 'comment.line.mcnp')],
-        [tk('1 1 '), tk('-10.42', 'constant.numeric.mcnp'), tk(' '), tk('-10', 'constant.numeric.mcnp'), tk('    '), tk('imp', 'keyword.control.mcnp'), tk(':n='), tk('1', 'constant.numeric.mcnp')],
-        [tk('2 0         '), tk('10', 'constant.numeric.mcnp'), tk(' '), tk('-20', 'constant.numeric.mcnp'), tk('  '), tk('imp', 'keyword.control.mcnp'), tk(':n='), tk('1', 'constant.numeric.mcnp')],
-        [tk('10 '), tk('rcc', 'storage.type.surface.mcnp'), tk(' '), tk('0 0 0  0 0 365  0.4096', 'constant.numeric.mcnp')],
-        [tk('20 '), tk('rpp', 'storage.type.surface.mcnp'), tk(' '), tk('-0.63 0.63 -0.63 0.63 0 365', 'constant.numeric.mcnp')],
-        [tk('m1', 'entity.name.material.mcnp'), tk(' '), tk('92235.80c', 'constant.other.zaid.mcnp'), tk(' '), tk('-0.0485', 'constant.numeric.mcnp'), tk('  '), tk('92238.80c', 'constant.other.zaid.mcnp'), tk(' '), tk('-0.9515', 'constant.numeric.mcnp')],
-        [tk('mode', 'keyword.control.mcnp'), tk(' n')],
-        [tk('f4:n', 'support.function.tally.mcnp'), tk(' '), tk('1', 'constant.numeric.mcnp')],
+        [tk('c Cell cards', 'comment.line.mcnp')],
+        [tk('100', 'entity.name.cell.mcnp'), tk(' 2 '), tk('-7.86', 'constant.numeric.mcnp'), tk(' -8 9 '), tk('imp', 'keyword.control.mcnp'), tk(':n', 'keyword.other.particle.mcnp'), tk('='), tk('1', 'constant.numeric.mcnp')],
+        [tk('c Surface cards', 'comment.line.mcnp')],
+        [tk('21 ', 'entity.name.surface-id.mcnp'), tk('rpp', 'storage.type.surface.mcnp'), tk(' -25 25 -60 60 0 300', 'constant.numeric.mcnp')],
+        [tk('23 ', 'entity.name.surface-id.mcnp'), tk('c/z', 'storage.type.surface.mcnp'), tk(' 0 0 0.4096', 'constant.numeric.mcnp')],
+        [tk('c Material cards', 'comment.line.mcnp')],
+        [tk('m100', 'entity.name.material.mcnp'), tk(' '), tk('08016.31c', 'constant.other.zaid.mcnp'), tk(' -2.75'), tk(' 26000.31c', 'constant.other.zaid.mcnp'), tk(' -0.00225')],
+        [tk('mt100', 'entity.name.mt-card.mcnp'), tk(' '), tk('lwtr.20t', 'constant.other.library.mcnp')],
+        [tk('mode', 'keyword.control.mcnp'), tk(' n p')],
+        [tk('f4', 'support.function.tally.mcnp'), tk(':n', 'keyword.other.particle.mcnp'), tk(' 1')],
     ],
     openmc: [
         [tk('import '), tk('openmc', 'variable.language.openmc')],

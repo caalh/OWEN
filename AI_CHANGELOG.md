@@ -12,6 +12,33 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-14 — v1.0.3 — Marketplace publish prep
+
+- **Model:** composer-2.5-fast
+- **Fix:** `packages/mcnp-workspace` import paths for standalone `caalh/owen` (was pointing at monorepo sibling `../packages`).
+- **Fix:** `src/tutorials/panel.ts` `_extensionUri` typo blocked search panel init.
+- **Bundle:** `data/search-index.json` (350 entries from ReactorMC) + refreshed `tutorial-links.json`.
+- **VSIX:** `owen-neutronics-1.0.3.vsix` — `npm run typecheck`, production esbuild, `vsce package`.
+- **Publish:** `npx @vscode/vsce publish` (Marketplace) after `vsce login`; Open VSX: `npx ovsx publish owen-neutronics-1.0.3.vsix -p <token>`.
+- **`README.md`:** v1.0.3 feature list, commands, settings; synced to BelvoirDynamics/owen.
+- Requested by: User — prepare OWEN for VS Marketplace publish.
+
+## 2026-07-14 — Richer MCNP TextMate highlighting
+
+- **Model:** composer-2.5-fast
+- **`syntaxes/mcnp.tmLanguage.json`:** line-context rules for cell/surface/macrobody lines, material (`m`) vs `mt` cards, tally/data cards, particle suffixes (`:n`), thermal libraries (`lwtr.20t`), expanded data-card keywords, geometry `#` complement.
+- **`src/highlight/palettes.ts`:** new roles `identifier` (cell/surface IDs, red) and `modifier` (`:n`, `#`); M cards/tallies purple, material numbers cyan, surfaces teal, macrobodies tan, ZAIDs/libraries gold.
+- **`src/highlight/previewPanel.ts`:** updated MCNP palette preview sample.
+- Requested by: User — MCNP highlighting too flat vs reference editors.
+
+## 2026-07-14 — Auto-number MCNP materials on insert
+
+- **`packages/mcnp-workspace/src/mcnpReferences.ts`:** `nextMcnpMaterialNumber()`, `remapMcnpMaterialCard()`, `isSingleMcnpMaterialBlock()` — scan open deck for highest `mN` definition, assign next id.
+- **`src/commands/insertMaterial.ts`:** NRDP + PNNL inserts renumber to next free `mN` (and `mtN`); status bar confirms assigned number.
+- **`src/panels/inputBuilder.ts`:** material wizard preview/insert uses same logic for single-card inserts.
+- **`src/test/suite/mcnpReferences.test.ts`:** regression tests for numbering + remap.
+- Requested by: User — avoid duplicate material numbers when inserting from database.
+
 ## 2026-07-08 — v1.0.2 — Input Builder integrated lattice editor
 
 **AI Agent:** Composer (Cursor IDE)

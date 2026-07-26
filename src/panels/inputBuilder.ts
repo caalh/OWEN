@@ -25,6 +25,11 @@ import {
     type SurfaceWizardInput,
 } from '../inputBuilder/wizards';
 import {
+    isSingleMcnpMaterialBlock,
+    nextMcnpMaterialNumber,
+    remapMcnpMaterialCard,
+} from '../references/mcnpReferences';
+import {
     genMCNP,
     genOpenMC,
     genSerpent,
@@ -100,7 +105,8 @@ export class InputBuilderPanel {
                     validationSummary: formatValidationSummary(issues),
                 });
             } else if (msg.command === 'wizardPreview') {
-                const code = this._buildWizardSnippet(msg.wizard, msg.state);
+                let code = this._buildWizardSnippet(msg.wizard, msg.state);
+                code = this._autoNumberMcnpMaterial(code);
                 const lang = String(msg.state?.code ?? 'mcnp') as MonteCarloCode;
                 const issues = validateSnippet(lang, code);
                 this._panel.webview.postMessage({
@@ -121,7 +127,8 @@ export class InputBuilderPanel {
                     validationSummary: formatValidationSummary(issues),
                 });
             } else if (msg.command === 'insertCode') {
-                const code = msg.code || buildDeck(msg.state as InputBuilderState);
+                let code = msg.code || buildDeck(msg.state as InputBuilderState);
+                code = this._autoNumberMcnpMaterial(code);
                 await this._insertCode(code);
             } else if (msg.command === 'newFile') {
                 const code = msg.code || buildDeck(msg.state as InputBuilderState);
@@ -144,6 +151,18 @@ export class InputBuilderPanel {
         }, null, this._disposables);
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+    }
+
+    private _editorTextForMaterialNumbering(): string {
+        const editor = vscode.window.activeTextEditor ?? this._targetEditor;
+        return editor?.document.getText() ?? '';
+    }
+
+    /** Renumber a lone MCNP material card to the next free m-id in the target deck. */
+    private _autoNumberMcnpMaterial(code: string): string {
+        if (!isSingleMcnpMaterialBlock(code)) return code;
+        const nextNum = nextMcnpMaterialNumber(this._editorTextForMaterialNumbering());
+        return remapMcnpMaterialCard(code, nextNum);
     }
 
     private async _insertCode(code: string) {

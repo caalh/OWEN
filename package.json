@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: a Monte Carlo language server with real-time physics-aware diagnostics, full-core 3D geometry preview, native OpenMC rendering and geometry verification, a cross-code deck converter (MCNP↔OpenMC stable), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -211,7 +211,7 @@
       },
       {
         "command": "owen.openTutorial",
-        "title": "OWEN: Open Tutorial",
+        "title": "OWEN: Search ReactorMC (Tutorials & NRDP)",
         "category": "OWEN"
       },
       {
@@ -679,7 +679,7 @@
     "package": "vsce package",
     "publish": "vsce publish",
     "export-nrdp": "node ./scripts/export-nrdp-snapshot.mjs",
-    "export-tutorials": "node ./scripts/export-tutorial-links.mjs"
+    "export-tutorials": "node ./scripts/export-tutorial-links.mjs && node ./scripts/export-search-index.mjs"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",

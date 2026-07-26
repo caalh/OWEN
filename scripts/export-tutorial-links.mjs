@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const guideRoot = path.resolve(repoRoot, '..', '..', 'reactor-monte-carlo-guide');
+const guideRoot = path.resolve(repoRoot, '..', 'reactor-monte-carlo-guide');
 const dataDir = path.resolve(repoRoot, 'data');
 
 const SECTIONS = ['mcnp', 'openmc', 'serpent', 'scone', 'fundamentals'];

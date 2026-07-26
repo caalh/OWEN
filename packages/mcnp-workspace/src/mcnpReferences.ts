@@ -708,3 +708,48 @@ export function describeLattice(index: McnpReferenceIndex, lat: LatticeInfo): st
     }
     return lines;
 }
+
+/** Highest material id defined in `text` (0 if none). */
+export function maxMcnpMaterialNumber(text: string): number {
+    const index = buildMcnpReferenceIndex(text);
+    let max = 0;
+    for (const def of index.definitions.values()) {
+        if (def.kind === 'material' && def.id > max) max = def.id;
+    }
+    return max;
+}
+
+/** Next unused MCNP material number (max defined + 1, or 1 on an empty deck). */
+export function nextMcnpMaterialNumber(text: string): number {
+    return maxMcnpMaterialNumber(text) + 1;
+}
+
+/**
+ * Renumber a single-material MCNP card block (`mN`, `mtN`, `mxN`) from its
+ * catalog id to `newNum`. Continuation lines (ZAID rows) are unchanged.
+ */
+export function remapMcnpMaterialCard(code: string, newNum: number): string {
+    const header = code.match(/^\s*m(\d+)\b/m);
+    if (!header) return code;
+    const oldNum = header[1];
+    if (oldNum === String(newNum)) return code;
+
+    return code
+        .split('\n')
+        .map((line) => {
+            const m = line.match(/^(\s*)m(\d+)(\s.*)$/i);
+            if (m && m[2] === oldNum) return `${m[1]}m${newNum}${m[3]}`;
+            const mt = line.match(/^(\s*)mt(\d+)(\s.*)$/i);
+            if (mt && mt[2] === oldNum) return `${mt[1]}mt${newNum}${mt[3]}`;
+            const mx = line.match(/^(\s*)mx(\d+)(\s.*)$/i);
+            if (mx && mx[2] === oldNum) return `${mx[1]}mx${newNum}${mx[3]}`;
+            return line;
+        })
+        .join('\n');
+}
+
+/** True when `code` looks like a single material definition block (not a full deck). */
+export function isSingleMcnpMaterialBlock(code: string): boolean {
+    const defs = code.match(/^\s*m(\d+)\s+/gm) ?? [];
+    return defs.length === 1;
+}

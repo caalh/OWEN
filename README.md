@@ -12,6 +12,7 @@
 </p>
 
 <p align="center">A <a href="https://reactormc.net">BelvoirDynamics</a> product · part of <a href="https://reactormc.net">ReactorMC</a></p>
+<p align="center">Current release: <strong>v1.0.3</strong> · <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics">VS Marketplace</a> · <a href="https://open-vsx.org/extension/belvoirdynamics/owen-neutronics">Open VSX</a> · <a href="https://github.com/caalh/owen/releases">GitHub Releases</a></p>
 
 ---
 
@@ -48,19 +49,20 @@ switch to concentric pin layers, and slice through the core.
 
 | Feature | Description |
 |---------|-------------|
-| **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), and SCONE (`.scone`), plus an OpenMC injection grammar for Python. Four switchable palettes per language (Classic / Solarized / High Contrast / Pastel) via `OWEN: Choose Highlight Palette`. |
+| **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), and SCONE (`.scone`), plus an OpenMC injection grammar for Python. Line-context MCNP rules color cell/surface/material cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry operators. Four switchable palettes per language (Classic / Solarized / High Contrast / Pastel) via `OWEN: Choose Highlight Palette`. |
 | **Snippets** | Ready-to-edit decks: PWR pin cell, 17×17 PWR assembly, criticality array, and shielding slab for MCNP; full OpenMC pin/assembly Python scripts; SCONE fuel pin, 5×5 assembly, and shielding tutorials. |
 | **MC Language Server** | A real language server for MCNP, Serpent, and SCONE: **real-time diagnostics as you type** — density-sign and fraction-sign conventions, S(α,β) thermal scattering on non-hydrogenous materials, ZAID format, macrobody parameter counts, MCNP line length, and **cross-reference errors** (a cell referencing an undefined surface/material/universe/transform is flagged; defined-but-unused entities are faded hints) — plus hover, go-to-definition, find-references, and a grouped document outline (Cells / Surfaces / Materials / Universes / Transforms / Tallies). Ships as a self-contained `out/server.js`, reusable by other editors over stdio. OpenMC Python files keep Pylance plus `OWEN: Validate Input File`. |
 | **MCNP cross-reference tracker** | Role- and position-aware hover, Go-to-Definition, Find-All-References, occurrence highlight, and a **MCNP References** tree for MCNP decks. A number is resolved by *what it is and where it sits on the card* — cell id (1st field), material number (2nd field; `0` = void), geometry surface refs (signed entries), surface id (1st field of a surface card), `u=` universe, `fill`/`lat` (lattice fill arrays are decoded so universe references inside them resolve), `trcl`/`tr` transforms, and `mt`/`mx` material-data cards. Clicking surface `3` finds only the references to *surface 3* — never material 3, cell 3, or the digit `3` inside a `fill=` index. |
+| **MCNP workspace validation** | Cross-file diagnostics when `owen.mcnp.projectRoot` is set: undefined references and duplicate IDs across included MCNP decks (`OWEN: Set MCNP Project Root`). |
 | **Deep validation** | On-demand language-aware diagnostics with codes — ZAID format, density/fraction sign conventions, `mt`/S(α,β) hydrogen checks, macrobody parameter counts (MCNP); `IndependentSource`/`RectangularPrism` API checks (OpenMC); `cuboid` vs `rect`, `trcl`, CLI `omp` (Serpent); `aceNeutronDatabase`, temperature-suffix matching, `pinUniverse` radii/fills (SCONE). |
 
 ### Build
 
 | Feature | Description |
 |---------|-------------|
-| **Lattice Builder** | A visual grid editor that generates MCNP / OpenMC / Serpent / SCONE lattice code from a few clicks. |
-| **Input Builder** | Five-step wizard: pick code, add materials from an 18-entry curated library or the searchable **PNNL-15870 Rev. 2 compendium (411 materials)**, pin-cell or lattice geometry, run settings, preview — then insert or open as a new file. |
-| **Materials (NRDP + PNNL)** | `OWEN: Insert Material from Database` inserts reactor materials rendered for the detected deck language — the curated Nuclear Reactor Data Project set (bundled snapshot, optional live refresh from reactormc.net) plus the full PNNL-15870 Rev. 2 compendium with correct per-code conventions (isotopic ZAIDs with weight fractions for MCNP/Serpent, `add_element`/`add_nuclide` for OpenMC, atom densities for SCONE; S(α,β) only on hydrogenous moderators). |
+| **Input Builder** | Snippet wizards for Material, Surface, Cell, Lattice (integrated visual grid editor with W 17×17 / BWR presets and editable identifiers), Source, and Settings — plus a searchable template library. Pick code, add materials from an 18-entry curated library or the searchable **PNNL-15870 Rev. 2 compendium (411 materials)**, pin-cell or lattice geometry, run settings, preview — then insert or open as a new file (`Ctrl+Shift+I`). |
+| **Lattice Builder** | Shortcut into Input Builder's Lattice tab — same visual grid editor that generates MCNP / OpenMC / Serpent / SCONE lattice code from a pin map. |
+| **Materials (NRDP + PNNL)** | `OWEN: Insert Material from Database` inserts reactor materials rendered for the detected deck language — the curated Nuclear Reactor Data Project set (bundled snapshot, optional live refresh from reactormc.net) plus the full PNNL-15870 Rev. 2 compendium with correct per-code conventions (isotopic ZAIDs with weight fractions for MCNP/Serpent, `add_element`/`add_nuclide` for OpenMC, atom densities for SCONE; S(α,β) only on hydrogenous moderators). **Auto-assigns the next free `mN` (and `mtN`)** from the open deck so inserts do not collide with existing material numbers. |
 | **Prebuilt models** | `OWEN: Open Prebuilt Model…` opens bundled, offline reactor decks in a new editor with the correct language. Ships the **complete BEAVRS Cycle-1 full core** (all 193 assemblies, full axial pin stacks, baffle/barrel/shields/RPV) for **all four codes** — MCNP, OpenMC, Serpent, and SCONE — plus 17×17 PWR assembly starters and a **Reflected UO2 Pin Cell** teaching model in all four codes (the OpenMC twin is run-verified: k-inf 1.2256 ± 0.0010). The SCONE full-core deck is the author-verified source of truth; the MCNP/OpenMC/Serpent decks are geometry/materials-faithful translations of it. |
 | **Cross-code converter** | `OWEN: Convert Deck…` (`owen.convertDeck`) converts **MCNP ↔ OpenMC** — a high-fidelity engine with a full boolean region AST, multi-level universes and rect/hex lattices, transforms, graveyard handling, and tally/source mapping, validated against the bundled BEAVRS full core in real OpenMC — plus **MCNP → Serpent / SCONE (experimental)**. Anything that can't be mapped emits a clearly marked `TODO(owen-convert)` comment instead of being silently dropped, and results open in a **Rosetta diff** view — source and converted deck side-by-side with aligned cells/surfaces/materials sections and TODO highlights. |
 
@@ -81,7 +83,7 @@ switch to concentric pin layers, and slice through the core.
 | **Results Viewer** | `OWEN: View Results` parses the outputs of **all four codes** (OpenMC `statepoint.h5` via h5wasm + stdout fallback, MCNP `mctal`, Serpent `_res.m`, SCONE `.out`) and shows k-eff convergence, flux spectrum (log-log), a tally table, and mesh heatmaps — mesh tallies can be overlaid on the 3D geometry preview as a colored slice plane. |
 | **Parametric sweep + dashboard** | JSON-described parameter sweeps with per-run input mutation, output capture, k-eff parsing, and a manifest + TSV summary — then `OWEN: View Sweep Results` plots k-eff vs the swept parameter with error bars, per-run convergence small-multiples, and a run table. |
 | **Community Library** | Browse and insert community-approved models (opt-in via `owen.community.enabled`; you supply your own Supabase backend). |
-| **Tutorials** | Deep-links into the reactormc.net learning material via `OWEN: Open Tutorial`. |
+| **Tutorials** | In-editor **ReactorMC search** (`OWEN: Search ReactorMC (Tutorials & NRDP)`) over bundled (and optional live) site index — tutorials, NRDP pages, reactors, and tools open on reactormc.net in one click. |
 
 ## Install
 
@@ -95,9 +97,9 @@ switch to concentric pin layers, and slice through the core.
 **From a VSIX** ([GitHub Releases](https://github.com/caalh/owen/releases/latest)):
 
 ```bash
-code --install-extension owen-neutronics-1.0.0.vsix
+code --install-extension owen-neutronics-1.0.3.vsix
 # Cursor:
-cursor --install-extension owen-neutronics-1.0.0.vsix
+cursor --install-extension owen-neutronics-1.0.3.vsix
 ```
 
 Or in the editor: Extensions view → `...` menu → **Install from VSIX…**.
@@ -109,8 +111,8 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | Command | Description |
 |---------|-------------|
 | `OWEN: Open ALLEN Cross-Sections` | σ(E) webview — nuclide/reaction picker, log-log plot, multi-overlay, Doppler Studio |
-| `OWEN: Open Input Builder` | Wizard: materials (curated + PNNL compendium) + geometry + settings → full starter deck |
-| `OWEN: Open Lattice Builder` | Visual lattice grid editor |
+| `OWEN: Open Input Builder` | Snippet wizards: materials (curated + PNNL), surfaces, cells, lattice, source, settings → starter deck |
+| `OWEN: Open Input Builder (Lattice tab)` | Visual lattice grid editor (alias for Lattice Builder) |
 | `OWEN: Validate Input File` | Deep MCNP / OpenMC / Serpent / SCONE checks on demand |
 | `OWEN: Run Simulation` | Launch the appropriate solver in a dedicated terminal |
 | `OWEN: Run Parameter Sweep` | Generate and run a JSON-described sweep |
@@ -121,9 +123,10 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | `OWEN: Verify Geometry with OpenMC` | Overlap + lost-particle checks through your local OpenMC |
 | `OWEN: Convert Deck… (MCNP↔OpenMC)` | MCNP ↔ OpenMC (stable), MCNP → Serpent / SCONE (experimental), with Rosetta diff view |
 | `OWEN: Open Prebuilt Model…` | Load a bundled BEAVRS full-core, assembly, or pin-cell deck |
-| `OWEN: Show MCNP References` | Open the MCNP cross-reference tracker dock |
-| `OWEN: Insert Material from Database` | NRDP + PNNL-15870 material picker, language-aware |
-| `OWEN: Open Tutorial` | Jump to a reactormc.net tutorial page |
+| `OWEN: Show MCNP References (Cross-Reference Tracker)` | Open the MCNP cross-reference tracker dock |
+| `OWEN: Set MCNP Project Root` | Root `.inp` for cross-file workspace validation |
+| `OWEN: Insert Material from Database` | NRDP + PNNL-15870 material picker, language-aware (auto-numbered `mN`) |
+| `OWEN: Search ReactorMC (Tutorials & NRDP)` | In-editor search over reactormc.net tutorials, NRDP, and site tools |
 | `OWEN: Choose Highlight Palette` | Switch between Classic / Solarized / High Contrast / Pastel |
 | `OWEN: Toggle Invisible Characters` | Reveal tabs/trailing whitespace that break fixed-format decks |
 | `OWEN: Search Reactor Library` | Community Library browser (disabled by default) |
@@ -142,6 +145,9 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.scone.executable` | `scone` | On Windows, SCONE typically requires WSL |
 | `owen.preview.maxInstances` | `1500000` | Max cylinder instances in the 3D preview; auto-simplifies detail (not pins) above this. Raise (e.g. 4000000) for full shell+axial detail on a full core |
 | `owen.simulation.workingDirectory` | `""` | Empty = the input file's directory |
+| `owen.mcnp.projectRoot` | `""` | MCNP root `.inp` for cross-file workspace validation |
+| `owen.mcnp.workspaceValidation.enabled` | `true` | Merge cross-file diagnostics into the language server |
+| `owen.mcnp.workspaceValidation.warnUnused` | `true` | Hint on defined-but-unused MCNP entities |
 | `owen.nrdp.live` | `true` | Live-fetch NRDP snapshots when online |
 | `owen.nrdp.endpoint` | `https://reactormc.net/data` | Base URL for live NRDP JSON |
 | `owen.allen.dataBaseUrl` | `https://reactormc.net/data/allen` | Base URL for ALLEN σ(E) JSON; override for offline use |

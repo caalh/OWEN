@@ -3,10 +3,18 @@
   "name": "MCNP",
   "patterns": [
     { "include": "#comment" },
-    { "include": "#material" },
-    { "include": "#tally" },
+    { "include": "#materialCard" },
+    { "include": "#mtCard" },
+    { "include": "#tallyCard" },
+    { "include": "#dataCard" },
+    { "include": "#cellMacrobodyLine" },
+    { "include": "#surfaceLine" },
+    { "include": "#cellLine" },
     { "include": "#keyword" },
+    { "include": "#particleSuffix" },
+    { "include": "#macrobody" },
     { "include": "#surface" },
+    { "include": "#thermalLib" },
     { "include": "#zaid" },
     { "include": "#number" }
   ],
@@ -16,20 +24,124 @@
       "name": "comment.line.mcnp"
     },
     "keyword": {
-      "match": "\\b(mode|kcode|ksrc|sdef|nps|prdmp|print|phys|imp|fill|lat|u|trcl|like|but|vol|area|tr|ctme|rand|cut|tmp|wwn|wwp|dxt|fmesh)\\b",
+      "match": "\\b(mode|kcode|ksrc|sdef|nps|print|phys|meshtal|act|burn|totnu|tmesh|mesh|wwgen|kpert|read|message|mctal|prdmp|cut|tmp|wwn|wwp|dxt|fmesh|ksens|rand|ctme|tr|vol|area|fill|lat|u|trcl|like|but|imp|det|elpt|em|esp|pwt|sp|spwt|talnp|t|var|varm|ww|wwg|wwgt|wwge|dx|dxn|dxt|dxs|fcl)\\b",
       "name": "keyword.control.mcnp"
     },
-    "material": {
-      "match": "^(m[t]?\\d+)\\b",
-      "name": "entity.name.material.mcnp"
+    "particleSuffix": {
+      "match": ":(n|p|e|h|photon|neutron|n,p|n p|p,e|e,p)\\b",
+      "name": "keyword.other.particle.mcnp"
     },
-    "tally": {
-      "match": "^(f[mcst]?\\d+|e\\d+|de\\d+|df\\d+|sd\\d+|tf\\d+)\\b",
-      "name": "support.function.tally.mcnp"
+    "materialCard": {
+      "begin": "^(m\\d+)\\b",
+      "beginCaptures": {
+        "1": { "name": "entity.name.material.mcnp" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#zaid" },
+        { "include": "#thermalLib" },
+        { "include": "#number" }
+      ]
+    },
+    "mtCard": {
+      "begin": "^(mt\\d+)\\b",
+      "beginCaptures": {
+        "1": { "name": "entity.name.mt-card.mcnp" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#thermalLib" },
+        { "include": "#zaid" },
+        { "include": "#number" }
+      ]
+    },
+    "tallyCard": {
+      "begin": "^(f[1-9]\\d*|f[mcst]?\\d+|fmesh\\d*|e\\d+|de\\d+|df\\d+|sd\\d+|tf\\d+)\\b",
+      "beginCaptures": {
+        "1": { "name": "support.function.tally.mcnp" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#particleSuffix" },
+        { "include": "#keyword" },
+        { "include": "#number" }
+      ]
+    },
+    "dataCard": {
+      "begin": "^(mode|kcode|ksrc|sdef|nps|print|phys|meshtal|act|burn|totnu|tmesh|mesh|wwgen|kpert|read|message|mctal|prdmp|cut|tmp|wwn|wwp|dxt|fmesh|ksens|rand|ctme|tr|vol|area|det|elpt|em|esp|pwt|sp|spwt|talnp|t|var|varm|ww|wwg|wwgt|wwge|dx|dxn|dxt|dxs|fcl)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.mcnp" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#particleSuffix" },
+        { "include": "#keyword" },
+        { "include": "#zaid" },
+        { "include": "#thermalLib" },
+        { "include": "#number" }
+      ]
+    },
+    "cellMacrobodyLine": {
+      "begin": "^(\\d+)\\s+(-?\\d+)\\s+(rpp|rcc|rhp|hex|box|arb|trc|ell|wed|rec|sph|sq|gq|py|c\\/z|c\\/x|c\\/y|pz|px|py)\\b",
+      "beginCaptures": {
+        "1": { "name": "entity.name.cell.mcnp" },
+        "2": { "name": "entity.name.material-id.mcnp" },
+        "3": { "name": "storage.type.macrobody.mcnp" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#particleSuffix" },
+        { "include": "#keyword" },
+        { "include": "#zaid" },
+        { "include": "#number" },
+        { "match": "#", "name": "keyword.operator.geometry.mcnp" }
+      ]
+    },
+    "surfaceLine": {
+      "begin": "^(\\*?)(\\d+)\\s+(cz|cx|cy|pz|px|py|sz|so|sx|sy|rpp|rcc|rhp|hex|box|sph|sq|gq|tz|tx|ty|kz|kx|ky|p|c\\/x|c\\/y|c\\/z|arb|trc|ell|wed|rec|py)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.operator.geometry.mcnp" },
+        "2": { "name": "entity.name.surface-id.mcnp" },
+        "3": { "name": "storage.type.surface.mcnp" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#number" }
+      ]
+    },
+    "cellLine": {
+      "begin": "^(\\d+)\\s+(-?\\d+)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.cell.mcnp" },
+        "2": { "name": "entity.name.material-id.mcnp" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#particleSuffix" },
+        { "include": "#keyword" },
+        { "include": "#zaid" },
+        { "include": "#number" },
+        { "match": "#", "name": "keyword.operator.geometry.mcnp" }
+      ]
+    },
+    "macrobody": {
+      "match": "\\b(rpp|rcc|rhp|hex|box|arb|trc|ell|wed|rec|sph|sq|gq|py)\\b",
+      "name": "storage.type.macrobody.mcnp"
     },
     "surface": {
-      "match": "\\b(cz|cx|cy|pz|px|py|sz|so|sx|sy|rpp|rcc|rhp|hex|box|sph|sq|gq|tz|tx|ty|kz|kx|ky|p|c\\/x|c\\/y|c\\/z)\\b",
+      "match": "\\b(cz|cx|cy|pz|px|py|sz|so|sx|sy|tz|tx|ty|kz|kx|ky|p|c\\/x|c\\/y|c\\/z)\\b",
       "name": "storage.type.surface.mcnp"
+    },
+    "thermalLib": {
+      "match": "\\b[a-zA-Z][\\w-]*\\.\\d{2}[cCpPdDyYtThH]\\b",
+      "name": "constant.other.library.mcnp"
     },
     "zaid": {
       "match": "\\b\\d{4,6}\\.\\d{2,3}[cCpPdDyYtThH]\\b",
