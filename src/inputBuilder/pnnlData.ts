@@ -8,13 +8,20 @@ import type { PnnlDataset, PnnlMaterial } from './pnnlCards';
 
 let cache: PnnlDataset | null = null;
 
+// The dataset sits at <repo>/data, but this module runs from two different
+// depths — out/extension.js in the esbuild bundle, out/src/inputBuilder/ under
+// tsc — and the tsc depth has moved once already. Rather than guess a fixed
+// number of `..`, walk up until the file appears.
 function candidatePaths(): string[] {
-    return [
-        // esbuild bundle: out/extension.js -> ../data
-        path.join(__dirname, '..', 'data', 'pnnl-materials.json'),
-        // tsc-compiled tests: out/inputBuilder/pnnlData.js -> ../../data
-        path.join(__dirname, '..', '..', 'data', 'pnnl-materials.json'),
-    ];
+    const out: string[] = [];
+    let dir = __dirname;
+    for (let i = 0; i < 6; i++) {
+        out.push(path.join(dir, 'data', 'pnnl-materials.json'));
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return out;
 }
 
 export function loadPnnlDataset(): PnnlDataset | null {

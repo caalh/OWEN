@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: a Monte Carlo language server with real-time physics-aware diagnostics, full-core 3D geometry preview, native OpenMC rendering and geometry verification, a cross-code deck converter (MCNP↔OpenMC stable), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -612,7 +612,12 @@
             "Soft low-saturation tones"
           ],
           "default": "Classic",
-          "description": "Color palette applied to OpenMC API tokens inside Python files (openmc module, classes, functions, submodules) via an injection grammar. Applied live via editor.tokenColorCustomizations."
+          "description": "Color palette applied to OpenMC API tokens inside Python files (openmc module, classes, functions, submodules). Applied as editor decorations, and via an injection grammar plus editor.tokenColorCustomizations where no Python language server is active."
+        },
+        "owen.highlight.openmc.decorate": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Draw the OpenMC palette as editor decorations in Python files that import `openmc`.\n\nThis is on because a Python language server (Pylance) publishes semantic tokens, and VS Code colors a semantic token from the scopes its *type* maps to — so `openmc.Material` is colored as a generic `class` and OWEN's injection grammar never gets a say. Decorations draw above that layer. Turn this off to leave OpenMC files entirely to the Python extension."
         },
         "owen.highlight.serpent.palette": {
           "type": "string",
@@ -675,8 +680,10 @@
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js",
+    "pretest": "tsc -p .",
+    "test": "node ./out/src/test/runTest.js",
     "verify:mcnp-rules": "node ./scripts/verify-mcnp-rules.mjs",
+    "verify:openmc-tokens": "node ./scripts/verify-openmc-tokens.mjs",
     "package": "vsce package",
     "publish": "vsce publish",
     "export-nrdp": "node ./scripts/export-nrdp-snapshot.mjs",

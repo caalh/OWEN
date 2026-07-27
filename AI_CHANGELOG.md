@@ -12,6 +12,52 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-26 — v1.0.4: the OpenMC palettes were invisible to anyone with Pylance
+
+- **Model:** claude-opus-5-thinking-high
+- **Reported as:** "the different OpenMC syntax highlight palettes don't implement, I think they get overridden by Python or something else on a person's computer." That diagnosis was right, and the mechanism is worth writing down because it is not obvious.
+
+### Why it happened
+
+MCNP, Serpent, and SCONE each have a language id and a grammar of their own, so a palette is just `editor.tokenColorCustomizations` against namespaced scopes. Nothing competes.
+
+OpenMC has neither. Decks are `.py`, VS Code assigns `languageId: python`, and OWEN colors them with `syntaxes/openmc.injection.tmLanguage.json` injected into `source.python`. That works right up until a Python language server is installed.
+
+VS Code colors a **semantic** token from the scopes that token's *type* maps to — not from whatever the grammar produced at that position. Pylance sends `Material` in `openmc.Material` as a `class`, VS Code resolves it against `entity.name.type.class`, and `support.class.openmc` is never consulted. The palette was being written to settings correctly, the preview webview rendered it correctly (it draws inline HTML from `styleForScope`, bypassing the whole token pipeline), and the editor showed nothing. That gap between the preview and the editor is why this survived to 1.0.3.
+
+### The fix
+
+Decorations render above both the TextMate and the semantic layer, so the palette is applied that way too.
+
+- `src/highlight/openmcTokens.ts` — pure scanner. `maskCommentsAndStrings` blanks comments and string literals in place, preserving every offset (the grammar's selector carries `-comment -string`, so a docstring mentioning `openmc.Material` must stay uncolored). `findOpenmcTokens` then runs the grammar's four patterns in the grammar's order, with a `Uint8Array` claim map so precedence is O(1) per match and `openmc.Material` cannot also match the bare-module pattern.
+- `src/decorations/openmcPalette.ts` — one decoration type per scope, rebuilt when the palette changes, applied to visible Python editors that pass `detectMonteCarloLanguage`. Edits are debounced 150 ms and documents over 2 MB are skipped.
+- `owen.highlight.openmc.decorate` (default `true`) is the escape hatch.
+
+The injection grammar stays. It is still the right mechanism when nothing else claims the file, and the two must agree or the same deck gets different colors on two machines — `npm run verify:openmc-tokens` asserts that, 15 cases, about a second, no VS Code download.
+
+### Deliberately not fixed
+
+`from openmc import Material` and `import openmc as om` are still plain Python. The scanner could resolve both — it sees the whole document, which TextMate cannot — but then the decoration path and the grammar path would disagree, and the grammar is what a user without Pylance gets. Documented in `docs/OPENMC_EVALUATION.md` under known caveats rather than quietly diverging.
+
+### Docs
+
+`docs/OPENMC_EVALUATION.md` T2 still said "there is no OpenMC-specific highlighting", which predated the 0.1.3 palette work; it is now a real test with a pass/partial/fail that distinguishes "decorations aren't running" from "nothing is colored". README gains the highlight settings it never listed and a short section on why OpenMC is highlighted twice.
+
+### `npm test` had not been able to run, and was hiding two bugs
+
+Trying to verify the above turned up a dead test script. `npm test` runs `out/test/runTest.js`, which no longer existed: vendoring `packages/mcnp-workspace` into the repo gave tsc a second source root, the inferred `rootDir` became the repo root, and everything moved down a level into `out/src/`. Nine suites resolve fixtures with `path.resolve(__dirname, '../../..')`, so all of those went stale — and `workspaceValidation.test.ts` had already been rewritten for the *new* depth, so the suite could not pass in either layout.
+
+`rootDir` is now stated rather than inferred, so one stray `.ts` file cannot move the output again. The depth is resolved once in `src/test/paths.ts` (`REPO_ROOT`, `PREBUILT_MODELS`, `FIXTURES`) and imported, instead of each suite counting its own `..`s. `pnnlData.ts` had two hardcoded guesses at where `data/` sits relative to it — one for the esbuild bundle, one for tsc — and the tsc one was now wrong; it walks up looking for the file instead. Two inline `require('fs')` calls in `extractor.test.ts` became imports, which also clears four ESLint errors.
+
+With the suite running, two real failures surfaced. Both were product bugs, not stale assertions:
+
+- **`fmtFrac` compared a signed value against a magnitude threshold.** `x >= 1e-3` is false for every negative number, and weight fractions are negative by MCNP convention, so all of them took the trace-constituent branch: `m3 1001.80c -1.1100e-1` where atom mode printed `0.111000`. `Math.abs(x) >= 1e-3`.
+- **`openmc.Source()` was an error saying it is "removed".** It is a deprecated alias for `IndependentSource` that still works — the deck runs. Downgraded to a warning and reworded. (The one genuinely stale assertion was in the same test: it still expected the pre-namespacing code `api-source` rather than `openmc.source`.)
+
+521 passing.
+
+---
+
 ## 2026-07-26 — MCNP validator: four false positives on correct decks
 
 - **Model:** claude-opus-5-thinking-high

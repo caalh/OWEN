@@ -11,7 +11,7 @@ import { GeometryScene } from '../../preview/types';
 // instead of collapsing to a short, radially-uniform slab. These tests pin the
 // fix and guard the other three codes against regression.
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+import { REPO_ROOT } from '../paths';
 const MODELS_DIR = path.join(REPO_ROOT, 'prebuilt-models');
 
 function loadDeck(filename: string): string {

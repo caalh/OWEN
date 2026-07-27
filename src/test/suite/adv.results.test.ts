@@ -9,7 +9,7 @@ import { parseSerpentResults } from '../../results/parsers/serpent';
 import { parseSconeOutput } from '../../results/parsers/scone';
 import { parseOpenmcStdout } from '../../results/parsers/openmc';
 
-const FIXTURES = path.resolve(__dirname, '../../../src/test/fixtures');
+import { FIXTURES } from '../paths';
 
 function binaryGarbage(n: number): string {
     let s = '';

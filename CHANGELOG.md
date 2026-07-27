@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-07-26
+
+Patch release — the OpenMC highlight palettes now actually take effect. No breaking changes.
+
+### Fixed
+
+- **OpenMC palettes had no visible effect on most machines.** OWEN colored OpenMC through an
+  injection grammar into `source.python` plus `editor.tokenColorCustomizations`. VS Code resolves a
+  *semantic* token's color from the scopes its **type** maps to, so with a Python language server
+  installed `openmc.Material` arrives from Pylance as a `class`, resolves against
+  `entity.name.type.class`, and the injection grammar's `support.class.openmc` is never consulted.
+  Switching palettes changed the settings and the preview panel while the editor stayed put.
+
+  The palette is now also drawn as editor decorations, which render above both the TextMate and
+  semantic layers. The scanner behind them matches the injection grammar's four patterns and their
+  precedence exactly, so a machine without Pylance sees the same colors; `npm run verify:openmc-tokens`
+  keeps the two in step. Comments and strings are excluded, as the grammar's `-comment -string`
+  selector already did.
+
+- **Weight fractions printed in scientific notation.** `fmtFrac` compared the signed value against
+  its `1e-3` threshold, and weight fractions are negative by MCNP convention, so every one of them
+  took the branch meant for trace constituents: `-1.1100e-1` where the same atom fraction printed
+  `0.111000`. Valid MCNP either way, but inconsistent and hard to read.
+- **`openmc.Source()` was reported as an error saying it is "removed".** It is deprecated, not
+  removed — still a working alias for `IndependentSource` — so the deck runs. Now a warning, worded
+  accordingly.
+- **`npm test` could not run.** Vendoring `packages/mcnp-workspace` into the repo moved tsc's
+  inferred `rootDir` to the repo root, so compiled tests landed in `out/src/…` while the harness
+  looked in `out/test/…`, and the `__dirname`-relative fixture paths in nine suites went stale by a
+  level — in both directions, since a couple had already been rewritten for the new layout. `rootDir`
+  is now pinned, the depth is resolved once in `src/test/paths.ts`, and the PNNL dataset loader walks
+  up for `data/` instead of guessing two fixed offsets. 521 tests pass.
+
+### Added
+
+- **`owen.highlight.openmc.decorate`** (default `true`) — turn the decoration layer off to leave
+  Python files entirely to the Python extension.
+- **`npm run verify:openmc-tokens`** — headless check of the OpenMC token scanner, 15 cases across
+  the four patterns, precedence, and comment/string masking.
+
 ## [1.0.3] — 2026-07-14
 
 Patch release — MCNP highlighting, material auto-numbering, ReactorMC in-editor search. No breaking changes.

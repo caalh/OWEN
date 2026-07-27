@@ -1,5 +1,8 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import { extractCylinders, buildScene } from '../../preview/extractor';
+import { PREBUILT_MODELS } from '../paths';
 
 function distinctX(cyls: { x: number }[]): number {
     return new Set(cyls.map((c) => Math.round(c.x * 1000))).size;
@@ -1061,9 +1064,7 @@ geometry { universes {
     // --- BEAVRS radial structure (v0.3.1) ---
 
     test('BEAVRS MCNP extract includes radial structure (barrel / RPV / shields)', () => {
-        const fs = require('fs') as typeof import('fs');
-        const path = require('path') as typeof import('path');
-        const deckPath = path.join(__dirname, '..', '..', '..', 'prebuilt-models', 'beavrs_fullcore_mcnp.i');
+        const deckPath = path.join(PREBUILT_MODELS, 'beavrs_fullcore_mcnp.i');
         if (!fs.existsSync(deckPath)) {
             console.log('BEAVRS MCNP deck not bundled — skipping radial structure test');
             return;
@@ -1082,9 +1083,7 @@ geometry { universes {
     });
 
     test('BEAVRS OpenMC extract includes radial structure and baffle boxes', () => {
-        const fs = require('fs') as typeof import('fs');
-        const path = require('path') as typeof import('path');
-        const deckPath = path.join(__dirname, '..', '..', '..', 'prebuilt-models', 'beavrs_fullcore_openmc.py');
+        const deckPath = path.join(PREBUILT_MODELS, 'beavrs_fullcore_openmc.py');
         if (!fs.existsSync(deckPath)) {
             console.log('BEAVRS OpenMC deck not bundled — skipping radial structure test');
             return;

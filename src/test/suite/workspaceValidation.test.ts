@@ -1,8 +1,9 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import { validateMcnpProject } from '../../../packages/mcnp-workspace/src/validate';
+import { REPO_ROOT } from '../paths';
 
-const FIXTURES = path.resolve(__dirname, '../../../../test/fixtures/mcnp-workspace');
+const FIXTURES = path.join(REPO_ROOT, 'test', 'fixtures', 'mcnp-workspace');
 
 suite('MCNP workspace validation (shared package)', () => {
     test('ok fixture has zero errors', () => {

@@ -150,18 +150,24 @@ Open Tutorial, Run Parameter Sweep). This confirms the lazy-Supabase activation 
 
 ## T2 — OpenMC syntax highlighting
 
-**Feature:** Language highlighting. **Caveat:** OWEN ships TextMate grammars only for MCNP,
-Serpent, and SCONE (`package.json` → `grammars`). OpenMC reuses the editor's **built-in
-Python** grammar — there is no OpenMC-specific highlighting.
+**Feature:** Language highlighting. The file stays Python — OWEN registers no `openmc`
+language id — but OpenMC API tokens are recolored on top of it, two ways: an injection
+grammar into `source.python`, and editor decorations for the (usual) case where Pylance's
+semantic tokens would otherwise win. See README → *Why OpenMC is highlighted twice*.
 
-**Invoke:** Open `pincell.py`.
+**Invoke:** Open `pincell.py`, with the Python extension installed and enabled.
 
-**Steps:** Confirm the file is recognized as Python and OpenMC API calls
-(`openmc.Material`, `openmc.ZCylinder`, keywords, strings) are colored.
+**Steps:** Confirm `openmc` itself, class names after it (`openmc.Material`,
+`openmc.ZCylinder`), called functions (`openmc.run(`), and submodules
+(`openmc.model`) each take a distinct color. Then run `OWEN: Choose Highlight
+Palette` → OpenMC → High Contrast and confirm those same tokens change while the
+rest of the Python file does not.
 
-**Expected / pass criteria:** Standard Python highlighting renders. There is **no** OpenMC
-keyword-specific coloring (e.g. `IndependentSource` is colored like any other identifier).
-Pass = Python highlighting works; mark Partial if you expected OpenMC-specific tokens.
+**Expected / pass criteria:** Pass = the four OpenMC token kinds are colored distinctly from
+surrounding Python, and switching palettes changes them live. Partial = colors appear only
+after disabling Pylance, which means the decoration layer is not running — check
+`owen.highlight.openmc.decorate`. Fail = `openmc.Material` looks identical to any other
+class reference under every palette.
 
 **Score:** ☐ Pass ☐ Partial ☐ Fail ☐ Blocked — notes: ________________
 
@@ -527,8 +533,10 @@ wrong `owen.openmc.pythonExecutable`) — not an OWEN bug.
 
 Honest read of the current code:
 
-1. **No OpenMC-specific syntax highlighting.** OpenMC is plain Python to the editor; only
-   MCNP/Serpent/SCONE have TextMate grammars (T2).
+1. **OpenMC highlighting is narrow by construction.** Only `openmc`-qualified dotted access
+   is recolored — `openmc.Material`, `openmc.model.borated_water(`, `openmc.stats`. A name
+   pulled in with `from openmc import Material`, or reached through `import openmc as om`,
+   is left to Python's own coloring (T2).
 2. **OpenMC detection is import-sniffing.** A `.py` file without a literal
    `import openmc` / `from openmc … import` line is invisible to validation, run-as-OpenMC,
    material insertion, and the OpenMC preview path (`detectLanguage.ts`).

@@ -17,7 +17,7 @@ interface PrebuiltModel {
     filename: string;
 }
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+import { REPO_ROOT } from '../paths';
 const MODELS_DIR = path.join(REPO_ROOT, 'prebuilt-models');
 
 function loadManifest(): PrebuiltModel[] {

@@ -5,6 +5,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
+import { PREBUILT_MODELS } from '../paths';
 import { runLanguageRules } from '../../language/rules';
 import type { RulesLanguage } from '../../language/types';
 
@@ -266,7 +267,7 @@ suite('ADV validator — SCONE', () => {
 suite('ADV validator — bundled prebuilt decks are clean of Errors', () => {
     // Enumerate ALL bundled decks by extension so new prebuilt models are
     // covered automatically without editing this test.
-    const root = path.resolve(__dirname, '../../../prebuilt-models');
+    const root = PREBUILT_MODELS;
     const langByExt: Record<string, RulesLanguage> = {
         '.i': 'mcnp', '.mcnp': 'mcnp', '.inp': 'mcnp',
         '.py': 'openmc',

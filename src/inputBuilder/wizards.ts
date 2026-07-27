@@ -129,8 +129,12 @@ export function sabAllowed(sabId: string, components: MaterialComponent[]): bool
     return hasHydrogen(components);
 }
 
+// Scientific notation is for trace constituents, so the threshold is on the
+// magnitude. Comparing the signed value sent every *weight* fraction down that
+// branch — they are all negative by convention — so `-0.111` printed as
+// `-1.1100e-1` while the same atom fraction printed as `0.111000`.
 function fmtFrac(x: number): string {
-    return x >= 1e-3 ? x.toFixed(6) : x.toExponential(4);
+    return Math.abs(x) >= 1e-3 ? x.toFixed(6) : x.toExponential(4);
 }
 
 function signedFraction(frac: number, mode: FractionMode): string {

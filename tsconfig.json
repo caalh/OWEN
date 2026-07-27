@@ -3,6 +3,12 @@
     "module": "commonjs",
     "target": "ES2022",
     "outDir": "out",
+    // Pinned rather than inferred. src/ relative-imports into
+    // packages/mcnp-workspace/src, so the inferred root is the repo root and
+    // output lands in out/src/... — but only as long as that stays true. One
+    // new .ts file elsewhere would silently move every compiled path and break
+    // the test harness again. Stating it keeps out/ layout stable.
+    "rootDir": ".",
     "lib": ["ES2022"],
     "sourceMap": true,
     "strict": true,

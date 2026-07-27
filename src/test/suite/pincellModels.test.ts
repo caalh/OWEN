@@ -8,7 +8,7 @@ import { buildScene } from '../../preview/extractor';
 // pellet 0.39218 / clad OR 0.45720, pitch 1.26, height 365.76), so each must
 // produce a non-trivial scene with the fuel pellet and clad shells present.
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+import { REPO_ROOT } from '../paths';
 const MODELS_DIR = path.join(REPO_ROOT, 'prebuilt-models');
 
 const DECKS: Record<'mcnp' | 'openmc' | 'serpent' | 'scone', string> = {

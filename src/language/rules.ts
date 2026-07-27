@@ -308,10 +308,13 @@ function validateOpenMC(text: string, diags: PlainDiagnostic[]): void {
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
+        // Deprecated, not removed: openmc.Source is still a working alias for
+        // IndependentSource, so a deck using it runs. Reporting it as an error
+        // put a red squiggle on code that is merely dated.
         if (/openmc\.Source\s*\(/.test(line)) {
             pushLine(diags, lines, i,
-                'openmc.Source() is removed — use openmc.IndependentSource(...) (or openmc.FileSource/CompiledSource).',
-                'error',
+                'openmc.Source() is deprecated — use openmc.IndependentSource(...) (or openmc.FileSource/CompiledSource).',
+                'warning',
                 'openmc.source');
         }
 

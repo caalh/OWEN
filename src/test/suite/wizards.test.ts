@@ -165,7 +165,7 @@ suite('Input Builder wizards', () => {
     test('validateSnippet flags deprecated openmc.Source in generated settings', () => {
         const bad = 'settings.source = openmc.Source()';
         const issues = validateSnippet('openmc', bad);
-        assert.ok(issues.some((i) => i.code === 'api-source'));
+        assert.ok(issues.some((i) => i.code === 'openmc.source'));
     });
 
     test('generated MCNP material passes snippet validation', () => {

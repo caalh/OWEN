@@ -6,8 +6,9 @@ import { parseSerpentResults } from '../../results/parsers/serpent';
 import { parseSconeOutput } from '../../results/parsers/scone';
 import { parseOpenmcStdout } from '../../results/parsers/openmc';
 import { resonanceIntegral, bondarenkoShieldingFactor, shieldedCurve } from '../../allen/plotConfig';
+import { FIXTURES } from '../paths';
 
-const FIX = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures');
+const FIX = FIXTURES;
 
 suite('Results parsers', () => {
     test('MCNP mctal parses k-eff history', () => {

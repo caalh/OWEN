@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
+import { PREBUILT_MODELS } from '../paths';
 import {
     convert, detectConversionSource, mcnpToOpenmc, mcnpToSerpent, mcnpToScone,
     openmcToMcnp, parseMcnpDeck, TODO_MARK,
@@ -215,7 +216,7 @@ suite('OWEN converter — direction detection', () => {
 });
 
 suite('OWEN converter — BEAVRS-assembly scale', () => {
-    const fixture = path.resolve(__dirname, '../../../prebuilt-models/assembly_17x17_mcnp.i');
+    const fixture = path.join(PREBUILT_MODELS, 'assembly_17x17_mcnp.i');
     const text = fs.readFileSync(fixture, 'utf8');
 
     test('17x17 assembly converts to all three targets without crashing', () => {

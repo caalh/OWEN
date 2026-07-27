@@ -1,6 +1,10 @@
 node_modules/
 out/
 out-test/
+packages/*/dist/
+# tsc run without -p inside packages/ drops these next to the sources
+packages/*/src/*.js
+packages/*/src/*.js.map
 *.vsix
 .vscode-test/
 *.log

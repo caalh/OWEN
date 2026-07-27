@@ -143,6 +143,8 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.openmc.executable` | `openmc` | Non-Python OpenMC entry point only |
 | `owen.openmc.pythonExecutable` | `python` | Interpreter for OpenMC model scripts; when explicitly set it is also the first candidate for `Render with OpenMC` |
 | `owen.scone.executable` | `scone` | On Windows, SCONE typically requires WSL |
+| `owen.highlight.<lang>.palette` | `Classic` | Palette for `mcnp` / `openmc` / `serpent` / `scone`. Also settable from `OWEN: Choose Highlight Palette` |
+| `owen.highlight.openmc.decorate` | `true` | Draw the OpenMC palette as decorations so it survives Pylance's semantic tokens (see below) |
 | `owen.preview.maxInstances` | `1500000` | Max cylinder instances in the 3D preview; auto-simplifies detail (not pins) above this. Raise (e.g. 4000000) for full shell+axial detail on a full core |
 | `owen.simulation.workingDirectory` | `""` | Empty = the input file's directory |
 | `owen.mcnp.projectRoot` | `""` | MCNP root `.inp` for cross-file workspace validation |
@@ -177,9 +179,29 @@ any solver installed.
 | Language | Highlighting | Snippets | Diagnostics | Runner |
 |----------|--------------|----------|------------|--------|
 | MCNP | Yes (4 palettes) | Yes | Real-time (LSP) + on-demand | `mcnp6 inp=…` |
-| OpenMC (Python) | Injection grammar (4 palettes) | Yes | On-demand (deep) + Pylance | `python <file>` |
+| OpenMC (Python) | Decorations + injection grammar (4 palettes) | Yes | On-demand (deep) + Pylance | `python <file>` |
 | Serpent | Yes (4 palettes) | Yes | Real-time (LSP) + on-demand | `sss2 <file>` |
 | SCONE | Yes (4 palettes) | Yes | Real-time (LSP) + on-demand | `scone <file>` (WSL on Windows) |
+
+### Why OpenMC is highlighted twice
+
+MCNP, Serpent, and SCONE have their own language ids, so a grammar plus
+`editor.tokenColorCustomizations` is all a palette needs. OpenMC decks are
+Python, and Python belongs to Pylance.
+
+VS Code colors a *semantic* token — which is what Pylance publishes — from the
+scopes that token's **type** maps to. `openmc.Material` arrives as a `class` and
+resolves against `entity.name.type.class`; the `support.class.openmc` that
+OWEN's injection grammar put at the same position is never consulted. The
+palette was applied, correct, and invisible on any machine with a Python
+language server installed.
+
+So OWEN also draws the palette as editor decorations, which render above both
+the TextMate and semantic layers. The scanner behind them
+(`src/highlight/openmcTokens.ts`) matches the injection grammar's four patterns
+exactly, so both routes produce the same colors; `npm run verify:openmc-tokens`
+holds them together. Set `owen.highlight.openmc.decorate` to `false` to leave
+Python files entirely to Pylance.
 
 ## Acknowledgements
 
