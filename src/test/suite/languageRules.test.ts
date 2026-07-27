@@ -18,8 +18,8 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
             'mt1  lwtr.20t',
         ].join('\n');
         const diags = runLanguageRules('mcnp', text);
-        assert.ok(diags.some((d) => d.code === 'mcnp.sab-no-h'),
-            `expected mcnp.sab-no-h diagnostic, got: ${JSON.stringify(diags.map((d) => d.code))}`);
+        assert.ok(diags.some((d) => d.code === 'mcnp.sab-no-target'),
+            `expected mcnp.sab-no-target diagnostic, got: ${JSON.stringify(diags.map((d) => d.code))}`);
     });
 
     test('MCNP: accepts S(α,β) on water', () => {
@@ -28,17 +28,47 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
             'mt3  lwtr.20t',
         ].join('\n');
         const diags = runLanguageRules('mcnp', text);
-        assert.ok(!diags.some((d) => d.code === 'mcnp.sab-no-h'));
+        assert.ok(!diags.some((d) => d.code === 'mcnp.sab-no-target'));
     });
 
-    test('MCNP: flags HEX macrobody keyword', () => {
-        const diags = runLanguageRules('mcnp', '10 hex 0 0 0  5 0 0  0 0 10');
-        assert.ok(diags.some((d) => d.code === 'mcnp.macrobody'), 'expected HEX macrobody error');
+    // S(α,β) is not hydrogen-only. Manual §5.6.2 Example 2 applies GRPH to pure
+    // carbon; the old hydrogen-only rule made that an error.
+    test('MCNP: accepts graphite S(α,β) on a carbon material', () => {
+        const text = [
+            'm4   6000.80c 1.0',
+            'mt4  grph.20t',
+        ].join('\n');
+        const diags = runLanguageRules('mcnp', text);
+        assert.ok(!diags.some((d) => d.code === 'mcnp.sab-no-target'),
+            `false positive: ${JSON.stringify(diags.map((d) => d.code))}`);
+    });
+
+    // §5.3.4.5 is titled "RHP or HEX" and three of the four examples in
+    // Listing 5.7 spell it `hex`.
+    test('MCNP: accepts HEX as an alias for RHP', () => {
+        const diags = runLanguageRules('mcnp', '10 hex 0 0 0  0 0 10  5 0 0');
+        assert.ok(!diags.some((d) => d.code === 'mcnp.macrobody'),
+            'HEX is a documented RHP alias and must not be flagged');
+    });
+
+    test('MCNP: still flags CYL, which is not a keyword', () => {
+        const diags = runLanguageRules('mcnp', '10 cyl 0 0 0 5');
+        assert.ok(diags.some((d) => d.code === 'mcnp.macrobody'));
     });
 
     test('MCNP: flags RPP with the wrong parameter count', () => {
         const diags = runLanguageRules('mcnp', '1 rpp -1 1 -1 1 -1');
         assert.ok(diags.some((d) => d.code === 'mcnp.macrobody-params'));
+    });
+
+    // RHP takes 9 or 15 (s and t are optional for a regular hexagon); BOX
+    // takes 9 or 12 (a3 omitted makes the body infinite).
+    test('MCNP: accepts the short forms of RHP and BOX', () => {
+        for (const card of ['1 rhp 0 0 0  0 0 10  5 0 0', '2 box 0 0 0  4 0 0  0 4 0']) {
+            const diags = runLanguageRules('mcnp', card);
+            assert.ok(!diags.some((d) => d.code === 'mcnp.macrobody-params'),
+                `false positive on short form: ${card}`);
+        }
     });
 
     test('MCNP: flags invalid ZAID format', () => {

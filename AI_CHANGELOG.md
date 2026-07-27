@@ -12,6 +12,39 @@ division-wide changelog is `AI_CHANGELOG.md` in the BelvoirDynamics monorepo roo
 
 ---
 
+## 2026-07-26 — MCNP validator: four false positives on correct decks
+
+- **Model:** claude-opus-5-thinking-high
+- **Context:** these four were found and fixed first in the ReactorMC site's browser port of these rules (`src/lib/owen-validator/rules.ts`), whose header has been carrying a "push these back upstream" note. This is that push. Each one rejects a card that real MCNP accepts, checked against the MCNP6.3.1 Theory & User Manual (LA-UR-24-24602 Rev. 1).
+
+### `HEX` is not a mistake
+
+`mcnp.macrobody` reported `HEX` as "not an MCNP keyword — use RHP". Manual §5.3.4.5 is titled **"RHP or HEX"**, and three of the four examples in Listing 5.7 spell it `hex`. OWEN was also contradicting itself: `src/preview/codes/mcnp.ts` has always accepted `hex` as a surface type, so the renderer drew the card the validator called invalid. The `HEX` branch is removed; `CYL` still errors, because that one really is not a keyword.
+
+### Macrobody parameter counts were single values
+
+`rhp: 15` and `box: 12` rejected the short forms, which are the ones people actually write. RHP takes **9 or 15** — `s` and `t` are optional for a regular hexagon — and BOX takes **9 or 12**, where dropping `a3` makes the body infinite along the normal to `a1 × a2` (§5.3.4.1, §5.3.4.5). The table now holds arrays, and gained `hex`, `sph`, `trc`, `ell`, and `wed`.
+
+### S(α,β) is not hydrogen-only
+
+`mcnp.sab-no-h` errored on any `mt` card whose material had no `1001`/`1002`. Manual §5.6.2 Example 2 applies `GRPH` to pure carbon. Graphite, beryllium, and Zr-in-ZrH decks were all flagged as broken.
+
+Replaced by **`mcnp.sab-no-target`**, which reads the table's own target out of its name and checks for *that* element: `lwtr`/`poly`/`benz` want hydrogen, `grph` wants carbon, `be`/`beo` want beryllium, and so on. Tables not in the map are left alone rather than guessed at, and materials written with element symbols (`M1 H-1 2`) are skipped, since the ZAID scan collects nothing for them and absence is not evidence.
+
+### Lattice fill rows are not cell cards
+
+`CELL_CARD_RE` matched the numeric rows of a `fill=` array, so every row of a BEAVRS fill map drew a "missing imp:n" warning. Lines indented 5+ columns are continuation lines and are now skipped.
+
+### Verification
+
+The suite runs under vscode-test, which downloads a VS Code build — too slow to be a habit for four pure text rules. Added `npm run verify:mcnp-rules` (`scripts/verify-mcnp-rules.mjs`): esbuild-bundles `rules.ts` and runs 17 cases in about a second, asserting in **both** directions — every corrected form stays quiet, and every genuinely bad card still fires. Its header cites the manual section for each case, because the obvious "fix" for most of them is to put the bug back.
+
+Existing tests updated for the new rule ID and behavior in `validator.test.ts`, `languageRules.test.ts`, `adv.validator.test.ts`, and `lspServer.test.ts`; regression cases added for graphite S(α,β), the RHP/BOX short forms, and lattice fill rows.
+
+### Still to do
+
+The GROVES Python port of these rules has not been checked yet.
+
 ## 2026-07-14 — v1.0.3 — Marketplace publish prep
 
 - **Model:** composer-2.5-fast

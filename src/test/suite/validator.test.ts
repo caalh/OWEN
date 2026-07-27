@@ -11,15 +11,15 @@ suite('OWEN validator', () => {
             'mt1  lwtr.20t',
         ].join('\n');
         const diags = runValidators('mcnp', text);
-        assert.ok(diags.some((d) => d.code === 'mcnp.sab-no-h'),
-            `expected mcnp.sab-no-h diagnostic, got: ${JSON.stringify(diags.map((d) => d.code))}`);
+        assert.ok(diags.some((d) => d.code === 'mcnp.sab-no-target'),
+            `expected mcnp.sab-no-target diagnostic, got: ${JSON.stringify(diags.map((d) => d.code))}`);
     });
 
-    test('MCNP: flags HEX macrobody keyword', () => {
-        const text = '10 hex 0 0 0  5 0 0  0 0 10';
+    test('MCNP: accepts HEX, which is a documented alias for RHP', () => {
+        const text = '10 hex 0 0 0  0 0 10  5 0 0';
         const diags = runValidators('mcnp', text);
-        assert.ok(diags.some((d) => d.code === 'mcnp.macrobody'),
-            'expected HEX macrobody error');
+        assert.ok(!diags.some((d) => d.code === 'mcnp.macrobody'),
+            'HEX must not be flagged');
     });
 
     test('OpenMC: flags deprecated openmc.Source(', () => {

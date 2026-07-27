@@ -85,12 +85,43 @@ const MT_CARD_RE = /^\s*mt(\d+)\s+/i;
 const CELL_CARD_RE = /^\s*(\d+)\s+(\d+|0)\s+(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)?\s+/;
 const MACROBODY_RE = /^\s*(\d+)\s+(\*?)(rpp|rcc|rhp|box|hex|cyl|sph|rec|trc|ell|wed|arb)\b/i;
 
-const MACROBODY_PARAM_COUNTS: Record<string, number> = {
-    rpp: 6,
-    rcc: 7,
-    rhp: 15,
-    box: 12,
+/**
+ * Accepted parameter counts per macrobody. Several take a short form:
+ * RHP omits the optional s and t facet vectors for a regular hexagon, and BOX
+ * omits a3 to make the body infinite along the normal to a1 x a2. Fixed counts
+ * flagged correct decks as errors.
+ * MCNP6.3.1 Theory & User Manual (LA-UR-24-24602 Rev. 1) 5.3.4.1 (BOX), 5.3.4.5 (RHP).
+ */
+const MACROBODY_PARAM_COUNTS: Record<string, number[]> = {
+    rpp: [6],
+    rcc: [7],
+    rhp: [9, 15],
+    hex: [9, 15],
+    box: [9, 12],
+    sph: [4],
+    trc: [8],
+    ell: [7],
+    wed: [12],
 };
+
+/**
+ * S(alpha,beta) table target -> the ZA numbers that target must be present as.
+ *
+ * Only used to catch a table pointed at a material that cannot contain its
+ * target — lwtr on graphite, say. S(alpha,beta) is emphatically not
+ * hydrogen-only: manual 5.6.2 Example 2 applies GRPH to pure carbon. Anything
+ * not listed here is left alone.
+ */
+const SAB_TARGETS: { match: RegExp; label: string; za: RegExp }[] = [
+    { match: /^(lwtr|h-h2o|poly|h-ch2|benz|h-zrh|h-para|h-ortho|lucite)/, label: 'hydrogen', za: /^100[123]$/ },
+    { match: /^(hwtr|d-d2o|d-para|d-ortho)/, label: 'deuterium', za: /^100[23]$/ },
+    { match: /^(grph|c-graphite|c6-c6h6)/, label: 'carbon', za: /^6\d{3}$/ },
+    { match: /^(be-met|be-beo|^be\b|beo)/, label: 'beryllium', za: /^4009$/ },
+    { match: /^(zr-zrh|zrh)/, label: 'zirconium', za: /^40\d{3}$/ },
+    { match: /^(fe-56|fe56)/, label: 'iron', za: /^26\d{3}$/ },
+    { match: /^(o-beo|o2-u|o-uo2)/, label: 'oxygen', za: /^8\d{3}$/ },
+    { match: /^(u-uo2|u-o2)/, label: 'uranium', za: /^92\d{3}$/ },
+];
 
 function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOptions): void {
     const lines = text.split(/\r?\n/);
@@ -158,32 +189,34 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
         const macro = raw.match(MACROBODY_RE);
         if (macro) {
             const kind = macro[3].toLowerCase();
-            if (kind === 'hex') {
-                pushLine(diags, lines, i,
-                    'Macrobody "HEX" is not an MCNP keyword — use "RHP" (right hexagonal prism).',
-                    'error',
-                    'mcnp.macrobody');
-            } else if (kind === 'cyl') {
+            // HEX is a documented alias for RHP, not a mistake: manual 5.3.4.5
+            // is titled "RHP or HEX" and three of the four examples in Listing
+            // 5.7 spell it `hex`. The preview parser has always accepted it.
+            if (kind === 'cyl') {
                 pushLine(diags, lines, i,
                     'Macrobody "CYL" is not an MCNP keyword — use "RCC" (right circular cylinder).',
                     'error',
                     'mcnp.macrobody');
             } else if (kind in MACROBODY_PARAM_COUNTS) {
-                const expected = MACROBODY_PARAM_COUNTS[kind];
+                const accepted = MACROBODY_PARAM_COUNTS[kind];
                 const idIdx = tokens.findIndex((t) => /^\d+$/.test(t));
                 const params = tokens
                     .slice(idIdx + 1)
                     .filter((t) => /^[-+]?\d/.test(t));
-                if (params.length > 0 && params.length !== expected) {
+                if (params.length > 0 && !accepted.includes(params.length)) {
                     pushLine(diags, lines, i,
-                        `${kind.toUpperCase()} expects ${expected} parameters but found ${params.length}.`,
+                        `${kind.toUpperCase()} expects ${accepted.join(' or ')} parameters but found ${params.length}.`,
                         'warning',
                         'mcnp.macrobody-params');
                 }
             }
         }
 
-        const cell = raw.match(CELL_CARD_RE);
+        // Lines indented 5+ columns are MCNP continuation lines (e.g. lattice
+        // fill arrays), never new cell cards. Matching them produced a
+        // "missing imp:n" warning on every row of a BEAVRS fill map.
+        const isContinuation = /^\s{5,}/.test(raw);
+        const cell = isContinuation ? null : raw.match(CELL_CARD_RE);
         if (cell && !macro && !mHead && !MT_CARD_RE.test(raw) && !/^\s*\*/.test(raw)) {
             const mat = cell[2];
             const density = cell[3];
@@ -224,13 +257,20 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
                 'mcnp.mt-missing-material');
             continue;
         }
-        const hasH = mat.zaids.some((z) => z.startsWith('1001') || z.startsWith('1002'));
-        if (!hasH) {
+        // Materials written with element symbols (M1 H-1 2 O-16 1) collect no
+        // ZAIDs, and absence is not evidence here.
+        if (mat.zaids.length === 0) continue;
+
+        for (const sabid of lines[i].trim().split(/\s+/).slice(1)) {
+            const target = sabid.toLowerCase().replace(/\.\w+$/, '');
+            const known = SAB_TARGETS.find((t) => t.match.test(target));
+            if (!known) continue;
+            if (mat.zaids.some((z) => known.za.test(z))) continue;
             pushLine(diags, lines, i,
-                `mt${matNum} (S(α,β) thermal scattering) requires hydrogen in m${matNum}. ` +
-                'S(α,β) thermal scattering only applies to hydrogen-bearing materials.',
+                `${sabid} applies S(α,β) scattering to ${known.label}, but m${matNum} contains no ${known.label}. ` +
+                'The table is ignored unless its target nuclide is in the material.',
                 'error',
-                'mcnp.sab-no-h');
+                'mcnp.sab-no-target');
         }
     }
 

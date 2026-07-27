@@ -12,9 +12,21 @@ const run = (lang: RulesLanguage, text: string) => runLanguageRules(lang, text);
 const codes = (diags: { code?: string }[]) => diags.map((d) => String(d.code));
 
 suite('ADV validator — MCNP', () => {
-    test('mt on hydrogen-free fuel fires mcnp.sab-no-h', () => {
+    test('mt on hydrogen-free fuel fires mcnp.sab-no-target', () => {
         const text = 'm7 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0\nmt7 lwtr.20t';
-        assert.ok(codes(run('mcnp', text)).includes('mcnp.sab-no-h'));
+        assert.ok(codes(run('mcnp', text)).includes('mcnp.sab-no-target'));
+    });
+
+    test('graphite S(a,b) on a carbon material does NOT fire', () => {
+        const text = 'm8 6000.80c 1.0\nmt8 grph.20t';
+        const c = codes(run('mcnp', text));
+        assert.ok(!c.includes('mcnp.sab-no-target'), `false positive: ${c}`);
+    });
+
+    test('beryllium S(a,b) on Be metal does NOT fire', () => {
+        const text = 'm9 4009.80c 1.0\nmt9 be.20t';
+        const c = codes(run('mcnp', text));
+        assert.ok(!c.includes('mcnp.sab-no-target'), `false positive: ${c}`);
     });
 
     test('mt referencing undefined material fires mcnp.mt-missing-material', () => {
@@ -25,7 +37,7 @@ suite('ADV validator — MCNP', () => {
     test('mt on water (has H) does NOT fire', () => {
         const text = 'm3 1001.80c 2 8016.80c 1\nmt3 lwtr.20t';
         const c = codes(run('mcnp', text));
-        assert.ok(!c.includes('mcnp.sab-no-h'), `false positive: ${c}`);
+        assert.ok(!c.includes('mcnp.sab-no-target'), `false positive: ${c}`);
     });
 
     test('mixed +/- fractions in one material fires mcnp.material-sign', () => {
@@ -62,9 +74,10 @@ suite('ADV validator — MCNP', () => {
         assert.ok(codes(run('mcnp', text)).includes('mcnp.zaid'));
     });
 
-    test('HEX and CYL macrobodies fire errors', () => {
-        assert.ok(codes(run('mcnp', '10 hex 0 0 0 5 0 0 0 0 10')).includes('mcnp.macrobody'));
+    test('CYL fires an error but HEX does not — HEX is an RHP alias', () => {
         assert.ok(codes(run('mcnp', '10 cyl 0 0 0 5')).includes('mcnp.macrobody'));
+        const c = codes(run('mcnp', '10 hex 0 0 0  0 0 10  5 0 0'));
+        assert.ok(!c.includes('mcnp.macrobody'), `false positive on HEX: ${c}`);
     });
 
     test('RPP with wrong param count fires macrobody-params', () => {
@@ -76,6 +89,34 @@ suite('ADV validator — MCNP', () => {
         const text = '10 rcc 0 0 0 0 0 100 0.5';
         const c = codes(run('mcnp', text));
         assert.ok(!c.includes('mcnp.macrobody-params'), `false positive: ${c}`);
+    });
+
+    test('short-form RHP (9) and BOX (9) do NOT fire macrobody-params', () => {
+        for (const card of ['10 rhp 0 0 0  0 0 10  5 0 0', '11 box 0 0 0  4 0 0  0 4 0']) {
+            const c = codes(run('mcnp', card));
+            assert.ok(!c.includes('mcnp.macrobody-params'), `false positive on ${card}: ${c}`);
+        }
+    });
+
+    test('long-form RHP (15) and BOX (12) do NOT fire macrobody-params', () => {
+        const rhp = '10 rhp 0 0 0  0 0 10  5 0 0  0 5 0  0 0 5';
+        const box = '11 box 0 0 0  4 0 0  0 4 0  0 0 4';
+        for (const card of [rhp, box]) {
+            const c = codes(run('mcnp', card));
+            assert.ok(!c.includes('mcnp.macrobody-params'), `false positive on ${card}: ${c}`);
+        }
+    });
+
+    test('lattice fill rows are continuation lines, not cells missing imp:n', () => {
+        const text = [
+            '100 0 -1 lat=1 u=5 imp:n=1',
+            '     fill=-1:1 -1:1 0:0',
+            '     2 2 2',
+            '     2 3 2',
+            '     2 2 2',
+        ].join('\n');
+        const c = codes(run('mcnp', text));
+        assert.ok(!c.includes('mcnp.cell-imp'), `false positive on fill array: ${c}`);
     });
 
     test('cell missing imp:n fires mcnp.cell-imp; continuation imp is honored', () => {

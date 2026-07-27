@@ -118,7 +118,7 @@ suite('LSP server — in-process', () => {
         await openDoc(h, uri, 'mcnp', PIN_DECK);
         const params = await h.waitForDiagnostics(uri);
         const codes = params.diagnostics.map((d) => String(d.code));
-        assert.ok(codes.includes('mcnp.sab-no-h'), `expected mcnp.sab-no-h in ${JSON.stringify(codes)}`);
+        assert.ok(codes.includes('mcnp.sab-no-target'), `expected mcnp.sab-no-target in ${JSON.stringify(codes)}`);
         assert.ok(codes.includes('mcnp.density-sign'));
         assert.ok(params.diagnostics.every((d) => d.source === 'owen'));
     });

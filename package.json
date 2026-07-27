@@ -676,6 +676,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
+    "verify:mcnp-rules": "node ./scripts/verify-mcnp-rules.mjs",
     "package": "vsce package",
     "publish": "vsce publish",
     "export-nrdp": "node ./scripts/export-nrdp-snapshot.mjs",
