@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-07-27
+
+Documentation-only release. The Marketplace and Open VSX listings render `README.md`
+from the published package, so a stale line in it can only be corrected by publishing.
+
+### Fixed
+
+- The listing said "Current release: v1.0.3" while serving 1.0.4. The line is gone —
+  the version badges at the top of the README already report the live version on each
+  registry, so there is nothing left to fall out of date. The VSIX install snippet
+  likewise no longer hardcodes a version number.
+
 ## [1.0.4] — 2026-07-26
 
 Patch release — the OpenMC highlight palettes now actually take effect. No breaking changes.

@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">A <a href="https://reactormc.net">BelvoirDynamics</a> product · part of <a href="https://reactormc.net">ReactorMC</a></p>
-<p align="center">Current release: <strong>v1.0.3</strong> · <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics">VS Marketplace</a> · <a href="https://open-vsx.org/extension/belvoirdynamics/owen-neutronics">Open VSX</a> · <a href="https://github.com/caalh/owen/releases">GitHub Releases</a></p>
+<p align="center">Get it from the <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics">VS Marketplace</a>, <a href="https://open-vsx.org/extension/belvoirdynamics/owen-neutronics">Open VSX</a>, or <a href="https://github.com/caalh/owen/releases">GitHub Releases</a> — the badges above show the current version on each.</p>
 
 ---
 
@@ -97,9 +97,9 @@ switch to concentric pin layers, and slice through the core.
 **From a VSIX** ([GitHub Releases](https://github.com/caalh/owen/releases/latest)):
 
 ```bash
-code --install-extension owen-neutronics-1.0.3.vsix
+code --install-extension owen-neutronics-<version>.vsix
 # Cursor:
-cursor --install-extension owen-neutronics-1.0.3.vsix
+cursor --install-extension owen-neutronics-<version>.vsix
 ```
 
 Or in the editor: Extensions view → `...` menu → **Install from VSIX…**.
