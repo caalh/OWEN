@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
+import { forcedColorCss } from '../highlight/forcedColor';
 import { findOpenmcTokens, OpenmcScope } from '../highlight/openmcTokens';
-import { PaletteId, paletteIdFromLabel, styleForScope } from '../highlight/palettes';
+import { PaletteId, TokenStyle, paletteIdFromLabel, styleForScope } from '../highlight/palettes';
 
 // Draw the OpenMC palette over Pylance.
 //
@@ -27,6 +28,24 @@ const SCOPES: OpenmcScope[] = [
 // Beyond this the scan stops being free and the file is almost certainly not a
 // hand-written input deck.
 const MAX_BYTES = 2_000_000;
+
+/**
+ * Decoration options that actually win against a theme's token colors.
+ *
+ * `DecorationRenderOptions.color` alone is not enough — that is why v1.0.4
+ * shipped a palette that still did nothing on a machine with Pylance. The
+ * ordering problem and the `!important` workaround are described in
+ * {@link forcedColorCss}; `color` is kept as well so the intent is legible to
+ * anything that inspects the decoration type.
+ */
+function forceColor(style: TokenStyle): vscode.DecorationRenderOptions {
+    return {
+        color: style.foreground,
+        fontStyle: style.fontStyle,
+        textDecoration: forcedColorCss(style),
+        rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+    };
+}
 
 function isEnabled(): boolean {
     return vscode.workspace
@@ -63,13 +82,7 @@ class OpenmcDecorator implements vscode.Disposable {
         for (const scope of SCOPES) {
             const style = styleForScope('openmc', palette, scope);
             if (!style) continue;
-            this.types.set(
-                scope,
-                vscode.window.createTextEditorDecorationType({
-                    color: style.foreground,
-                    fontStyle: style.fontStyle,
-                }),
-            );
+            this.types.set(scope, vscode.window.createTextEditorDecorationType(forceColor(style)));
         }
         this.palette = palette;
     }
@@ -134,5 +147,9 @@ export function registerOpenmcPalette(context: vscode.ExtensionContext): void {
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('owen.highlight.openmc')) decorator.refreshAll();
         }),
+        // A theme switch rebuilds the token stylesheet, and the palette colors are
+        // chosen for a dark background, so both the ranges and the reason to draw
+        // them are worth re-evaluating.
+        vscode.window.onDidChangeActiveColorTheme(() => decorator.refreshAll()),
     );
 }

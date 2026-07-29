@@ -27,6 +27,8 @@ import path from 'node:path';
 const outDir = mkdtempSync(path.join(tmpdir(), 'owen-openmc-'));
 const outFile = path.join(outDir, 'tokens.mjs');
 
+const cssFile = path.join(outDir, 'forcedColor.mjs');
+
 await build({
   entryPoints: ['src/highlight/openmcTokens.ts'],
   outfile: outFile,
@@ -36,7 +38,17 @@ await build({
   logLevel: 'error',
 });
 
+await build({
+  entryPoints: ['src/highlight/forcedColor.ts'],
+  outfile: cssFile,
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  logLevel: 'error',
+});
+
 const { findOpenmcTokens, maskCommentsAndStrings } = await import(pathToFileURL(outFile).href);
+const { forcedColorCss } = await import(pathToFileURL(cssFile).href);
 
 const failures = [];
 
@@ -152,6 +164,34 @@ expect(
 
 expect('unrelated python', 'import numpy as np\nnp.zeros(3)', []);
 
+// --- the decoration has to outrank the theme's token color ----------------
+// Without `!important` the palette is computed, applied, and invisible, which
+// is exactly what 1.0.4 shipped. Equal specificity means ordering decides, and
+// OWEN rewrites editor.tokenColorCustomizations on every palette change.
+
+{
+  const css = forcedColorCss({ foreground: '#9DD6C4' });
+  if (!/color:\s*#9DD6C4\s*!important/.test(css)) {
+    failures.push(`forcedColorCss dropped the important color declaration: ${css}`);
+  }
+  if (!css.startsWith('none;')) {
+    failures.push(
+      `forcedColorCss must open with "none;" to close the text-decoration property it is ` +
+      `assigned to, otherwise the color declaration is part of a text-decoration value: ${css}`,
+    );
+  }
+
+  const italic = forcedColorCss({ foreground: '#A8B7AB', fontStyle: 'italic' });
+  if (!/font-style:\s*italic\s*!important/.test(italic)) {
+    failures.push(`forcedColorCss dropped the important font-style declaration: ${italic}`);
+  }
+
+  const plain = forcedColorCss({ foreground: '#8AB4D8' });
+  if (/font-style/.test(plain)) {
+    failures.push(`forcedColorCss invented a font-style for a style that has none: ${plain}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 rmSync(outDir, { recursive: true, force: true });
@@ -166,4 +206,7 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('[verify-openmc-tokens] OK — 15 cases across the four patterns, precedence, and masking.');
+console.log(
+  '[verify-openmc-tokens] OK — 15 cases across the four patterns, precedence and masking, ' +
+  'plus the forced-color declaration that makes the decorations visible.',
+);

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] — 2026-07-29
+
+Patch release. The OpenMC palette drawn in 1.0.4 was still invisible, and both Marketplace
+badges had gone dead. No breaking changes.
+
+### Fixed
+
+- **The OpenMC palette still did nothing, for a second and different reason.** 1.0.4 correctly
+  identified that Pylance's semantic tokens outrank the injection grammar, and correctly moved to
+  editor decorations to get above them. What it missed is that a decoration's color is not
+  automatically stronger than a token's. VS Code emits the token color as
+  `.monaco-editor .mtk7 { color: … }` and the decoration color as
+  `.monaco-editor .ced-<key>-1 { color: … }` — two class selectors under one element selector, so
+  identical specificity, so the winner is whichever stylesheet the browser saw last. The token
+  stylesheet is rebuilt whenever `editor.tokenColorCustomizations` changes, and OWEN rewrites that
+  setting on every palette change, so OWEN reliably lost the race to itself.
+
+  The decoration now carries `color: … !important`, smuggled through `textDecoration` because that
+  is the one decoration property VS Code passes to CSS verbatim. An important declaration beats a
+  normal one at any specificity, which takes stylesheet ordering out of the picture entirely. The
+  decorator also refreshes on a color-theme change, since that rebuilds the same stylesheet.
+
+  Verified by inspection of the shipped bundle and by running the token scanner over a real
+  40 KB full-core OpenMC deck (156 tokens, correctly scoped). Not verified visually on this
+  machine: launching a second VS Code instance to screenshot the result failed because a pending
+  update holds the `vscode-updating` mutex.
+
+- **Both VS Marketplace badges rendered as "retired badge".** shields.io retired its entire
+  `visual-studio-marketplace` badge family, so the version and install-count badges had become grey
+  placeholders reading `retired badge` — which mattered more than it normally would, because 1.0.5
+  had deleted the README's hardcoded version line on the grounds that those badges reported the
+  live version. For a release and a half the listing had no working version indicator at all. Both
+  now come from `vsmarketplacebadges.dev`, which returns live data; Open VSX, release and license
+  badges were unaffected.
+
+### Changed
+
+- The listing's "See it in action" section now shows what the current build does. The superseded
+  Serpent 3D clip is replaced by a full BEAVRS core from a SCONE deck expanding to 1.2 M primitives
+  with its real 36-level axial stack, and two features that had no media at all are shown: geometry
+  verification through a local OpenMC install (five overlap planes, magenta overlap pixels), and the
+  side-by-side palette preview.
+
 ## [1.0.5] — 2026-07-27
 
 Documentation-only release. The Marketplace and Open VSX listings render `README.md`

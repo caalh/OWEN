@@ -4,8 +4,8 @@
 <p align="center">The nuclear reactor modeling toolkit for VS Code &amp; Cursor — a Monte Carlo language server, visual lattice and input builders, full-core 3D geometry preview, native OpenMC rendering and verification, a cross-code results viewer, and workflow automation for <strong>MCNP</strong>, <strong>OpenMC</strong>, <strong>Serpent</strong>, and <strong>SCONE</strong>.</p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics"><img alt="VS Code Marketplace Version" src="https://img.shields.io/visual-studio-marketplace/v/belvoirdynamics.owen-neutronics?label=VS%20Marketplace&logo=visualstudiocode&color=0b1020"></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics"><img alt="VS Code Marketplace Installs" src="https://img.shields.io/visual-studio-marketplace/i/belvoirdynamics.owen-neutronics?label=installs&color=f59e0b"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics"><img alt="VS Code Marketplace Version" src="https://vsmarketplacebadges.dev/version-short/belvoirdynamics.owen-neutronics.svg?style=flat&label=VS%20Marketplace&color=0b1020"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics"><img alt="VS Code Marketplace Installs" src="https://vsmarketplacebadges.dev/installs-short/belvoirdynamics.owen-neutronics.svg?style=flat&label=installs&color=f59e0b"></a>
   <a href="https://open-vsx.org/extension/belvoirdynamics/owen-neutronics"><img alt="Open VSX Version" src="https://img.shields.io/open-vsx/v/belvoirdynamics/owen-neutronics?label=Open%20VSX&color=0b1020"></a>
   <a href="https://github.com/caalh/owen/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/caalh/owen?label=release&color=f59e0b"></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-0b1020"></a>
@@ -33,15 +33,34 @@ guide-tube, and instrument-tube positions on a grid and OWEN writes the lattice 
 
 <p align="center"><a href="https://github.com/caalh/owen/releases/download/v0.2.2/demo-lattice-builder.mp4">▶ Watch full-quality MP4</a></p>
 
-**3D geometry preview of a full Serpent core — component toggles, Disc/Layers fidelity, and
-X / Y / Z slice planes.** Inspect ~56,900 pins interactively: peel away vessel and guide tubes,
-switch to concentric pin layers, and slice through the core.
+**A full BEAVRS core from a SCONE deck, at 1.2 million primitives, with the real axial stack.**
+OWEN resolves the nested lattice — 17×17 assemblies of 17×17 pins — and draws every one of the
+55,809 pin positions. Turn on axial segments and each pin expands into its true z-column, so the
+36 levels of active fuel, plena, grid spacers, end plugs and nozzles are individually toggleable.
+Peel off the vessel, solo a layer, or slice through the core on any axis.
 
 <p align="center">
-  <img alt="OWEN 3D geometry preview of a full Serpent core with component toggles and slice planes" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-3d-preview.gif" width="820">
+  <img alt="OWEN 3D geometry preview of a full BEAVRS core from a SCONE deck, expanding to 1.2 million primitives with per-axial-layer toggles and slice planes" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-3d-core-axial.gif" width="880">
 </p>
 
-<p align="center"><a href="https://github.com/caalh/owen/releases/download/v0.2.2/demo-3d-preview.mp4">▶ Watch full-quality MP4</a></p>
+**Geometry checked against your own OpenMC, not against OWEN's opinion of it.**
+`OWEN: Verify Geometry with OpenMC` runs the model through your real OpenMC install — local or WSL —
+and reports overlapping cells on five sampled planes plus a short lost-particle probe. Overlap
+pixels come back highlighted in magenta, and the panel says plainly that sampled planes are
+evidence rather than proof.
+
+<p align="center">
+  <img alt="OWEN Geometry Verification panel showing five overlap slices of a full PWR core checked through OpenMC 0.15.3 under WSL, all clear" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-verify-openmc.png" width="820">
+</p>
+
+**Four highlight palettes per code, previewed side by side before you commit.**
+`OWEN: Choose Highlight Palette` opens all four on the language you picked — Classic, Solarized,
+High Contrast, Pastel — rendered from the same color table the editor uses, so what you compare is
+what you get. Click a card to apply it.
+
+<p align="center">
+  <img alt="OWEN highlight palette preview showing Classic, Solarized, High Contrast and Pastel side by side for MCNP" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-highlight-palettes.png" width="880">
+</p>
 
 ## Features
 
@@ -49,7 +68,7 @@ switch to concentric pin layers, and slice through the core.
 
 | Feature | Description |
 |---------|-------------|
-| **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), and SCONE (`.scone`), plus an OpenMC injection grammar for Python. Line-context MCNP rules color cell/surface/material cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry operators. Four switchable palettes per language (Classic / Solarized / High Contrast / Pastel) via `OWEN: Choose Highlight Palette`. |
+| **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), and SCONE (`.scone`), plus an OpenMC injection grammar for Python. Line-context MCNP rules color cell/surface/material cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry operators. Four switchable palettes per language (Classic / Solarized / High Contrast / Pastel) via `OWEN: Choose Highlight Palette`, previewed side by side before you apply one. OpenMC decks are Python, so a language server such as Pylance owns their semantic tokens; OWEN draws the OpenMC palette on top of that layer, which is what makes it visible on a machine with Pylance installed (`owen.highlight.openmc.decorate` turns it off). |
 | **Snippets** | Ready-to-edit decks: PWR pin cell, 17×17 PWR assembly, criticality array, and shielding slab for MCNP; full OpenMC pin/assembly Python scripts; SCONE fuel pin, 5×5 assembly, and shielding tutorials. |
 | **MC Language Server** | A real language server for MCNP, Serpent, and SCONE: **real-time diagnostics as you type** — density-sign and fraction-sign conventions, S(α,β) thermal scattering on non-hydrogenous materials, ZAID format, macrobody parameter counts, MCNP line length, and **cross-reference errors** (a cell referencing an undefined surface/material/universe/transform is flagged; defined-but-unused entities are faded hints) — plus hover, go-to-definition, find-references, and a grouped document outline (Cells / Surfaces / Materials / Universes / Transforms / Tallies). Ships as a self-contained `out/server.js`, reusable by other editors over stdio. OpenMC Python files keep Pylance plus `OWEN: Validate Input File`. |
 | **MCNP cross-reference tracker** | Role- and position-aware hover, Go-to-Definition, Find-All-References, occurrence highlight, and a **MCNP References** tree for MCNP decks. A number is resolved by *what it is and where it sits on the card* — cell id (1st field), material number (2nd field; `0` = void), geometry surface refs (signed entries), surface id (1st field of a surface card), `u=` universe, `fill`/`lat` (lattice fill arrays are decoded so universe references inside them resolve), `trcl`/`tr` transforms, and `mt`/`mx` material-data cards. Clicking surface `3` finds only the references to *surface 3* — never material 3, cell 3, or the digit `3` inside a `fill=` index. |
