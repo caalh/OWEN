@@ -443,7 +443,7 @@ function findAxialBands(text: string): AxialBand[] {
             const args = m[1];
             if (!/region\s*=/.test(args)) continue;
             const zs: number[] = [];
-            for (const vm of args.matchAll(/[+\-]\s*([A-Za-z_]\w*)/g)) {
+            for (const vm of args.matchAll(/[+-]\s*([A-Za-z_]\w*)/g)) {
                 const z = zplanes.get(vm[1]);
                 if (z !== undefined) zs.push(z);
             }
@@ -1629,7 +1629,7 @@ function resolveExpr(expr: string, scope: Scope, depth: number): ResolvedNode {
         }
     } else if (sub && /^(BAF|baf)$/i.test(sub[1])) {
         result = { kind: 'structure', subtype: 'baffle' };
-    } else if (/^BAF\s*\[/.test(t) || /\bbaf[_\[]/i.test(t)) {
+    } else if (/^BAF\s*\[/.test(t) || /\bbaf(?:_|\[)/i.test(t)) {
         result = { kind: 'structure', subtype: 'baffle' };
     } else {
         // Function call: name(args).

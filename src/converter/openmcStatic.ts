@@ -381,7 +381,7 @@ function parseRegionExpr(expr: string, bindings: Map<string, BoundValue>): TRegi
     const peek = () => (pos < tokens.length ? tokens[pos] : null);
 
     function parseOr(): TRegion | null {
-        let left = parseAnd();
+        const left = parseAnd();
         if (!left) return null;
         const parts = [left];
         while (peek() === '|') {

@@ -248,7 +248,9 @@ export function mcnpToScone(mcnpText: string): ConversionResult {
     }
     out.push('  }', '}', '');
 
-    // ASCII-only guarantee
+    // ASCII-only guarantee. The \x00 is the low end of the permitted range,
+    // not a control character being matched for its own sake.
+    // eslint-disable-next-line no-control-regex
     const ascii = out.join('\n').replace(/[^\x00-\x7F]/g, '?');
     return { direction: 'mcnp_to_scone', output: ascii, issues };
 }

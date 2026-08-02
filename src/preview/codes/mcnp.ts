@@ -248,7 +248,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         if (discMode) {
             // Dominant solid layer drives the colour; component from the pin's
             // classified kind so guide/instrument tubes read correctly.
-            let solid = pin.layers.find((l) => l.component !== Component.Gap && l.component !== Component.Moderator) ?? pin.layers[0];
+            const solid = pin.layers.find((l) => l.component !== Component.Gap && l.component !== Component.Moderator) ?? pin.layers[0];
             let comp: ComponentId = solid.component;
             let color = solid.color;
             if (pin.kind === 'guide') { comp = Component.GuideTube; color = componentColor(comp); }
