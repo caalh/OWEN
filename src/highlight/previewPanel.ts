@@ -25,7 +25,7 @@ function tk(text: string, scope?: string): SampleToken {
 }
 
 // Representative, domain-correct samples per language. Each token is tagged with
-// the same scope the grammar would assign, so all four palettes recolor the
+// the same scope the grammar would assign, so every palette recolors the
 // identical text exactly as the editor would. Kept short (~6–12 lines).
 const SAMPLES: Record<Language, SampleLine[]> = {
     mcnp: [
@@ -107,7 +107,7 @@ function renderSample(language: Language, palette: PaletteId): string {
     return lines;
 }
 
-/** Build the four labeled palette blocks for the selected language. */
+/** Build the labeled palette blocks (one per PaletteId) for the selected language. */
 function renderBlocks(language: Language, selectedId: PaletteId): string {
     return PALETTE_IDS.map((id) => {
         const sample = renderSample(language, id);
@@ -260,7 +260,7 @@ function buildHtml(language: Language, selectedId: PaletteId): string {
 
 /**
  * Open (or reveal and re-target) the palette-preview panel for a language. The
- * panel renders all four palettes side by side so the user can compare before
+ * panel renders every palette side by side so the user can compare before
  * choosing. Each card is clickable: clicking applies that palette via the
  * supplied `onSelect` callback. `selectedId` marks the currently-applied
  * palette. Safe to call repeatedly; reuses a single panel.

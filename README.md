@@ -53,10 +53,15 @@ evidence rather than proof.
   <img alt="OWEN Geometry Verification panel showing five overlap slices of a full PWR core checked through OpenMC 0.15.3 under WSL, all clear" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-verify-openmc.png" width="820">
 </p>
 
-**Four highlight palettes per code, previewed side by side before you commit.**
-`OWEN: Choose Highlight Palette` opens all four on the language you picked — Classic, Solarized,
-High Contrast, Pastel — rendered from the same color table the editor uses, so what you compare is
-what you get. Click a card to apply it.
+**Five highlight palettes per code, previewed side by side before you commit.**
+`OWEN: Choose Highlight Palette` opens them on the language you picked — Classic, Solarized,
+High Contrast, Pastel, and **Custom** (your own colors) — rendered from the same color table the
+editor uses, so what you compare is what you get. Click a card to apply it. For OpenMC each
+built-in palette uses its own hue family (blue/teal, olive/blue, orange/yellow/green/cyan,
+lilac/rose/mint), so the options are distinct at a glance even though Python decks only show
+four token roles. Custom colors live in `owen.highlight.customColors` — set any of the ten
+token roles to a hex color (or `{foreground, fontStyle}`); roles you leave out fall back to
+Classic.
 
 <p align="center">
   <img alt="OWEN highlight palette preview showing Classic, Solarized, High Contrast and Pastel side by side for MCNP" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-highlight-palettes.png" width="880">
@@ -68,7 +73,7 @@ what you get. Click a card to apply it.
 
 | Feature | Description |
 |---------|-------------|
-| **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), SCONE (`.scone`), and PHITS (`.phits`, `phits.inp` — sections, `$`/`#`/`!`/`c` comments, `infl:`/`set:` directives, `MAT[n]`), plus an OpenMC injection grammar for Python. Line-context MCNP rules color cell/surface/material cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry operators. Four switchable palettes per language (Classic / Solarized / High Contrast / Pastel) via `OWEN: Choose Highlight Palette`, previewed side by side before you apply one. OpenMC decks are Python, so a language server such as Pylance owns their semantic tokens; OWEN draws the OpenMC palette on top of that layer, which is what makes it visible on a machine with Pylance installed (`owen.highlight.openmc.decorate` turns it off). |
+| **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), SCONE (`.scone`), and PHITS (`.phits`, `phits.inp` — sections, `$`/`#`/`!`/`c` comments, `infl:`/`set:` directives, `MAT[n]`), plus an OpenMC injection grammar for Python. Line-context MCNP rules color cell/surface/material cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry operators. Five switchable palettes per language (Classic / Solarized / High Contrast / Pastel / Custom — your own colors via `owen.highlight.customColors`) via `OWEN: Choose Highlight Palette`, previewed side by side before you apply one; the OpenMC palettes each use a distinct hue family so the choice is visible at a glance. OpenMC decks are Python, so a language server such as Pylance owns their semantic tokens; OWEN draws the OpenMC palette on top of that layer, which is what makes it visible on a machine with Pylance installed (`owen.highlight.openmc.decorate` turns it off). |
 | **Snippets** | Ready-to-edit decks: PWR pin cell, 17×17 PWR assembly, criticality array, and shielding slab for MCNP; full OpenMC pin/assembly Python scripts plus depletion runs (`omc_deplete`, `omc_deplete_results`); SCONE fuel pin, 5×5 assembly, and shielding tutorials; PHITS starter deck, source, material, and T-Track tally blocks. |
 | **MC Language Server** | A real language server for MCNP, Serpent, and SCONE: **real-time diagnostics as you type** — density-sign and fraction-sign conventions, S(α,β) thermal scattering on non-hydrogenous materials, ZAID format, macrobody parameter counts, MCNP line length, and **cross-reference errors** (a cell referencing an undefined surface/material/universe/transform is flagged; defined-but-unused entities are faded hints) — plus hover, go-to-definition, find-references, and a grouped document outline (Cells / Surfaces / Materials / Universes / Transforms / Tallies). Ships as a self-contained `out/server.js`, reusable by other editors over stdio. OpenMC Python files keep Pylance plus `OWEN: Validate Input File`. |
 | **MCNP cross-reference tracker** | Role- and position-aware hover, Go-to-Definition, Find-All-References, occurrence highlight, and a **MCNP References** tree for MCNP decks. A number is resolved by *what it is and where it sits on the card* — cell id (1st field), material number (2nd field; `0` = void), geometry surface refs (signed entries), surface id (1st field of a surface card), `u=` universe, `fill`/`lat` (lattice fill arrays are decoded so universe references inside them resolve), `trcl`/`tr` transforms, and `mt`/`mx` material-data cards. Clicking surface `3` finds only the references to *surface 3* — never material 3, cell 3, or the digit `3` inside a `fill=` index. |
@@ -148,7 +153,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | `OWEN: Set MCNP Project Root` | Root `.inp` for cross-file workspace validation |
 | `OWEN: Insert Material from Database` | NRDP + PNNL-15870 material picker, language-aware (auto-numbered `mN`) |
 | `OWEN: Search ReactorMC (Tutorials & NRDP)` | In-editor search over reactormc.net tutorials, NRDP, and site tools |
-| `OWEN: Choose Highlight Palette` | Switch between Classic / Solarized / High Contrast / Pastel |
+| `OWEN: Choose Highlight Palette` | Switch between Classic / Solarized / High Contrast / Pastel / Custom |
 | `OWEN: Toggle Invisible Characters` | Reveal tabs/trailing whitespace that break fixed-format decks |
 | `OWEN: Search Reactor Library` | Community Library browser (disabled by default) |
 
@@ -165,6 +170,7 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.openmc.pythonExecutable` | `python` | Interpreter for OpenMC model scripts; when explicitly set it is also the first candidate for `Render with OpenMC` |
 | `owen.scone.executable` | `scone` | On Windows, SCONE typically requires WSL |
 | `owen.highlight.<lang>.palette` | `Classic` | Palette for `mcnp` / `openmc` / `serpent` / `scone`. Also settable from `OWEN: Choose Highlight Palette` |
+| `owen.highlight.customColors` | `{}` | Colors for the `Custom` palette, per token role (`"keyword": "#FF9100"` or `{foreground, fontStyle}` objects). Unset roles fall back to Classic |
 | `owen.highlight.openmc.decorate` | `true` | Draw the OpenMC palette as decorations so it survives Pylance's semantic tokens (see below) |
 | `owen.preview.maxInstances` | `1500000` | Max cylinder instances in the 3D preview; auto-simplifies detail (not pins) above this. Raise (e.g. 4000000) for full shell+axial detail on a full core |
 | `owen.simulation.workingDirectory` | `""` | Empty = the input file's directory |
@@ -232,6 +238,14 @@ OWEN integrates with **[OpenMC](https://openmc.org)** (MIT License, © OpenMC co
 the `Render with OpenMC (authoritative)` and `Verify Geometry with OpenMC` features — the images
 and checks in those panels are produced by your locally installed OpenMC, not by OWEN. OpenMC
 itself is not bundled or redistributed.
+
+The optional adapter convert backend (`OWEN: Convert to OpenMC XML (openmc adapters)`) drives
+the OpenMC team's own converters, **[openmc_mcnp_adapter](https://github.com/openmc-dev/openmc_mcnp_adapter)**
+and **[openmc_serpent_adapter](https://github.com/openmc-dev/openmc_serpent_adapter)** (both MIT
+License, © OpenMC contributors), through your Python environment. Neither adapter is bundled or
+redistributed — OWEN offers the pip install command when one is missing. OWEN's built-in
+converter is an independent implementation; the adapters serve as a second opinion
+(`docs/ADAPTER_COMPARISON.md`).
 
 Compendium material data derives from **PNNL-15870 Rev. 2** (April 2021): R.S. Detwiler,
 R.J. McConn Jr., T.F. Grimes, S.A. Upton, E.J. Engel, *Compendium of Material Composition Data

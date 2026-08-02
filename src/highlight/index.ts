@@ -11,6 +11,7 @@ import {
     TextMateRule,
     buildRules,
     paletteIdFromLabel,
+    setCustomColors,
 } from './palettes';
 import { showPalettePreview, postHighlight, postSelected } from './previewPanel';
 
@@ -43,6 +44,10 @@ function isOwenRule(rule: TextMateRule): boolean {
 export async function applyPalettes(): Promise<void> {
     const owenCfg = vscode.workspace.getConfiguration('owen');
     const editorCfg = vscode.workspace.getConfiguration('editor');
+
+    // Install the user's Custom colors (if any) before building rules, so a
+    // language whose palette is "Custom" resolves against the live config.
+    setCustomColors(owenCfg.get('highlight.customColors'));
 
     const inspected = editorCfg.inspect<TokenColorCustomizations>('tokenColorCustomizations');
     const current: TokenColorCustomizations = inspected?.globalValue ?? {};
@@ -82,9 +87,28 @@ async function applySelection(language: Language, id: PaletteId): Promise<void> 
     // so it takes effect even if the value was already set to this label.
     await applyPalettes();
 
-    vscode.window.showInformationMessage(
-        `OWEN: ${LANGUAGE_LABELS[language]} highlighting set to "${PALETTE_LABELS[id]}".`,
-    );
+    if (id === 'custom') {
+        const open = 'Edit colors';
+        void vscode.window
+            .showInformationMessage(
+                `OWEN: ${LANGUAGE_LABELS[language]} highlighting set to "Custom". ` +
+                'Define your colors in the owen.highlight.customColors setting; ' +
+                'roles you leave out use the Classic color.',
+                open,
+            )
+            .then((choice) => {
+                if (choice === open) {
+                    void vscode.commands.executeCommand(
+                        'workbench.action.openSettingsJson',
+                        { revealSetting: { key: 'owen.highlight.customColors' } },
+                    );
+                }
+            });
+    } else {
+        vscode.window.showInformationMessage(
+            `OWEN: ${LANGUAGE_LABELS[language]} highlighting set to "${PALETTE_LABELS[id]}".`,
+        );
+    }
 }
 
 interface PaletteItem extends vscode.QuickPickItem {

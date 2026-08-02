@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
 import { forcedColorCss } from '../highlight/forcedColor';
 import { findOpenmcTokens, OpenmcScope } from '../highlight/openmcTokens';
-import { PaletteId, TokenStyle, paletteIdFromLabel, styleForScope } from '../highlight/palettes';
+import { PaletteId, TokenStyle, paletteIdFromLabel, setCustomColors, styleForScope } from '../highlight/palettes';
 
 // Draw the OpenMC palette over Pylance.
 //
@@ -61,7 +61,7 @@ function currentPalette(): PaletteId {
 
 class OpenmcDecorator implements vscode.Disposable {
     private types = new Map<OpenmcScope, vscode.TextEditorDecorationType>();
-    private palette: PaletteId | null = null;
+    private fingerprint: string | null = null;
     private timer: NodeJS.Timeout | undefined;
 
     dispose(): void {
@@ -72,19 +72,25 @@ class OpenmcDecorator implements vscode.Disposable {
     private disposeTypes(): void {
         for (const t of this.types.values()) t.dispose();
         this.types.clear();
-        this.palette = null;
+        this.fingerprint = null;
     }
 
-    /** Decoration types carry their color, so a palette change rebuilds them. */
+    /**
+     * Decoration types carry their color, so they rebuild when the *resolved
+     * styles* change — not just when the palette id changes. The distinction
+     * matters for the Custom palette, whose id stays "custom" while
+     * owen.highlight.customColors edits change every color.
+     */
     private ensureTypes(palette: PaletteId): void {
-        if (this.palette === palette && this.types.size > 0) return;
+        const styles = SCOPES.map((scope) => [scope, styleForScope('openmc', palette, scope)] as const);
+        const fingerprint = JSON.stringify(styles);
+        if (this.fingerprint === fingerprint && this.types.size > 0) return;
         this.disposeTypes();
-        for (const scope of SCOPES) {
-            const style = styleForScope('openmc', palette, scope);
+        for (const [scope, style] of styles) {
             if (!style) continue;
             this.types.set(scope, vscode.window.createTextEditorDecorationType(forceColor(style)));
         }
-        this.palette = palette;
+        this.fingerprint = fingerprint;
     }
 
     private clear(editor: vscode.TextEditor): void {
@@ -97,6 +103,9 @@ class OpenmcDecorator implements vscode.Disposable {
             this.clear(editor);
             return;
         }
+        // Idempotent and cheap; guarantees the Custom palette resolves against
+        // the live config even if this refresh ran before applyPalettes().
+        setCustomColors(vscode.workspace.getConfiguration('owen').get('highlight.customColors'));
         this.ensureTypes(currentPalette());
         if (detectMonteCarloLanguage(doc) !== 'openmc') {
             this.clear(editor);
@@ -145,7 +154,9 @@ export function registerOpenmcPalette(context: vscode.ExtensionContext): void {
             if (e.document.languageId === 'python') decorator.schedule();
         }),
         vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('owen.highlight.openmc')) decorator.refreshAll();
+            // owen.highlight.customColors also affects this decorator when the
+            // OpenMC palette is set to Custom, so listen at the highlight root.
+            if (e.affectsConfiguration('owen.highlight')) decorator.refreshAll();
         }),
         // A theme switch rebuilds the token stylesheet, and the palette colors are
         // chosen for a dark background, so both the ranges and the reason to draw

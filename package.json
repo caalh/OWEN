@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -323,7 +323,7 @@
         {
           "submenu": "owen.editorTitleMenu",
           "group": "navigation@100",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|phits)$/ || editorLangId == xml && resourceFilename =~ /(materials|geometry|settings|tallies|model)\\.xml$/"
         }
       ],
       "owen.editorTitleMenu": [
@@ -333,11 +333,13 @@
         },
         {
           "command": "owen.validateInput",
-          "group": "1_analyze@1"
+          "group": "1_analyze@1",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.insertMaterial",
-          "group": "1_analyze@2"
+          "group": "1_analyze@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.openPrebuiltModel",
@@ -358,7 +360,8 @@
         },
         {
           "command": "owen.openGeometryPreview",
-          "group": "2_build@2"
+          "group": "2_build@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.renderWithOpenmc",
@@ -372,7 +375,8 @@
         },
         {
           "command": "owen.convertDeck",
-          "group": "2_build@5"
+          "group": "2_build@5",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.convertDeckAdapter",
@@ -385,11 +389,13 @@
         },
         {
           "command": "owen.runSimulation",
-          "group": "3_run@1"
+          "group": "3_run@1",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.runSweep",
-          "group": "3_run@2"
+          "group": "3_run@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.viewSweepResults",
@@ -416,7 +422,7 @@
         {
           "submenu": "owen.contextMenu",
           "group": "owen@1",
-          "when": "editorTextFocus && editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+          "when": "editorTextFocus && (editorLangId =~ /^(mcnp|serpent|scone|python|phits)$/ || editorLangId == xml && resourceFilename =~ /(materials|geometry|settings|tallies|model)\\.xml$/)"
         }
       ],
       "owen.contextMenu": [
@@ -426,11 +432,13 @@
         },
         {
           "command": "owen.validateInput",
-          "group": "1_analyze@1"
+          "group": "1_analyze@1",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.insertMaterial",
-          "group": "1_analyze@2"
+          "group": "1_analyze@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.openPrebuiltModel",
@@ -451,7 +459,8 @@
         },
         {
           "command": "owen.openGeometryPreview",
-          "group": "2_build@2"
+          "group": "2_build@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.renderWithOpenmc",
@@ -465,7 +474,8 @@
         },
         {
           "command": "owen.convertDeck",
-          "group": "2_build@5"
+          "group": "2_build@5",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.convertDeckAdapter",
@@ -478,11 +488,13 @@
         },
         {
           "command": "owen.runSimulation",
-          "group": "3_run@1"
+          "group": "3_run@1",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.runSweep",
-          "group": "3_run@2"
+          "group": "3_run@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.viewSweepResults",
@@ -627,13 +639,15 @@
             "Classic",
             "Solarized",
             "High Contrast",
-            "Pastel"
+            "Pastel",
+            "Custom"
           ],
           "enumDescriptions": [
             "VS Code dark default-style colors",
             "Muted Solarized-inspired accents",
             "Bright, vivid, maximum legibility",
-            "Soft low-saturation tones"
+            "Soft low-saturation tones",
+            "Your own colors - edit owen.highlight.customColors"
           ],
           "default": "Classic",
           "description": "Color palette applied to MCNP syntax tokens (comments, keywords, surfaces, materials, tallies, numbers, ZAIDs). Applied live via editor.tokenColorCustomizations."
@@ -644,16 +658,55 @@
             "Classic",
             "Solarized",
             "High Contrast",
-            "Pastel"
+            "Pastel",
+            "Custom"
           ],
           "enumDescriptions": [
             "VS Code dark default-style colors",
             "Muted Solarized-inspired accents",
             "Bright, vivid, maximum legibility",
-            "Soft low-saturation tones"
+            "Soft low-saturation tones",
+            "Your own colors - edit owen.highlight.customColors"
           ],
           "default": "Classic",
           "description": "Color palette applied to OpenMC API tokens inside Python files (openmc module, classes, functions, submodules). Applied as editor decorations, and via an injection grammar plus editor.tokenColorCustomizations where no Python language server is active."
+        },
+        "owen.highlight.customColors": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Colors for the **Custom** highlight palette, per token role. Select `Custom` in any `owen.highlight.<language>.palette` setting (or via `OWEN: Choose Highlight Palette`) to use these. Each role takes a hex color string (`\"keyword\": \"#FF9100\"`) or an object with a font style (`\"comment\": { \"foreground\": \"#6A9955\", \"fontStyle\": \"italic\" }`). Roles you leave out fall back to the Classic color. Roles: `comment` `keyword` `type` (classes, surface types) `entity` (submodules, macrobodies, materials) `func` (functions, tallies) `number` `string` `special` (ZAIDs, libraries) `identifier` (cell/surface ids) `modifier` (particle designators, geometry operators).",
+          "properties": {
+            "comment": {
+              "description": "Comments (hex color or {foreground, fontStyle})"
+            },
+            "keyword": {
+              "description": "Keywords / the openmc module name"
+            },
+            "type": {
+              "description": "Classes, surface types, material ids"
+            },
+            "entity": {
+              "description": "Submodules, macrobodies, material names"
+            },
+            "func": {
+              "description": "Functions, tallies, MT cards"
+            },
+            "number": {
+              "description": "Numeric literals"
+            },
+            "string": {
+              "description": "Quoted strings"
+            },
+            "special": {
+              "description": "ZAIDs and library identifiers"
+            },
+            "identifier": {
+              "description": "Cell and surface ids"
+            },
+            "modifier": {
+              "description": "Particle designators, geometry operators"
+            }
+          }
         },
         "owen.highlight.openmc.decorate": {
           "type": "boolean",
@@ -666,13 +719,15 @@
             "Classic",
             "Solarized",
             "High Contrast",
-            "Pastel"
+            "Pastel",
+            "Custom"
           ],
           "enumDescriptions": [
             "VS Code dark default-style colors",
             "Muted Solarized-inspired accents",
             "Bright, vivid, maximum legibility",
-            "Soft low-saturation tones"
+            "Soft low-saturation tones",
+            "Your own colors - edit owen.highlight.customColors"
           ],
           "default": "Classic",
           "description": "Color palette applied to Serpent syntax tokens (comments, keywords, materials, cells/pins/surfaces, numbers, strings, ZAIDs). Applied live via editor.tokenColorCustomizations."
@@ -683,13 +738,15 @@
             "Classic",
             "Solarized",
             "High Contrast",
-            "Pastel"
+            "Pastel",
+            "Custom"
           ],
           "enumDescriptions": [
             "VS Code dark default-style colors",
             "Muted Solarized-inspired accents",
             "Bright, vivid, maximum legibility",
-            "Soft low-saturation tones"
+            "Soft low-saturation tones",
+            "Your own colors - edit owen.highlight.customColors"
           ],
           "default": "Classic",
           "description": "Color palette applied to SCONE syntax tokens (comments, keywords, block/section names, numbers, strings). Applied live via editor.tokenColorCustomizations."

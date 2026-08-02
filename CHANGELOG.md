@@ -5,6 +5,37 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-08-02
+
+### Added
+
+- **The OWEN menu now appears on PHITS and OpenMC XML files.** The right-click and
+  editor-title OWEN menus were gated to MCNP / Serpent / SCONE / Python and never showed on
+  the file types added in 1.1.0. They now also appear on `phits` files and on OpenMC XML
+  inputs (`materials.xml`, `geometry.xml`, `settings.xml`, `tallies.xml`, `model.xml`,
+  including prefixed names like `pin_model.xml`). Deck-workflow entries (Validate, Run,
+  Sweep, 3D Preview, Convert, Insert Material) stay hidden where they don't apply; the
+  universal entries (ALLEN, Input Builder, Prebuilt Models, Results, Highlight Palette,
+  ReactorMC search, Reactor Library) are available everywhere OWEN is.
+- **Custom highlight palette.** Every `owen.highlight.<language>.palette` setting (and the
+  `Choose Highlight Palette` picker) now offers **Custom**: define your own colors per token
+  role in `owen.highlight.customColors` — a hex string (`"keyword": "#FF9100"`) or an object
+  with a font style (`"comment": {"foreground": "#6A9955", "fontStyle": "italic"}`). Roles you
+  leave out fall back to the Classic color, so a partial config renders sensibly. Edits to the
+  setting re-color live, including the Pylance-proof OpenMC decorations.
+
+### Changed
+
+- **The OpenMC palettes are now visually distinct.** Python decks only surface four token
+  roles, and the built-in palettes differed mostly by saturation within the same hue families —
+  so Classic, High Contrast, and Pastel looked nearly identical on an OpenMC file. Each
+  OpenMC palette now uses its own hue family (Classic blue/teal · Solarized olive/blue/magenta ·
+  High Contrast orange/yellow/green/cyan · Pastel lilac/rose/mint/peach). Other languages'
+  colors are unchanged.
+- **README acknowledgements** now credit the optional adapter backend's upstreams
+  (`openmc_mcnp_adapter`, `openmc_serpent_adapter`, both MIT © OpenMC contributors) alongside
+  OpenMC itself.
+
 ## [1.1.0] — 2026-08-02
 
 Feature release: OpenMC XML validation, PHITS language support, and the official OpenMC

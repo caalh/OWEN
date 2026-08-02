@@ -8,7 +8,7 @@
 // targeting that language's namespaced scopes precisely.
 
 export type Language = 'mcnp' | 'openmc' | 'serpent' | 'scone';
-export type PaletteId = 'classic' | 'solarized' | 'highContrast' | 'pastel';
+export type PaletteId = 'classic' | 'solarized' | 'highContrast' | 'pastel' | 'custom';
 
 /** A semantic token role shared across all languages. */
 export type Role =
@@ -38,13 +38,14 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 };
 
 /** Ordered for the QuickPick / settings enum. */
-export const PALETTE_IDS: PaletteId[] = ['classic', 'solarized', 'highContrast', 'pastel'];
+export const PALETTE_IDS: PaletteId[] = ['classic', 'solarized', 'highContrast', 'pastel', 'custom'];
 
 export const PALETTE_LABELS: Record<PaletteId, string> = {
     classic: 'Classic',
     solarized: 'Solarized',
     highContrast: 'High Contrast',
     pastel: 'Pastel',
+    custom: 'Custom',
 };
 
 export const PALETTE_DESCRIPTIONS: Record<PaletteId, string> = {
@@ -52,6 +53,7 @@ export const PALETTE_DESCRIPTIONS: Record<PaletteId, string> = {
     solarized: 'Muted Solarized-inspired accents',
     highContrast: 'Bright, vivid, maximum legibility',
     pastel: 'Soft low-saturation tones',
+    custom: 'Your own colors — edit owen.highlight.customColors',
 };
 
 /** Map a user-facing label (settings enum value) back to its palette id. */
@@ -111,7 +113,107 @@ const ROLE_COLORS: Record<PaletteId, Record<Role, TokenStyle>> = {
         identifier: { foreground: '#E89898' },
         modifier: { foreground: '#E0B0A0' },
     },
+    // Placeholder — the live values come from CUSTOM_COLORS (see setCustomColors).
+    // Kept identical to classic so 'custom' behaves sensibly before any config
+    // is read, and so fullPaletteMap() never sees a hole.
+    custom: {
+        comment: { foreground: '#6A9955', fontStyle: 'italic' },
+        keyword: { foreground: '#569CD6' },
+        type: { foreground: '#4EC9B0' },
+        entity: { foreground: '#DCDCAA' },
+        func: { foreground: '#C586C0' },
+        number: { foreground: '#B5CEA8' },
+        string: { foreground: '#CE9178' },
+        special: { foreground: '#D7BA7D' },
+        identifier: { foreground: '#F44747' },
+        modifier: { foreground: '#CE9178' },
+    },
 };
+
+// ── Per-language overrides ───────────────────────────────────────────────────
+// OpenMC decks only ever show four roles (module / class / function /
+// submodule), and the base palettes differ mostly by saturation within the
+// same hue families — which made the OpenMC options nearly indistinguishable
+// in practice (user report, 2026-08-02). These overrides give each OpenMC
+// palette its own hue family so the choice is visible at a glance:
+//   classic       blue module    teal classes    violet functions  khaki submodules
+//   solarized     olive module   blue classes    magenta functions gold submodules
+//   highContrast  orange module  yellow classes  green functions   cyan submodules
+//   pastel        lilac module   rose classes    mint functions    peach submodules
+// Other languages use the base palettes unchanged.
+const ROLE_OVERRIDES: Partial<Record<Language, Partial<Record<PaletteId, Partial<Record<Role, TokenStyle>>>>>> = {
+    openmc: {
+        solarized: {
+            type: { foreground: '#268BD2' },
+            func: { foreground: '#D33682' },
+        },
+        highContrast: {
+            keyword: { foreground: '#FF9100' },
+            type: { foreground: '#FFEA00' },
+            func: { foreground: '#00E676' },
+            entity: { foreground: '#40C4FF' },
+        },
+        pastel: {
+            keyword: { foreground: '#C8A2C8' },
+            type: { foreground: '#FFB3BA' },
+            func: { foreground: '#A8E6CF' },
+            entity: { foreground: '#FFDAC1' },
+        },
+    },
+};
+
+// ── Custom palette ───────────────────────────────────────────────────────────
+// The 'custom' palette takes its colors from the owen.highlight.customColors
+// setting. Roles the user leaves out (or sets to an invalid color) fall back
+// to the Classic style for that role, so a partial config still renders.
+
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const FONT_STYLES = new Set(['', 'italic', 'bold', 'underline', 'italic bold', 'bold italic']);
+
+export const ROLES: Role[] = [
+    'comment', 'keyword', 'type', 'entity', 'func',
+    'number', 'string', 'special', 'identifier', 'modifier',
+];
+
+let CUSTOM_COLORS: Record<Role, TokenStyle> = { ...ROLE_COLORS.classic };
+
+/**
+ * Validate a raw owen.highlight.customColors value into a full role → style
+ * map. Accepts per role either a hex string ("#RRGGBB") or an object
+ * `{ foreground, fontStyle? }`. Anything invalid falls back to Classic.
+ */
+export function resolveCustomColors(raw: unknown): Record<Role, TokenStyle> {
+    const out = {} as Record<Role, TokenStyle>;
+    const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    for (const role of ROLES) {
+        const base = ROLE_COLORS.classic[role];
+        const v = src[role];
+        if (typeof v === 'string' && HEX_COLOR.test(v)) {
+            out[role] = { foreground: v, ...(base.fontStyle ? { fontStyle: base.fontStyle } : {}) };
+        } else if (v && typeof v === 'object') {
+            const o = v as { foreground?: unknown; fontStyle?: unknown };
+            const fg = typeof o.foreground === 'string' && HEX_COLOR.test(o.foreground)
+                ? o.foreground : base.foreground;
+            const fs = typeof o.fontStyle === 'string' && FONT_STYLES.has(o.fontStyle)
+                ? o.fontStyle : base.fontStyle;
+            out[role] = { foreground: fg, ...(fs ? { fontStyle: fs } : {}) };
+        } else {
+            out[role] = { ...base };
+        }
+    }
+    return out;
+}
+
+/** Install the user's owen.highlight.customColors value as the Custom palette. */
+export function setCustomColors(raw: unknown): void {
+    CUSTOM_COLORS = resolveCustomColors(raw);
+}
+
+/** Resolve the effective style for a role, honoring custom + per-language overrides. */
+function roleStyle(language: Language, palette: PaletteId, role: Role): TokenStyle {
+    if (palette === 'custom') return CUSTOM_COLORS[role];
+    return ROLE_OVERRIDES[language]?.[palette]?.[role] ?? ROLE_COLORS[palette][role];
+}
 
 // Each language's TextMate scopes mapped to a shared role. These scope names
 // MUST match what the grammars emit (syntaxes/*.tmLanguage.json).
@@ -183,7 +285,7 @@ export function styleForScope(
 ): TokenStyle | undefined {
     const role = SCOPE_ROLES[language][scope];
     if (!role) return undefined;
-    return ROLE_COLORS[palette][role];
+    return roleStyle(language, palette, role);
 }
 
 /**
@@ -192,10 +294,9 @@ export function styleForScope(
  * string) so OWEN-managed rules are trivially identifiable via MANAGED_SCOPES.
  */
 export function buildRules(language: Language, palette: PaletteId): TextMateRule[] {
-    const roleColors = ROLE_COLORS[palette];
     const scopeRoles = SCOPE_ROLES[language];
     return Object.entries(scopeRoles).map(([scope, role]) => {
-        const style = roleColors[role];
+        const style = roleStyle(language, palette, role);
         const settings: TokenStyle = { foreground: style.foreground };
         if (style.fontStyle) settings.fontStyle = style.fontStyle;
         return { scope, settings };
