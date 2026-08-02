@@ -1,0 +1,94 @@
+{
+  "scopeName": "source.phits",
+  "name": "PHITS",
+  "patterns": [
+    { "include": "#comment-c" },
+    { "include": "#comment-dollar" },
+    { "include": "#comment-bang" },
+    { "include": "#comment-hash" },
+    { "include": "#section-tally" },
+    { "include": "#section" },
+    { "include": "#directive" },
+    { "include": "#material-def" },
+    { "include": "#complement" },
+    { "include": "#parameter-assignment" },
+    { "include": "#surface-mnemonic" },
+    { "include": "#particle" },
+    { "include": "#user-variable" },
+    { "include": "#char-variable" },
+    { "include": "#number" }
+  ],
+  "repository": {
+    "comment-dollar": {
+      "match": "\\$.*$",
+      "name": "comment.line.dollar.phits"
+    },
+    "comment-bang": {
+      "match": "!.*$",
+      "name": "comment.line.exclamation.phits"
+    },
+    "comment-hash": {
+      "comment": "# followed by whitespace is a comment; #N / #(…) in [cell] is the complement operator (see #complement)",
+      "match": "#(?=\\s).*$",
+      "name": "comment.line.hash.phits"
+    },
+    "comment-c": {
+      "comment": "c + space within the first five columns, MCNP style",
+      "match": "^\\s{0,4}[cC](?:\\s.*)?$",
+      "name": "comment.line.c.phits"
+    },
+    "section-tally": {
+      "match": "^\\s{0,4}(\\[\\s*[tT]\\s*-[^\\]]*\\])(\\s+off)?",
+      "captures": {
+        "1": { "name": "entity.name.section.tally.phits" },
+        "2": { "name": "keyword.other.off.phits" }
+      }
+    },
+    "section": {
+      "match": "^\\s{0,4}(\\[[^\\]\\n]+\\])(\\s+off)?",
+      "captures": {
+        "1": { "name": "entity.name.section.phits" },
+        "2": { "name": "keyword.other.off.phits" }
+      }
+    },
+    "directive": {
+      "match": "^\\s*(infl:|set:|qp:|q:)",
+      "name": "keyword.control.directive.phits"
+    },
+    "material-def": {
+      "match": "^\\s*(?:(?i:MAT)\\[\\s*\\d+\\s*\\]|[mM][tT]?\\d+)\\b",
+      "name": "entity.name.material.phits"
+    },
+    "complement": {
+      "match": "#(?=[\\d(])",
+      "name": "keyword.operator.complement.phits"
+    },
+    "parameter-assignment": {
+      "match": "^\\s*([A-Za-z][\\w-]*(?:\\(\\s*[\\w$-]*\\s*\\))?)\\s*(=)",
+      "captures": {
+        "1": { "name": "variable.parameter.phits" },
+        "2": { "name": "keyword.operator.assignment.phits" }
+      }
+    },
+    "surface-mnemonic": {
+      "match": "(?i)(?<=\\s)(px|py|pz|p|so|sx|sy|sz|sph|s|cx|cy|cz|c/x|c/y|c/z|kx|ky|kz|k/x|k/y|k/z|sq|gq|tx|ty|tz|box|rpp|rcc|rhp|hex|rec|trc|ell|wed|arb)(?=\\s)",
+      "name": "keyword.other.surface.phits"
+    },
+    "particle": {
+      "match": "(?i)\\b(neutron|proton|photon|gamma|electron|positron|deuteron|triton|alpha|muon|pion|kaon|nucleus|all)\\b",
+      "name": "constant.language.particle.phits"
+    },
+    "user-variable": {
+      "match": "\\bc\\d{1,3}\\b(?!\\s*[a-zA-Z])",
+      "name": "variable.other.constant.phits"
+    },
+    "char-variable": {
+      "match": "%[A-Za-z_][\\w]*%",
+      "name": "variable.other.character.phits"
+    },
+    "number": {
+      "match": "(?<![\\w.])[-+]?\\d+\\.?\\d*(?:[eE][+-]?\\d+)?\\b",
+      "name": "constant.numeric.phits"
+    }
+  }
+}

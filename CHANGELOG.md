@@ -5,7 +5,58 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] — 2026-08-02
+
+Feature release: OpenMC XML validation, PHITS language support, and the official OpenMC
+adapters as an optional second-opinion convert backend. No breaking changes.
+
+### Added
+
+- **OpenMC XML validation.** Live diagnostics on `materials.xml`, `geometry.xml`, `settings.xml`,
+  `tallies.xml`, and single-file `model.xml` (recognized by root element, so renamed exports
+  validate too): duplicate ids, GNDS nuclide-name format (`U235`, not `92235.80c`), density
+  units, `ao`/`wo` conflicts, MCNP-style `<sab>` names, surface and boundary types, region →
+  surface references, cell → material references (cross-checked against a sibling
+  `materials.xml`), `inactive < batches`, run modes, and tally → filter references.
+- **PHITS language support (highlighting + snippets).** New `phits` language id (`.phits`,
+  `phits.inp`) with a TextMate grammar written from the PHITS 3.36 manual — `[Section]` headers
+  (tally sections styled separately), all four comment forms (`$` anywhere, `!`, `#` followed by
+  whitespace, `c` in the first five columns), `#N`/`#(…)` cell complements kept distinct from
+  `#` comments, `infl:`/`set:`/`qp:`/`q:` directives, `MAT[n]`/`Mn` materials, surface
+  mnemonics, particle names, and `c1`–`c999` / `%var%` user variables. Snippets: starter deck,
+  `[Parameters]`, `[Source]`, `[Material]`, `[T-Track]`, `infl:`. No validator claims — PHITS
+  diagnostics are deliberately out of scope until they can be held to the same bar as MCNP's.
+- **Official OpenMC adapter backend.** `OWEN: Convert to OpenMC XML (openmc adapters)` runs the
+  OpenMC team's own MIT-licensed converters — `openmc_mcnp_adapter` for MCNP decks,
+  `openmc_serpent_adapter` for Serpent decks — through your Python (same interpreter discovery
+  as Render with OpenMC, WSL included) as a second opinion next to OWEN's built-in converter.
+  The result message is explicit about the adapters' scope: geometry + materials only, source
+  and tally definitions ignored, placeholder settings from the MCNP adapter (40 batches, point
+  source at the bounding-box centre). The adapters are not bundled — when missing, OWEN offers
+  the pip install command to copy. Measured comparison against OWEN's converter (pin cell,
+  17×17 assembly, BEAVRS full core): `docs/ADAPTER_COMPARISON.md`.
+- **OpenMC depletion snippets.** `omc_deplete` (CoupledOperator + PredictorIntegrator with
+  volume/depletable reminders) and `omc_deplete_results` (k-eff history + nuclide inventories
+  from `depletion_results.h5`).
+- **New OpenMC rules.** `openmc.sab-name` warns when `add_s_alpha_beta()` gets an MCNP table id
+  (`lwtr`) instead of a `c_` name; `openmc.density-units` catches units OpenMC rejects.
+- **New MCNP rule: `mcnp.short-continuation`.** MCNP card names may start anywhere in columns
+  1–5; only a line whose first five columns are all blank continues the previous card. A
+  material continuation indented 1–4 spaces is therefore read by real MCNP as a new (unknown)
+  card — a fatal error — and the bundled 17×17 assembly deck had exactly this (see Fixed).
+
+### Fixed
+
+- **Removed the false `openmc.mat-temperature` error.** `openmc.Material(temperature=…)` is a
+  documented, valid signature (OpenMC's own `openmc.model.borated_water()` uses it); temperature
+  precedence is cell > material > `Settings.temperature['default']`. The rule flagging it as an
+  error shipped through v1.0.6 and is gone; the ReactorMC browser port never carried it.
+- **Two latent bugs in the bundled prebuilt MCNP decks**, both found by running the official
+  adapter over them as an independent audit (details in `docs/ADAPTER_COMPARISON.md`):
+  `assembly_17x17_mcnp.i` had the `m3` continuation indented to column 5 (real MCNP reads it as
+  an unknown card and fatals; the adapter silently dropped Zr94 + Zr96), and
+  `beavrs_fullcore_mcnp.i` cell 61 had an empty geometry specification (only legal for
+  `like n but` cells) — now the standard infinite-cell idiom `-3:3`.
 
 ## [1.0.6] — 2026-07-29
 

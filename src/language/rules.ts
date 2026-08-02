@@ -152,6 +152,25 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
             activeMat = null;
         }
 
+        if (activeMat && activeMat.line !== i) {
+            // MCNP card names may start anywhere in columns 1-5; only a line
+            // whose first five columns are all blank is a continuation. So an
+            // intended material continuation indented 1-4 spaces is read by
+            // real MCNP as a new card named e.g. "40094.80c" — a fatal error.
+            // (Found 2026-08-02: the bundled 17x17 assembly deck had exactly
+            // this, and openmc_mcnp_adapter silently dropped the two Zr
+            // isotopes on the short-indented line.)
+            const shortIndent = raw.match(/^( {1,4})\d/);
+            if (shortIndent) {
+                push(diags, i, 0, shortIndent[0].length,
+                    `Continuation lines must leave columns 1-5 blank — this line starts in column ${shortIndent[1].length + 1}, ` +
+                    'where MCNP expects a card name, so it is read as a new (unknown) card: fatal error. ' +
+                    'Indent to column 6 or later, or end the previous line with &.',
+                    'error',
+                    'mcnp.short-continuation');
+            }
+        }
+
         if (activeMat) {
             let zm: RegExpExecArray | null;
             ZAID_RE.lastIndex = 0;
@@ -325,11 +344,32 @@ function validateOpenMC(text: string, diags: PlainDiagnostic[]): void {
                 'openmc.rectprism');
         }
 
-        if (/Material\s*\([^)]*temperature\s*=/.test(line)) {
+        // NOTE: no rule for Material(temperature=...). It is a documented,
+        // valid signature — openmc.Material(material_id=None, name='',
+        // temperature=None) — and OpenMC's own openmc.model.borated_water()
+        // passes temperature= to it. Temperature precedence is cell > material
+        // > Settings.temperature['default']. A rule flagging it as an error
+        // shipped here through v1.0.6 and was removed 2026-08-02; the ReactorMC
+        // browser port never carried it. Do not reintroduce.
+
+        // MCNP S(α,β) names (lwtr, grph, poly…) passed to add_s_alpha_beta are
+        // silently wrong in OpenMC, whose tables are c_ names (c_H_in_H2O,
+        // c_Graphite). Common porting mistake, so worth a warning.
+        const sabMatch = line.match(/add_s_alpha_beta\s*\(\s*['"]([^'"]+)['"]/);
+        if (sabMatch && !/^c_/.test(sabMatch[1])) {
             pushLine(diags, lines, i,
-                'Temperature is set on cells in OpenMC, not on Material. Set cell.temperature = T instead.',
+                `'${sabMatch[1]}' is not an OpenMC thermal-scattering name — OpenMC uses c_ names ` +
+                `(e.g. c_H_in_H2O for light water, c_Graphite for graphite). '${sabMatch[1]}' looks like an MCNP table id.`,
+                'warning',
+                'openmc.sab-name');
+        }
+
+        const densMatch = line.match(/set_density\s*\(\s*['"]([^'"]+)['"]/);
+        if (densMatch && !['g/cm3', 'g/cc', 'kg/m3', 'atom/b-cm', 'atom/cm3', 'sum', 'macro'].includes(densMatch[1])) {
+            pushLine(diags, lines, i,
+                `Unknown density units '${densMatch[1]}' — OpenMC accepts g/cm3, g/cc, kg/m3, atom/b-cm, atom/cm3, sum, or macro.`,
                 'error',
-                'openmc.mat-temperature');
+                'openmc.density-units');
         }
 
         if (/\.run\s*\(\s*openmc_exec_kwargs\s*=/.test(line)) {

@@ -134,7 +134,7 @@ c ----- Structural / plate / end-plug / plenum / water rods -----
 59 4  4.34389e-2   2 -3   u=11 imp:n=1   $ Zircaloy clad
 60 5  7.41863e-2    3      u=11 imp:n=1   $ water
 c ----- Water rod u=30 (reflector / lattice-outer positions) -----
-61 5  7.41863e-2          u=30 imp:n=1
+61 5  7.41863e-2  -3:3    u=30 imp:n=1  $ water everywhere (-3:3 = all space)
 c ========== GRID-OVERLAY PIN UNIVERSES (Inconel square sleeve) ==========
 c Sleeve: water inside inner sq, Inconel annulus, water in corner.
 c ----- Fuel + grid: u=41 (1.6%), u=42 (2.4%), u=43 (3.1%) -----

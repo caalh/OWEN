@@ -148,13 +148,51 @@ suite('ADV validator — OpenMC', () => {
         assert.ok(!c.includes('openmc.rectprism'), `false positive: ${c}`);
     });
 
-    test('Material(temperature=...) fires', () => {
-        assert.ok(codes(run('openmc', 'f = openmc.Material(temperature=600.0)')).includes('openmc.mat-temperature'));
+    test('Material(temperature=...) is valid OpenMC — no diagnostic', () => {
+        // Documented signature; openmc.model.borated_water() uses it. The old
+        // openmc.mat-temperature error was removed 2026-08-02.
+        const c = codes(run('openmc', 'f = openmc.Material(temperature=600.0)'));
+        assert.ok(!c.includes('openmc.mat-temperature'), `removed rule fired: ${c}`);
     });
 
     test('cell.temperature assignment does NOT fire', () => {
         const c = codes(run('openmc', 'cell.temperature = 600.0'));
         assert.ok(!c.includes('openmc.mat-temperature'), `false positive: ${c}`);
+    });
+
+    test('material continuation indented 1-4 spaces fires short-continuation', () => {
+        const deck = 'm3  40090.80c 0.5145 40091.80c 0.1122\n    40094.80c 0.1738 40096.80c 0.0280';
+        assert.ok(codes(run('mcnp', deck)).includes('mcnp.short-continuation'));
+    });
+
+    test('material continuation indented 5+ spaces does NOT fire', () => {
+        const deck = 'm3  40090.80c 0.5145 40091.80c 0.1122\n     40094.80c 0.1738 40096.80c 0.0280';
+        const c = codes(run('mcnp', deck));
+        assert.ok(!c.includes('mcnp.short-continuation'), `false positive: ${c}`);
+    });
+
+    test('new card at column 1 after a material does NOT fire', () => {
+        const deck = 'm3  40090.80c 1.0\nkcode 5000 1.0 30 130';
+        const c = codes(run('mcnp', deck));
+        assert.ok(!c.includes('mcnp.short-continuation'), `false positive: ${c}`);
+    });
+
+    test('MCNP-style S(α,β) name in add_s_alpha_beta fires', () => {
+        assert.ok(codes(run('openmc', "w.add_s_alpha_beta('lwtr')")).includes('openmc.sab-name'));
+    });
+
+    test('c_H_in_H2O S(α,β) name does NOT fire', () => {
+        const c = codes(run('openmc', "w.add_s_alpha_beta('c_H_in_H2O')"));
+        assert.ok(!c.includes('openmc.sab-name'), `false positive: ${c}`);
+    });
+
+    test('bogus density units fire', () => {
+        assert.ok(codes(run('openmc', "m.set_density('g/m3', 10.0)")).includes('openmc.density-units'));
+    });
+
+    test('atom/b-cm density units do NOT fire', () => {
+        const c = codes(run('openmc', "m.set_density('atom/b-cm', 0.06)"));
+        assert.ok(!c.includes('openmc.density-units'), `false positive: ${c}`);
     });
 
     test('openmc_exec_kwargs fires', () => {

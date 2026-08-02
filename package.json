@@ -1,8 +1,8 @@
 {
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
-  "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, and SCONE: a Monte Carlo language server with real-time physics-aware diagnostics, full-core 3D geometry preview, native OpenMC rendering and geometry verification, a cross-code deck converter (MCNP↔OpenMC stable), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.0.6",
+  "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
+  "version": "1.1.0",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -34,6 +34,7 @@
     "openmc",
     "serpent",
     "scone",
+    "phits",
     "nuclear",
     "monte-carlo",
     "reactor",
@@ -68,6 +69,7 @@
     "onCommand:owen.runSweep",
     "onCommand:owen.viewSweepResults",
     "onCommand:owen.convertDeck",
+    "onCommand:owen.convertDeckAdapter",
     "onCommand:owen.chooseHighlightPalette",
     "onCommand:owen.toggleInvisibleCharacters",
     "onCommand:owen.showMcnpReferences",
@@ -118,6 +120,20 @@
           ".scone"
         ],
         "configuration": "./language-configuration/scone.language-configuration.json"
+      },
+      {
+        "id": "phits",
+        "aliases": [
+          "PHITS",
+          "phits"
+        ],
+        "extensions": [
+          ".phits"
+        ],
+        "filenames": [
+          "phits.inp"
+        ],
+        "configuration": "./language-configuration/phits.language-configuration.json"
       }
     ],
     "grammars": [
@@ -135,6 +151,11 @@
         "language": "scone",
         "scopeName": "source.scone",
         "path": "./syntaxes/scone.tmLanguage.json"
+      },
+      {
+        "language": "phits",
+        "scopeName": "source.phits",
+        "path": "./syntaxes/phits.tmLanguage.json"
       },
       {
         "scopeName": "openmc.injection",
@@ -230,6 +251,12 @@
         "title": "OWEN: Convert Deck… (MCNP↔OpenMC)",
         "category": "OWEN",
         "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "owen.convertDeckAdapter",
+        "title": "OWEN: Convert to OpenMC XML (openmc adapters)",
+        "category": "OWEN",
+        "icon": "$(arrow-right)"
       },
       {
         "command": "owen.chooseHighlightPalette",
@@ -348,6 +375,11 @@
           "group": "2_build@5"
         },
         {
+          "command": "owen.convertDeckAdapter",
+          "group": "2_build@6",
+          "when": "editorLangId =~ /^(mcnp|serpent)$/"
+        },
+        {
           "command": "owen.openResults",
           "group": "3_run@3"
         },
@@ -436,6 +468,11 @@
           "group": "2_build@5"
         },
         {
+          "command": "owen.convertDeckAdapter",
+          "group": "2_build@6",
+          "when": "editorLangId =~ /^(mcnp|serpent)$/"
+        },
+        {
           "command": "owen.openResults",
           "group": "3_run@3"
         },
@@ -472,6 +509,10 @@
         {
           "command": "owen.showMcnpReferences",
           "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.convertDeckAdapter",
+          "when": "editorLangId =~ /^(mcnp|serpent)$/"
         },
         {
           "command": "owen.renderWithOpenmc",
@@ -671,6 +712,10 @@
       {
         "language": "scone",
         "path": "./snippets/scone.json"
+      },
+      {
+        "language": "phits",
+        "path": "./snippets/phits.json"
       }
     ]
   },

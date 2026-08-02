@@ -202,5 +202,41 @@
       "    print('k-eff =', sp.keff)"
     ],
     "description": "Complete OpenMC 17x17 fuel assembly eigenvalue script"
+  },
+
+  "OpenMC Depletion Run": {
+    "prefix": "omc_deplete",
+    "scope": "python",
+    "body": [
+      "import openmc.deplete",
+      "",
+      "# Depletable materials need a volume for normalization",
+      "${1:uo2}.depletable = True",
+      "${1:uo2}.volume = ${2:0.5277}  # cm3 (per unit height for a 2D pin)",
+      "",
+      "op = openmc.deplete.CoupledOperator(model, chain_file=\"${3:chain_endfb80_pwr.xml}\")",
+      "integrator = openmc.deplete.PredictorIntegrator(",
+      "    op,",
+      "    timesteps=[${4:30.0}] * ${5:6},",
+      "    power=${6:174.0e2},  # W — thermal power of the modeled region",
+      "    timestep_units=\"d\",",
+      ")",
+      "integrator.integrate()"
+    ],
+    "description": "OpenMC transport-coupled depletion run (CoupledOperator + PredictorIntegrator)"
+  },
+
+  "OpenMC Depletion Results": {
+    "prefix": "omc_deplete_results",
+    "scope": "python",
+    "body": [
+      "results = openmc.deplete.Results(\"${1:depletion_results.h5}\")",
+      "time, keff = results.get_keff(time_units=\"d\")",
+      "for t, (k, k_std) in zip(time, keff):",
+      "    print(f\"{t:8.1f} d   k = {k:.5f} ± {k_std:.5f}\")",
+      "",
+      "t_atoms, n_atoms = results.get_atoms(\"${2:1}\", \"${3:Xe135}\", nuc_units=\"atom/b-cm\", time_units=\"d\")"
+    ],
+    "description": "Read a depletion_results.h5 (k-eff history + nuclide inventories)"
   }
 }

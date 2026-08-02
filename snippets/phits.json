@@ -1,0 +1,139 @@
+{
+  "PHITS Starter Deck": {
+    "prefix": "phits_deck",
+    "body": [
+      "[ T i t l e ]",
+      "${1:Sample PHITS input}",
+      "",
+      "[ P a r a m e t e r s ]",
+      " icntl    =           0     \\$ (D=0) 0: normal transport calculation",
+      " maxcas   =        ${2:1000}     \\$ number of particles per batch",
+      " maxbch   =          ${3:10}     \\$ number of batches",
+      "",
+      "[ S o u r c e ]",
+      "   s-type =   1             \\$ mono-energetic cylindrical (pencil) source",
+      "     proj =  ${4:proton}         \\$ incident particle",
+      "      dir =   1.0           \\$ z-direction cosine",
+      "       r0 =   ${5:0.3}           \\$ radius [cm]",
+      "       z0 =   0.0",
+      "       z1 =   0.0",
+      "       e0 =   ${6:150.0}         \\$ energy [MeV] (MeV/n for ions)",
+      "",
+      "[ M a t e r i a l ]",
+      "MAT[ 1 ]",
+      "            H         2.0",
+      "            O         1.0",
+      "",
+      "[ S u r f a c e ]",
+      " 10  sph    0.0  0.0  ${7:3.0}   ${8:1.0}",
+      "",
+      "[ C e l l ]",
+      " 100    1  -1.0   -10       \\$ water sphere",
+      " 101   -1          10       \\$ outer void",
+      "",
+      "[ T - T r a c k ]",
+      "    title = Track in xz mesh",
+      "     mesh =  xyz",
+      "   x-type =    2",
+      "     xmin =  -5.0",
+      "     xmax =   5.0",
+      "       nx =  100",
+      "   y-type =    2",
+      "     ymin =  -5.0",
+      "     ymax =   5.0",
+      "       ny =    1",
+      "   z-type =    2",
+      "     zmin =  -5.0",
+      "     zmax =   5.0",
+      "       nz =  100",
+      "   e-type =    2",
+      "     emin =   0.0",
+      "     emax = ${9:200.0}",
+      "       ne =    1",
+      "     unit =    1            \\$ [1/cm^2/source]",
+      "     axis =   xz",
+      "     file = track_xz.out",
+      "     part =  all",
+      "   epsout =    1",
+      "",
+      "[ E n d ]"
+    ],
+    "description": "Complete PHITS starter input (title, parameters, source, geometry, T-Track tally)"
+  },
+
+  "PHITS Parameters Section": {
+    "prefix": "phits_params",
+    "body": [
+      "[ P a r a m e t e r s ]",
+      " icntl    =           ${1:0}     \\$ (D=0) 0: transport, 7/8: geometry check [t-gshow]/[t-rshow], 11: 3D show",
+      " maxcas   =        ${2:1000}     \\$ number of particles per batch",
+      " maxbch   =          ${3:10}     \\$ number of batches",
+      " negs     =           ${4:1}     \\$ (D=-1) 1: transport e-/e+/photons with EGS5"
+    ],
+    "description": "PHITS [Parameters] section"
+  },
+
+  "PHITS Material": {
+    "prefix": "phits_material",
+    "body": [
+      "MAT[ ${1:1} ]",
+      "            ${2:H}         ${3:2.0}",
+      "            ${4:O}         ${5:1.0}"
+    ],
+    "description": "PHITS material definition (element + ratio pairs; positive = atom ratio)"
+  },
+
+  "PHITS Source Section": {
+    "prefix": "phits_source",
+    "body": [
+      "[ S o u r c e ]",
+      "   s-type =   ${1:1}             \\$ 1: cylinder, 2: rectangular, 9: sphere, 13: gaussian",
+      "     proj =  ${2:neutron}",
+      "      dir =   ${3:1.0}",
+      "       r0 =   ${4:0.5}",
+      "       z0 =   ${5:0.0}",
+      "       z1 =   ${6:0.0}",
+      "       e0 =   ${7:14.0}          \\$ energy [MeV]"
+    ],
+    "description": "PHITS [Source] section (cylindrical mono-energetic)"
+  },
+
+  "PHITS T-Track Tally": {
+    "prefix": "phits_ttrack",
+    "body": [
+      "[ T - T r a c k ]",
+      "    title = ${1:Fluence in xyz mesh}",
+      "     mesh =  xyz",
+      "   x-type =    2",
+      "     xmin =  ${2:-5.0}",
+      "     xmax =   ${3:5.0}",
+      "       nx =  ${4:100}",
+      "   y-type =    2",
+      "     ymin =  ${2:-5.0}",
+      "     ymax =   ${3:5.0}",
+      "       ny =    1",
+      "   z-type =    2",
+      "     zmin =  ${2:-5.0}",
+      "     zmax =   ${3:5.0}",
+      "       nz =  ${4:100}",
+      "   e-type =    2",
+      "     emin =   0.0",
+      "     emax = ${5:20.0}",
+      "       ne =    1",
+      "     unit =    1            \\$ [1/cm^2/source]",
+      "     axis =   ${6:xz}",
+      "     file = ${7:track}.out",
+      "     part =  ${8:all}",
+      "   epsout =    1"
+    ],
+    "description": "PHITS [T-Track] fluence tally on an xyz mesh"
+  },
+
+  "PHITS Include File": {
+    "prefix": "phits_infl",
+    "body": [
+      "infl: {${1:common_geometry.inp}}"
+    ],
+    "description": "PHITS file include directive"
+  }
+}

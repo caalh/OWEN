@@ -18,6 +18,8 @@ import { registerDecorations } from './decorations';
 import { registerMcnpIndexCache } from './references/providers';
 import { registerMcnpReferencesView } from './references/referencesView';
 import { startLanguageClient, stopLanguageClient } from './lsp/client';
+import { registerOpenmcXmlDiagnostics } from './language/openmcXmlHost';
+import { registerConvertDeckAdapter } from './converter/adapterCommand';
 import { openAllenCrossSections } from './allen/panel';
 import { openResultsViewer } from './results/panel';
 import { setMcnpProjectRoot } from './commands/setMcnpProjectRoot';
@@ -36,6 +38,10 @@ export function activate(context: vscode.ExtensionContext) {
     // (out/server.js). The old client-side providers were removed in its
     // favor — see docs/LSP_DESIGN.md.
     startLanguageClient(context);
+
+    // OpenMC XML (materials/geometry/settings/tallies/model.xml) carries
+    // languageId "xml", so it bypasses the LSP; the host validates it directly.
+    registerOpenmcXmlDiagnostics(context);
 
     context.subscriptions.push(
         vscode.commands.registerCommand('owen.openLatticeBuilder', () => {
@@ -82,6 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
         registerRunSweep(context),
         registerViewSweepResults(context),
         registerConvertDeck(context),
+        registerConvertDeckAdapter(context),
     );
 }
 
