@@ -251,6 +251,21 @@ const SCOPE_ROLES: Record<Language, Record<string, Role>> = {
         'support.function.openmc': 'func',
         'support.type.openmc': 'entity',
         'support.variable.openmc': 'modifier',
+        // Python-level tokens, emitted by the decorator (not by a grammar) under
+        // 'full' coverage. Without these, OpenMC was the only language whose
+        // palette left numbers, strings and comments to the theme, so switching
+        // palettes changed a small minority of the characters on screen.
+        'comment.line.openmc': 'comment',
+        'string.quoted.openmc': 'string',
+        'constant.numeric.openmc': 'number',
+        // Python keywords share the module's role on purpose: `import`, `def`
+        // and `openmc` are all "keyword" in the palette's vocabulary, and the
+        // shared hue is a per-palette signature, so reusing it widens the
+        // visible difference between palettes instead of diluting it.
+        'keyword.control.openmc': 'keyword',
+        // A `def`/`class` name sits with submodules under 'entity', matching the
+        // entity.name.function convention.
+        'entity.name.function.openmc': 'entity',
     },
     serpent: {
         'comment.line.serpent': 'comment',

@@ -40,20 +40,29 @@ const SAMPLES: Record<Language, SampleLine[]> = {
         [tk('mode', 'keyword.control.mcnp'), tk(' n p')],
         [tk('f4', 'support.function.tally.mcnp'), tk(':n', 'keyword.other.particle.mcnp'), tk(' 1')],
     ],
+    // Tagged the way the decorator claims tokens under 'full' coverage, so the
+    // cards show what the editor actually renders. Under 'OpenMC API only' the
+    // comment, string, number and keyword tokens below fall back to the theme
+    // foreground and the four cards look far more alike — which is exactly the
+    // complaint that coverage setting exists to answer.
     openmc: [
-        [tk('import '), tk('openmc', 'variable.language.openmc')],
+        [tk('# PWR pin cell (OpenMC)', 'comment.line.openmc')],
+        [tk('import', 'keyword.control.openmc'), tk(' '), tk('openmc', 'variable.language.openmc')],
         [tk('')],
-        [tk('fuel = '), tk('openmc', 'variable.language.openmc'), tk('.'), tk('Material', 'support.class.openmc'), tk("(name='UO2')")],
-        [tk('fuel.'), tk('add_nuclide', 'support.function.openmc'), tk("('U235', 0.045)")],
-        [tk('fuel.'), tk('set_density', 'support.function.openmc'), tk("('g/cm3', 10.4)")],
+        [tk('fuel = '), tk('openmc', 'variable.language.openmc'), tk('.'), tk('Material', 'support.class.openmc'), tk('(name='), tk("'UO2'", 'string.quoted.openmc'), tk(')')],
+        [tk('fuel.'), tk('add_nuclide', 'support.function.openmc'), tk('('), tk("'U235'", 'string.quoted.openmc'), tk(', '), tk('0.045', 'constant.numeric.openmc'), tk(')')],
+        [tk('fuel.'), tk('set_density', 'support.function.openmc'), tk('('), tk("'g/cm3'", 'string.quoted.openmc'), tk(', '), tk('10.4', 'constant.numeric.openmc'), tk(')')],
         [tk('src = '), tk('openmc', 'variable.language.openmc'), tk('.'), tk('IndependentSource', 'support.class.openmc'), tk('()')],
-        [tk('src.'), tk('space', 'support.variable.openmc'), tk(' = '), tk('openmc', 'variable.language.openmc'), tk('.'), tk('stats', 'support.type.openmc'), tk('.'), tk('Box', 'support.class.openmc'), tk('((-1, -1, -1), (1, 1, 1))')],
-        [tk('pin = '), tk('openmc', 'variable.language.openmc'), tk('.'), tk('model', 'support.type.openmc'), tk('.'), tk('RectangularPrism', 'support.class.openmc'), tk('(1.26, 1.26)')],
+        [tk('src.'), tk('space', 'support.variable.openmc'), tk(' = '), tk('openmc', 'variable.language.openmc'), tk('.'), tk('stats', 'support.type.openmc'), tk('.'), tk('Box', 'support.class.openmc'), tk('((-'), tk('1', 'constant.numeric.openmc'), tk(', -'), tk('1', 'constant.numeric.openmc'), tk(', -'), tk('1', 'constant.numeric.openmc'), tk('), ('), tk('1', 'constant.numeric.openmc'), tk(', '), tk('1', 'constant.numeric.openmc'), tk(', '), tk('1', 'constant.numeric.openmc'), tk('))')],
+        [tk('')],
+        [tk('def', 'keyword.control.openmc'), tk(' '), tk('pin_universe', 'entity.name.function.openmc'), tk('(r):')],
+        [tk('    '), tk('return', 'keyword.control.openmc'), tk(' '), tk('openmc', 'variable.language.openmc'), tk('.'), tk('model', 'support.type.openmc'), tk('.'), tk('RectangularPrism', 'support.class.openmc'), tk('('), tk('1.26', 'constant.numeric.openmc'), tk(', '), tk('1.26', 'constant.numeric.openmc'), tk(')')],
+        [tk('')],
         [tk('cell.'), tk('fill', 'support.variable.openmc'), tk(' = fuel')],
-        [tk('cell.'), tk('temperature', 'support.variable.openmc'), tk(' = 900.0')],
-        [tk('settings.'), tk('batches', 'support.variable.openmc'), tk(' = 150')],
+        [tk('cell.'), tk('temperature', 'support.variable.openmc'), tk(' = '), tk('900.0', 'constant.numeric.openmc')],
+        [tk('settings.'), tk('batches', 'support.variable.openmc'), tk(' = '), tk('150', 'constant.numeric.openmc')],
         [tk('mats.'), tk('export_to_xml', 'support.function.openmc'), tk('()')],
-        [tk('openmc', 'variable.language.openmc'), tk('.'), tk('run', 'support.function.openmc'), tk('(threads=4)')],
+        [tk('openmc', 'variable.language.openmc'), tk('.'), tk('run', 'support.function.openmc'), tk('(threads='), tk('4', 'constant.numeric.openmc'), tk(')')],
     ],
     serpent: [
         [tk('/* PWR pin cell (Serpent) */', 'comment.line.serpent')],

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
 import { forcedColorCss } from '../highlight/forcedColor';
-import { findOpenmcTokens, OpenmcScope } from '../highlight/openmcTokens';
+import { Coverage, findOpenmcTokens, OpenmcScope } from '../highlight/openmcTokens';
 import { PaletteId, TokenStyle, paletteIdFromLabel, setCustomColors, styleForScope } from '../highlight/palettes';
 
 // Draw the OpenMC palette over Pylance.
@@ -24,6 +24,11 @@ const SCOPES: OpenmcScope[] = [
     'support.class.openmc',
     'support.function.openmc',
     'support.variable.openmc',
+    'comment.line.openmc',
+    'string.quoted.openmc',
+    'constant.numeric.openmc',
+    'keyword.control.openmc',
+    'entity.name.function.openmc',
 ];
 
 // Beyond this the scan stops being free and the file is almost certainly not a
@@ -58,6 +63,14 @@ function currentPalette(): PaletteId {
     return paletteIdFromLabel(
         vscode.workspace.getConfiguration('owen').get<string>('highlight.openmc.palette'),
     );
+}
+
+/** 'Full deck' unless the user has asked for API-only accents. */
+function currentCoverage(): Coverage {
+    const raw = vscode.workspace
+        .getConfiguration('owen')
+        .get<string>('highlight.openmc.coverage', 'Full deck');
+    return /api/i.test(raw ?? '') ? 'api' : 'full';
 }
 
 class OpenmcDecorator implements vscode.Disposable {
@@ -115,7 +128,7 @@ class OpenmcDecorator implements vscode.Disposable {
 
         const text = doc.getText();
         const byScope = new Map<OpenmcScope, vscode.Range[]>(SCOPES.map((s) => [s, []]));
-        for (const token of findOpenmcTokens(text)) {
+        for (const token of findOpenmcTokens(text, currentCoverage())) {
             byScope
                 .get(token.scope)
                 ?.push(new vscode.Range(doc.positionAt(token.start), doc.positionAt(token.end)));

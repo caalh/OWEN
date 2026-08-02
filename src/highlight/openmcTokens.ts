@@ -21,7 +21,29 @@ export type OpenmcScope =
     | 'support.type.openmc'
     | 'support.class.openmc'
     | 'support.function.openmc'
-    | 'support.variable.openmc';
+    | 'support.variable.openmc'
+    // Python-level tokens. Colored only under 'full' coverage — see Coverage.
+    | 'comment.line.openmc'
+    | 'string.quoted.openmc'
+    | 'constant.numeric.openmc'
+    | 'keyword.control.openmc'
+    | 'entity.name.function.openmc';
+
+/**
+ * How much of an OpenMC deck the palette governs.
+ *
+ * `api` colors only OpenMC API tokens and leaves everything else to the user's
+ * theme. That was the original behaviour, and it made switching palettes look
+ * like almost nothing happened: in a real deck the API names are a small
+ * minority of the visible characters, so numbers, strings, comments and
+ * `def`/`import` kept their theme color under every palette (user report,
+ * 2026-08-02, third occurrence).
+ *
+ * `full` additionally claims the Python-level tokens, which is what makes a
+ * palette switch legible. It applies only to files already detected as OpenMC
+ * decks, so ordinary Python is never touched.
+ */
+export type Coverage = 'api' | 'full';
 
 export interface OpenmcToken {
     /** Offset of the first character, into the string that was scanned. */
@@ -105,15 +127,59 @@ const PATTERNS: { re: RegExp; scopes: (OpenmcScope | undefined)[] }[] = [
     },
 ];
 
+// ── Python-level tokens (Coverage 'full') ────────────────────────────────────
+
+/** Reserved words, including the three keyword constants. */
+const PY_KEYWORDS = [
+    'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break',
+    'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally',
+    'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal',
+    'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield',
+];
+
+const PY_KEYWORD_RE = new RegExp(`\\b(?:${PY_KEYWORDS.join('|')})\\b`, 'g');
+
+/** The name a `def` or `class` introduces. Only the name is claimed here; the
+ *  `def` itself is left for PY_KEYWORD_RE so both get their own role. */
+const DEF_NAME_RE = /\b(?:def|class)\s+([A-Za-z_]\w*)/g;
+
+/**
+ * Integers and floats, including exponents and a leading bare decimal point.
+ *
+ * The leading `\b` is what keeps `mat1` and `U235` out of it: there is no word
+ * boundary between a letter and a digit, so a digit run inside an identifier
+ * is never claimed. A sign is deliberately excluded — in Python `-` is an
+ * operator, not part of the literal.
+ */
+const NUMBER_RE = /\b\d+(?:\.\d*)?(?:[eE][+-]?\d+)?\b|\B\.\d+(?:[eE][+-]?\d+)?\b/g;
+
+export interface Span {
+    start: number;
+    end: number;
+}
+
+export interface MaskedSource {
+    /** `text` with comments and strings blanked, offsets preserved. */
+    masked: string;
+    comments: Span[];
+    strings: Span[];
+}
+
 /**
  * Blank out comments and string literals, preserving every offset so matches
- * found in the result index straight back into the original text.
+ * found in the result index straight back into the original text, and report
+ * where they were.
  *
  * The injection grammar carries `-comment -string` in its selector, so an
- * `openmc.Material` written inside a docstring is not colored there either.
+ * `openmc.Material` written inside a docstring is not colored as API there
+ * either. Under 'full' coverage the reported spans are colored as comment and
+ * string instead, which is why the scan hands them back rather than dropping
+ * them.
  */
-export function maskCommentsAndStrings(text: string): string {
+export function scanCommentsAndStrings(text: string): MaskedSource {
     const out = text.split('');
+    const comments: Span[] = [];
+    const strings: Span[] = [];
     const n = text.length;
     let i = 0;
 
@@ -130,6 +196,7 @@ export function maskCommentsAndStrings(text: string): string {
             let j = i;
             while (j < n && text[j] !== '\n') j++;
             blank(i, j);
+            if (j > i) comments.push({ start: i, end: j });
             i = j;
             continue;
         }
@@ -151,15 +218,22 @@ export function maskCommentsAndStrings(text: string): string {
                 if (!triple && text[j] === '\n') break;
                 j++;
             }
-            blank(i, Math.min(j, n));
-            i = Math.min(j, n);
+            const end = Math.min(j, n);
+            blank(i, end);
+            if (end > i) strings.push({ start: i, end });
+            i = end;
             continue;
         }
 
         i++;
     }
 
-    return out.join('');
+    return { masked: out.join(''), comments, strings };
+}
+
+/** Offset-preserving mask only, for callers that do not need the spans. */
+export function maskCommentsAndStrings(text: string): string {
+    return scanCommentsAndStrings(text).masked;
 }
 
 /**
@@ -168,8 +242,8 @@ export function maskCommentsAndStrings(text: string): string {
  * Higher-precedence patterns claim their span first, so the `Material` in
  * `openmc.Material` is a class rather than three separate module matches.
  */
-export function findOpenmcTokens(text: string): OpenmcToken[] {
-    const masked = maskCommentsAndStrings(text);
+export function findOpenmcTokens(text: string, coverage: Coverage = 'full'): OpenmcToken[] {
+    const { masked, comments, strings } = scanCommentsAndStrings(text);
     const claimed: OpenmcToken[] = [];
 
     // Cheap rejection: most Python files in a workspace never mention openmc.
@@ -210,6 +284,46 @@ export function findOpenmcTokens(text: string): OpenmcToken[] {
                 cursor = start + captured.length;
             }
         }
+    }
+
+    if (coverage === 'full') {
+        // Comments and strings are already blanked out of `masked`, so nothing
+        // above could have claimed them; mark them anyway so the Python-level
+        // patterns below cannot reach inside one.
+        for (const s of comments) {
+            taken.fill(1, s.start, s.end);
+            claimed.push({ ...s, scope: 'comment.line.openmc' });
+        }
+        for (const s of strings) {
+            taken.fill(1, s.start, s.end);
+            claimed.push({ ...s, scope: 'string.quoted.openmc' });
+        }
+
+        /** Claim `group` of every match that does not overlap an earlier claim. */
+        const claimAll = (re: RegExp, scope: OpenmcScope, group = 0) => {
+            re.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(masked)) !== null) {
+                if (m[0].length === 0) {
+                    re.lastIndex++;
+                    continue;
+                }
+                const captured = m[group];
+                if (!captured) continue;
+                const start = group === 0 ? m.index : masked.indexOf(captured, m.index);
+                if (start < 0) continue;
+                const end = start + captured.length;
+                if (overlaps(start, end)) continue;
+                taken.fill(1, start, end);
+                claimed.push({ start, end, scope });
+            }
+        };
+
+        // Names first, claiming only the identifier, so the `def` that precedes
+        // one is still available to the keyword pass and the two differ.
+        claimAll(DEF_NAME_RE, 'entity.name.function.openmc', 1);
+        claimAll(PY_KEYWORD_RE, 'keyword.control.openmc');
+        claimAll(NUMBER_RE, 'constant.numeric.openmc');
     }
 
     return claimed.sort((a, b) => a.start - b.start);

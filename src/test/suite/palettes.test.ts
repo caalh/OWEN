@@ -16,13 +16,66 @@ import {
 import { findOpenmcTokens } from '../../highlight/openmcTokens';
 
 suite('Highlight palettes — OpenMC distinctness', () => {
+    /** One scope per *distinct role* OpenMC uses. Two further scopes share a
+     *  role deliberately (see the pair of tests below), so they are excluded
+     *  from the pairwise-distinctness checks. */
     const OPENMC_SCOPES = [
-        'variable.language.openmc',
-        'support.class.openmc',
-        'support.function.openmc',
-        'support.type.openmc',
-        'support.variable.openmc',
+        'variable.language.openmc',   // keyword
+        'support.class.openmc',       // type
+        'support.function.openmc',    // func
+        'support.type.openmc',        // entity
+        'support.variable.openmc',    // modifier
+        'comment.line.openmc',        // comment
+        'constant.numeric.openmc',    // number
+        'string.quoted.openmc',       // string
     ];
+
+    /** The Python-level scopes the decorator adds under 'full' coverage. */
+    const PYTHON_SCOPES = [
+        'comment.line.openmc',
+        'string.quoted.openmc',
+        'constant.numeric.openmc',
+        'keyword.control.openmc',
+        'entity.name.function.openmc',
+    ];
+
+    test('every Python-level scope resolves to a color', () => {
+        // A scope missing from SCOPE_ROLES resolves to undefined, and the
+        // decorator then silently creates no decoration type for it — which is
+        // indistinguishable, on screen, from the palette doing nothing.
+        for (const id of PALETTE_IDS) {
+            for (const scope of PYTHON_SCOPES) {
+                const style = styleForScope('openmc', id, scope);
+                assert.ok(style?.foreground, `${id}/${scope} has no color`);
+            }
+        }
+    });
+
+    test('each Python-level scope changes color across the built-in palettes', () => {
+        // This is the property the user is actually looking at: switch palette,
+        // see the numbers and strings change.
+        const builtIns = PALETTE_IDS.filter((id) => id !== 'custom');
+        for (const scope of PYTHON_SCOPES) {
+            const colors = builtIns.map((id) => styleForScope('openmc', id, scope)?.foreground);
+            assert.strictEqual(new Set(colors).size, builtIns.length,
+                `${scope} repeats a color across palettes: ${colors}`);
+        }
+    });
+
+    test('Python keywords share the module hue, def names share the submodule hue', () => {
+        // Both are deliberate (see SCOPE_ROLES.openmc). Asserted so that a
+        // future edit which splits them is a decision rather than an accident.
+        for (const id of PALETTE_IDS) {
+            assert.strictEqual(
+                styleForScope('openmc', id, 'keyword.control.openmc')?.foreground,
+                styleForScope('openmc', id, 'variable.language.openmc')?.foreground,
+                `${id}: python keyword should track the module color`);
+            assert.strictEqual(
+                styleForScope('openmc', id, 'entity.name.function.openmc')?.foreground,
+                styleForScope('openmc', id, 'support.type.openmc')?.foreground,
+                `${id}: def name should track the submodule color`);
+        }
+    });
 
     test('every built-in palette gives OpenMC a distinct color set', () => {
         const builtIns = PALETTE_IDS.filter((id) => id !== 'custom');
@@ -39,7 +92,7 @@ suite('Highlight palettes — OpenMC distinctness', () => {
         assert.strictEqual(new Set(kw).size, builtIns.length, `keyword colors collide: ${kw}`);
     });
 
-    test('within each palette, the five OpenMC roles are pairwise different', () => {
+    test('within each palette, the OpenMC roles are pairwise different', () => {
         for (const id of PALETTE_IDS.filter((p) => p !== 'custom')) {
             const colors = OPENMC_SCOPES.map((s) => styleForScope('openmc', id, s)?.foreground);
             assert.strictEqual(new Set(colors).size, colors.length,
@@ -66,9 +119,12 @@ suite('Highlight palettes — OpenMC distinctness', () => {
 });
 
 suite('OpenMC token finder — any-receiver methods and attributes', () => {
+    // Pinned to 'api': this suite is about which API names get claimed, so the
+    // Python-level tokens would only be noise here. Full coverage has its own
+    // suite below.
     const scopesAt = (text: string, needle: string): string[] => {
         const idx = text.indexOf(needle);
-        return findOpenmcTokens(text)
+        return findOpenmcTokens(text, 'api')
             .filter((t) => t.start >= idx && t.end <= idx + needle.length)
             .map((t) => t.scope);
     };
@@ -88,7 +144,7 @@ suite('OpenMC token finder — any-receiver methods and attributes', () => {
 
     test('openmc.run stays module+function (anchored patterns win)', () => {
         const text = 'openmc.run(threads=4)\n';
-        const tokens = findOpenmcTokens(text);
+        const tokens = findOpenmcTokens(text, 'api');
         assert.deepStrictEqual(tokens.map((t) => t.scope),
             ['variable.language.openmc', 'support.function.openmc']);
     });
@@ -108,8 +164,85 @@ suite('OpenMC token finder — any-receiver methods and attributes', () => {
 
     test('strings and comments stay masked', () => {
         const text = "s = 'settings.batches'\n# cell.temperature = 900\nimport openmc\n";
-        const tokens = findOpenmcTokens(text);
+        const tokens = findOpenmcTokens(text, 'api');
         assert.deepStrictEqual(tokens.map((t) => t.scope), ['variable.language.openmc']);
+    });
+});
+
+suite('OpenMC token finder — full coverage', () => {
+    const DECK = [
+        '# PWR pin cell',
+        'import openmc',
+        "fuel = openmc.Material(name='UO2')",
+        "fuel.add_nuclide('U235', 0.045)",
+        'settings.batches = 150',
+        '',
+        'def pin_universe(r):',
+        '    return openmc.model.RectangularPrism(1.26, 1.26)',
+        '',
+        'mat1 = 5',
+        'flux = 1e-5',
+        ''].join('\n');
+
+    const scopes = (text: string) => findOpenmcTokens(text, 'full').map((t) => t.scope);
+    const textsOf = (text: string, scope: string) =>
+        findOpenmcTokens(text, 'full')
+            .filter((t) => t.scope === scope)
+            .map((t) => text.slice(t.start, t.end));
+
+    test('full is the default coverage', () => {
+        assert.deepStrictEqual(findOpenmcTokens(DECK), findOpenmcTokens(DECK, 'full'));
+    });
+
+    test('full claims far more than api, which is the whole point', () => {
+        const api = findOpenmcTokens(DECK, 'api').length;
+        const full = findOpenmcTokens(DECK, 'full').length;
+        assert.ok(full > api * 2, `expected full (${full}) to dwarf api (${api})`);
+    });
+
+    test('numbers, strings, comments and keywords are claimed', () => {
+        assert.deepStrictEqual(textsOf(DECK, 'comment.line.openmc'), ['# PWR pin cell']);
+        assert.deepStrictEqual(textsOf(DECK, 'string.quoted.openmc'), ["'UO2'", "'U235'"]);
+        assert.deepStrictEqual(textsOf(DECK, 'constant.numeric.openmc'),
+            ['0.045', '150', '1.26', '1.26', '5', '1e-5']);
+        assert.deepStrictEqual(textsOf(DECK, 'keyword.control.openmc'),
+            ['import', 'def', 'return']);
+    });
+
+    test('a def name is claimed separately from the def keyword', () => {
+        assert.deepStrictEqual(textsOf(DECK, 'entity.name.function.openmc'), ['pin_universe']);
+    });
+
+    test('digits inside an identifier are never a number', () => {
+        // `mat1` must survive whole: the "1" is not a literal. The 5 it is
+        // assigned is, and appears in the numeric list above.
+        assert.ok(!textsOf(DECK, 'constant.numeric.openmc').includes('1'));
+    });
+
+    test('API tokens still win inside a full-coverage scan', () => {
+        const text = 'import openmc\nopenmc.run(threads=4)\n';
+        assert.deepStrictEqual(scopes(text), [
+            'keyword.control.openmc',     // import
+            'variable.language.openmc',   // openmc (the import target)
+            'variable.language.openmc',   // openmc.run receiver
+            'support.function.openmc',    // run
+            'constant.numeric.openmc',    // 4
+        ]);
+    });
+
+    test('an API name inside a string is a string, not an attribute', () => {
+        const text = "import openmc\ns = 'settings.batches'\n";
+        const tokens = findOpenmcTokens(text, 'full');
+        const inString = tokens.filter((t) => text.slice(t.start, t.end).includes('batches'));
+        assert.deepStrictEqual(inString.map((t) => t.scope), ['string.quoted.openmc']);
+    });
+
+    test('no two tokens overlap', () => {
+        const tokens = findOpenmcTokens(DECK, 'full');
+        for (let i = 1; i < tokens.length; i++) {
+            assert.ok(tokens[i].start >= tokens[i - 1].end,
+                `overlap at ${JSON.stringify(tokens[i - 1])} / ${JSON.stringify(tokens[i])}`);
+        }
     });
 });
 

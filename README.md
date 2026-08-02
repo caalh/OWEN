@@ -58,12 +58,15 @@ evidence rather than proof.
 High Contrast, Pastel, and **Custom** (your own colors) — rendered from the same color table the
 editor uses, so what you compare is what you get. Click a card to apply it. For OpenMC each
 built-in palette uses its own hue family (blue/teal, olive/blue, orange/yellow/green/cyan,
-lilac/rose/mint), and the palette reaches the whole API surface — not just `openmc.*`
-names but method calls (`fuel.add_nuclide`, `mats.export_to_xml`) and attributes
-(`settings.batches`, `cell.temperature`) on any variable, so switching palettes visibly
-recolors a real deck. Custom colors live in `owen.highlight.customColors` — set any of the
-ten token roles to a hex color (or `{foreground, fontStyle}`); roles you leave out fall
-back to Classic.
+lilac/rose/mint), and the palette governs the whole deck: `openmc.*` names, method calls
+(`fuel.add_nuclide`) and attributes (`settings.batches`) on any variable, and the Python
+layer around them — comments, strings, numeric literals, keywords, and the name a
+`def`/`class` introduces. That last part is what makes a switch obvious rather than
+subtle: on the bundled BEAVRS full-core deck the palette reaches 69% of the non-whitespace
+characters, against 10% when only the API names are colored. Set
+`owen.highlight.openmc.coverage` to `OpenMC API only` for accents alone. Custom colors live
+in `owen.highlight.customColors` — set any of the ten token roles to a hex color (or
+`{foreground, fontStyle}`); roles you leave out fall back to Classic.
 
 <p align="center">
   <img alt="OWEN highlight palette preview showing Classic, Solarized, High Contrast and Pastel side by side for MCNP" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-highlight-palettes.png" width="880">
@@ -174,6 +177,7 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.highlight.<lang>.palette` | `Classic` | Palette for `mcnp` / `openmc` / `serpent` / `scone`. Also settable from `OWEN: Choose Highlight Palette` |
 | `owen.highlight.customColors` | `{}` | Colors for the `Custom` palette, per token role (`"keyword": "#FF9100"` or `{foreground, fontStyle}` objects). Unset roles fall back to Classic |
 | `owen.highlight.openmc.decorate` | `true` | Draw the OpenMC palette as decorations so it survives Pylance's semantic tokens (see below) |
+| `owen.highlight.openmc.coverage` | `Full deck` | Whether the OpenMC palette also colors Python comments, strings, numbers, keywords and `def`/`class` names, or only OpenMC API names |
 | `owen.preview.maxInstances` | `1500000` | Max cylinder instances in the 3D preview; auto-simplifies detail (not pins) above this. Raise (e.g. 4000000) for full shell+axial detail on a full core |
 | `owen.simulation.workingDirectory` | `""` | Empty = the input file's directory |
 | `owen.mcnp.projectRoot` | `""` | MCNP root `.inp` for cross-file workspace validation |

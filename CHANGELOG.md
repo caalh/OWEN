@@ -5,6 +5,40 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] — 2026-08-02
+
+### Fixed
+
+- **The OpenMC palettes now visibly change a deck.** Switching palettes recolored
+  only OpenMC API names, and in a real deck those are a small minority of what is
+  on screen — so numbers, strings, comments and `def`/`import` kept the same theme
+  color under every palette and the four options looked nearly identical. This was
+  reported three times; the two previous attempts (per-palette hue families in
+  1.1.1, method and attribute coverage in 1.1.2) both widened *which API names*
+  were colored without touching the Python layer that surrounds them, which is why
+  neither moved the needle.
+
+  The palette now also claims Python comments, string literals, numeric literals,
+  keywords, and the name a `def` or `class` introduces. Measured on the bundled
+  decks, the share of non-whitespace characters the palette governs goes from
+  20.7% to 73.2% on the pin cell and from **9.8% to 68.9%** on BEAVRS full-core.
+
+  Plain variable names (`fuel`, `cell`) are still left alone — themes render those
+  in the default foreground, and claiming them would fight the editor rather than
+  decorate it.
+
+### Added
+
+- `owen.highlight.openmc.coverage` — `Full deck` (default) or `OpenMC API only` to
+  restore the previous accent-only behaviour. Applies only to files detected as
+  OpenMC decks; ordinary Python is never touched.
+
+### Changed
+
+- The palette preview panel tags its OpenMC sample the way the editor actually
+  claims tokens, so the cards no longer under-sell the difference between
+  palettes. The sample gained a comment, a `def`, and real numeric literals.
+
 ## [1.1.3] — 2026-08-02
 
 ### Fixed
