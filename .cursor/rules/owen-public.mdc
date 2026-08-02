@@ -1,0 +1,44 @@
+---
+description: Public OWEN repo (caalh/owen) — extension source only; AI maintainer docs are private
+alwaysApply: true
+---
+
+# OWEN public repo — AI rules
+
+This is the **public** OWEN extension mirror (`caalh/owen`). Extension **source code** is open
+(MIT). **AI maintainer documentation does not belong here.**
+
+## Where AI docs live (private monorepo only)
+
+| Doc | Location |
+|-----|----------|
+| `AGENTS.md` | `BelvoirDynamics/owen/` |
+| `AI_MAINTAINER_GUIDE.md` | `BelvoirDynamics/owen/` |
+| `AI_CHANGELOG.md` | `BelvoirDynamics/owen/` (+ division-wide log at monorepo root) |
+| `PROJECT_STRUCTURE.md` | `BelvoirDynamics/owen/` |
+| Cursor rules for sync | `BelvoirDynamics/.cursor/rules/owen-public-sync.mdc` |
+
+Before non-trivial OWEN work, read those files in the **BelvoirDynamics** monorepo, not here.
+
+## What to update in this repo
+
+- **User-facing release notes:** `CHANGELOG.md` only (Keep a Changelog).
+- **Do not recreate** `AGENTS.md`, `AI_CHANGELOG.md`, `AI_MAINTAINER_GUIDE.md`, or
+  `PROJECT_STRUCTURE.md` — they are gitignored on purpose.
+
+## Sync with the monorepo
+
+OWEN exists in two places:
+
+| Copy | Repo | Gets |
+|------|------|------|
+| `BelvoirDynamics/owen/` | private monorepo | all changes (code + AI docs) |
+| this repo | `caalh/owen` | **extension code only** |
+
+Mirror **source, tests, syntaxes, snippets, docs/LSP_DESIGN.md, CHANGELOG.md, README.md** to
+both copies before release. Mirror AI hygiene docs **only** in the monorepo.
+
+## Release reminder
+
+After shipping from here: bump version strings on reactormc.net — see
+`reactor-monte-carlo-guide/.cursor/rules/owen-version.mdc`.

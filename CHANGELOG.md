@@ -405,7 +405,7 @@ OpenMC, and a **sweep results dashboard**.
   faded hints. Hover, go-to-definition, find-references, occurrence highlight, and a grouped
   document outline (Cells / Surfaces / Materials / Universes / Transforms / Tallies) are served
   over LSP. The server ships as a self-contained `out/server.js` and can be reused by other
-  editors (Sublime LSP, Neovim) over stdio — see `AI_MAINTAINER_GUIDE.md`. OpenMC Python files
+  editors (Sublime LSP, Neovim) over stdio — see `docs/LSP_DESIGN.md`. OpenMC Python files
   keep Pylance plus OWEN's manual validate command.
 - **`OWEN: Convert Deck… (Experimental)`** (`owen.convertDeck`): the previously hidden
   MCNP↔OpenMC converter is now a visible command with a source→target picker, and grows two new

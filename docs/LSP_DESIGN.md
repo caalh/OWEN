@@ -82,7 +82,21 @@ owen/src/
 
 ## How another editor consumes this server
 
-See "Multi-editor use" in `AI_MAINTAINER_GUIDE.md` §LSP. Short version: any LSP client can
-launch `node out/server.js --stdio` (the entry supports both IPC when spawned by
-vscode-languageclient and `--stdio` for generic clients) and associate it with MCNP/Serpent/
-SCONE file types.
+`out/server.js` is self-contained (bundled, no `vscode` dependency) and
+`createConnection(ProposedFeatures.all)` auto-detects the transport, so any LSP client can run
+it over stdio:
+
+```
+node <owen install dir>/out/server.js --stdio
+```
+
+The entry supports both IPC when spawned by vscode-languageclient and `--stdio` for generic
+clients. Associate it with MCNP/Serpent/SCONE file types.
+
+- Sublime Text (LSP package): client with `"command": ["node", ".../out/server.js", "--stdio"]`
+  and `"selector": "source.mcnp | source.serpent | source.scone"`.
+- Neovim: `vim.lsp.start({ name = 'owen-mc', cmd = { 'node', '.../out/server.js', '--stdio' } })`
+  for the matching filetypes.
+
+The server keys its behavior off the `languageId` sent in `didOpen` — clients must send `mcnp`,
+`serpent`, or `scone`.
