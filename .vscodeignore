@@ -1,6 +1,14 @@
 .vscode/**
 .vscode-test/**
 .github/**
+.cursor/**
+# Private AI maintainer docs — these live only in the BelvoirDynamics monorepo
+# and do not exist in this public clone, but the ignore list is kept identical
+# in both copies so a VSIX packaged from either location can never ship them.
+AGENTS.md
+AI_CHANGELOG.md
+AI_MAINTAINER_GUIDE.md
+PROJECT_STRUCTURE.md
 src/**
 scripts/**
 node_modules/**
