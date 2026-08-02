@@ -23,6 +23,7 @@ const SCOPES: OpenmcScope[] = [
     'support.type.openmc',
     'support.class.openmc',
     'support.function.openmc',
+    'support.variable.openmc',
 ];
 
 // Beyond this the scan stops being free and the file is almost certainly not a

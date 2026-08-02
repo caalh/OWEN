@@ -5,6 +5,43 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] — 2026-08-02
+
+### Changed
+
+- **The OpenMC palette now recolors the whole API surface, so switching palettes is
+  actually visible.** Previously only `openmc.*`-anchored names were colored (module,
+  submodule, class, function) — a handful of tokens per screen in a real deck, which made
+  the four palettes look nearly identical in practice. The injection grammar and the
+  Pylance-proof decorator now also color well-known OpenMC **method calls on any
+  receiver** (`fuel.add_nuclide`, `mat.set_density`, `mats.export_to_xml`, …) and
+  **attributes** (`settings.batches`, `cell.temperature`, `cell.fill`, `lat.pitch`,
+  `tally.scores`, …), from curated API name lists. Attributes are a new token role with
+  its own hue per palette (Classic light-blue, Solarized teal, High Contrast magenta,
+  Pastel periwinkle). The palette preview cards show the richer sample.
+
+### Fixed
+
+- **The 3D preview now draws the core baffle as thin plates hugging the stepped core
+  outline** — in all four deck languages (MCNP, OpenMC, Serpent, SCONE). Baffle universes
+  at peripheral lattice positions previously rendered as full-height square posts (MCNP)
+  or a belt of assembly-wide blocks at the wrong height (OpenMC), nothing like the real
+  stepped SS304 plate ring OpenMC's own plotter shows. The parsers now detect which
+  neighbors of each reflector cell are fuel assemblies and emit thin rectangular plates
+  (plus L-shaped corner pieces on diagonal steps) on the core-facing edges, at the real
+  plate band read from the deck's px/py plane offsets (BEAVRS: 8.367–10.589 cm from the
+  cell centre) with a proportional fallback. Serpent and SCONE gained baffle-universe
+  detection (steel cells on x/y planes, no cylinders); their baffles previously didn't
+  render at all.
+- **Neutron-shield pads render as arc segments on the shield ring** instead of four
+  floating boxes at 45°/135°/225°/315°. New `arc` primitive (annular sector) in the
+  preview IR and webview; boxes remain for grid sleeves and baffle plates, which are now
+  true rectangles (`halfX`/`halfY`) rather than squares only.
+- **OpenMC full-core structure height**: baffle/structure boxes in a resolved
+  programmatic core used the raw text-scan height (40 cm default) instead of the
+  reconstructed column extent, so they floated as a short belt at mid-plane. They now
+  span the same height as the radial shells.
+
 ## [1.1.1] — 2026-08-02
 
 ### Added

@@ -61,28 +61,119 @@ export function baffleBox(
 }
 
 /**
- * Four octant neutron-shield pads approximated as box prisms on the annulus
- * mid-radius at 45° / 135° / 225° / 315°.
+ * Which sides of a reflector lattice cell face the fueled core. Edge sides
+ * get a full-length plate; a diagonal that faces the core with neither
+ * adjacent edge doing so gets an L-shaped corner piece (two half-length
+ * plates), matching how BEAVRS models the stepped-outline corners.
+ */
+export interface BaffleNeighborhood {
+    east: boolean;
+    west: boolean;
+    north: boolean;
+    south: boolean;
+    ne: boolean;
+    nw: boolean;
+    se: boolean;
+    sw: boolean;
+}
+
+/**
+ * Radial band the plates occupy, as distances from the cell centre
+ * [inner, outer]. BEAVRS puts its SS304 plates at [8.36662, 10.58912] cm in a
+ * 21.50364 cm cell — inner ≈ 0.778 × half-pitch, outer ≈ 0.985 × half-pitch —
+ * which the default reproduces for any pitch. Parsers that can read the real
+ * px/py plane offsets from the deck should pass them instead.
+ */
+export function defaultBaffleBand(halfPitch: number): [number, number] {
+    return [halfPitch * 0.778, halfPitch * 0.985];
+}
+
+/**
+ * Thin baffle/former plates for one reflector lattice cell, hugging the edges
+ * that face fuel assemblies. This replaces the old single `baffleBox` post,
+ * which drew the whole cell (or a token square) and produced the blocky belt
+ * users saw instead of BEAVRS' stepped plate ring.
+ */
+export function bafflePlates(
+    label: string,
+    cx: number,
+    cy: number,
+    halfPitchX: number,
+    halfPitchY: number,
+    nb: BaffleNeighborhood,
+    ctx: RadialContext,
+    band?: [number, number],
+    material = 'SS304',
+): CylinderSpec[] {
+    const out: CylinderSpec[] = [];
+    const [ax, bx] = band ?? defaultBaffleBand(halfPitchX);
+    const [ay, by] = band ?? defaultBaffleBand(halfPitchY);
+    const midX = (ax + bx) / 2;
+    const thickX = Math.max(0.05, (bx - ax) / 2);
+    const midY = (ay + by) / 2;
+    const thickY = Math.max(0.05, (by - ay) / 2);
+
+    const plate = (suffix: string, x: number, y: number, hx: number, hy: number): void => {
+        out.push({
+            label: `${label}_${suffix}`,
+            shape: 'box',
+            radius: Math.max(hx, hy),
+            halfX: hx,
+            halfY: hy,
+            height: ctx.height,
+            x,
+            y,
+            z: ctx.zCenter,
+            color: componentColor(Component.Baffle),
+            opacity: 0.9,
+            component: Component.Baffle,
+            material,
+        });
+    };
+
+    if (nb.east) plate('e', cx + midX, cy, thickX, halfPitchY);
+    if (nb.west) plate('w', cx - midX, cy, thickX, halfPitchY);
+    if (nb.north) plate('n', cx, cy + midY, halfPitchX, thickY);
+    if (nb.south) plate('s', cx, cy - midY, halfPitchX, thickY);
+
+    // L-shaped corner pieces where only the diagonal faces the core.
+    const corner = (suffix: string, sx: 1 | -1, sy: 1 | -1): void => {
+        plate(`${suffix}_x`, cx + sx * midX, cy + sy * halfPitchY / 2, thickX, halfPitchY / 2);
+        plate(`${suffix}_y`, cx + sx * halfPitchX / 2, cy + sy * midY, halfPitchX / 2, thickY);
+    };
+    if (nb.ne && !nb.north && !nb.east) corner('ne', 1, 1);
+    if (nb.nw && !nb.north && !nb.west) corner('nw', -1, 1);
+    if (nb.se && !nb.south && !nb.east) corner('se', 1, -1);
+    if (nb.sw && !nb.south && !nb.west) corner('sw', -1, -1);
+    return out;
+}
+
+/**
+ * Four octant neutron-shield pads as annular arc segments on the shield ring
+ * at 45° / 135° / 225° / 315°. BEAVRS pads span 32°; boxes previously used
+ * here read as floating blocks instead of pads hugging the barrel.
  */
 export function neutronShieldPads(
     innerR: number,
     outerR: number,
     ctx: RadialContext,
     prefix = 'ns_pad',
+    spanDeg = 32,
 ): CylinderSpec[] {
     if (!(outerR > innerR && innerR > 0)) return [];
-    const midR = (innerR + outerR) / 2;
-    const pad = Math.max(2.0, (outerR - innerR) * 0.85);
-    const angles = [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4];
+    const centers = [45, 135, 225, 315];
     const out: CylinderSpec[] = [];
-    angles.forEach((a, i) => {
+    centers.forEach((c, i) => {
         out.push({
             label: `${prefix}_${i}`,
-            shape: 'box',
-            radius: pad,
+            shape: 'arc',
+            radius: outerR,
+            innerRadius: innerR,
+            thetaStart: c - spanDeg / 2,
+            thetaLength: spanDeg,
             height: ctx.height,
-            x: midR * Math.cos(a),
-            y: midR * Math.sin(a),
+            x: 0,
+            y: 0,
             z: ctx.zCenter,
             color: componentColor(Component.Structure),
             opacity: 0.65,
@@ -283,6 +374,39 @@ export function mcnpBaffleUniverses(
         if (hasSteel && hasPxPy && !hasCz) out.add(uid);
     }
     return out;
+}
+
+/**
+ * Radial band [inner, outer] the baffle plates of one MCNP baffle universe
+ * occupy, read from the |offsets| of the px/py planes its steel cells
+ * reference (BEAVRS: 8.36662 / 10.58912). Undefined when the universe doesn't
+ * expose two distinct plane offsets — callers fall back to defaultBaffleBand.
+ */
+export function mcnpBaffleBand(
+    uid: number,
+    byUniverse: Map<number, McnpCellLike[]>,
+    surfaces: Map<number, McnpSurfaceLike>,
+    materials: Map<number, { component: ComponentId; name: string }>,
+): [number, number] | undefined {
+    const group = byUniverse.get(uid);
+    if (!group) return undefined;
+    const offs = new Set<number>();
+    for (const cell of group) {
+        if (cell.material === 0) continue;
+        const mat = materials.get(cell.material);
+        const steel = mat && (mat.component === Component.Structure || mat.name.toLowerCase().includes('steel'));
+        if (!steel) continue;
+        for (const sid of cell.surfaces) {
+            const s = surfaces.get(Math.abs(sid));
+            if (s && (s.type === 'px' || s.type === 'py')) {
+                const v = Math.abs(s.params[0] ?? 0);
+                if (v > 0.01) offs.add(Number(v.toFixed(5)));
+            }
+        }
+    }
+    const sorted = [...offs].sort((a, b) => a - b);
+    if (sorted.length < 2) return undefined;
+    return [sorted[0], sorted[sorted.length - 1]];
 }
 
 /** Serpent large `cyl` surfaces → annular shells from containment cells. */

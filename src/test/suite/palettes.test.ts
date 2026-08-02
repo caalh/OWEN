@@ -13,6 +13,7 @@ import {
     setCustomColors,
     styleForScope,
 } from '../../highlight/palettes';
+import { findOpenmcTokens } from '../../highlight/openmcTokens';
 
 suite('Highlight palettes — OpenMC distinctness', () => {
     const OPENMC_SCOPES = [
@@ -20,6 +21,7 @@ suite('Highlight palettes — OpenMC distinctness', () => {
         'support.class.openmc',
         'support.function.openmc',
         'support.type.openmc',
+        'support.variable.openmc',
     ];
 
     test('every built-in palette gives OpenMC a distinct color set', () => {
@@ -37,7 +39,7 @@ suite('Highlight palettes — OpenMC distinctness', () => {
         assert.strictEqual(new Set(kw).size, builtIns.length, `keyword colors collide: ${kw}`);
     });
 
-    test('within each palette, the four OpenMC roles are pairwise different', () => {
+    test('within each palette, the five OpenMC roles are pairwise different', () => {
         for (const id of PALETTE_IDS.filter((p) => p !== 'custom')) {
             const colors = OPENMC_SCOPES.map((s) => styleForScope('openmc', id, s)?.foreground);
             assert.strictEqual(new Set(colors).size, colors.length,
@@ -45,11 +47,69 @@ suite('Highlight palettes — OpenMC distinctness', () => {
         }
     });
 
+    test('attribute color differs across every built-in palette', () => {
+        const builtIns = PALETTE_IDS.filter((id) => id !== 'custom');
+        const attr = builtIns.map((id) => styleForScope('openmc', id, 'support.variable.openmc')?.foreground);
+        assert.strictEqual(new Set(attr).size, builtIns.length, `attribute colors collide: ${attr}`);
+    });
+
     test('OpenMC overrides do not leak into other languages', () => {
         // MCNP keyword under highContrast must remain the base palette blue,
         // not OpenMC's orange override.
         const style = styleForScope('mcnp', 'highContrast', 'keyword.control.mcnp');
         assert.strictEqual(style?.foreground, '#00B0FF');
+        // MCNP particle modifier must remain the base orange, not OpenMC's
+        // per-palette attribute hue.
+        const mod = styleForScope('mcnp', 'highContrast', 'keyword.other.particle.mcnp');
+        assert.strictEqual(mod?.foreground, '#FF9E64');
+    });
+});
+
+suite('OpenMC token finder — any-receiver methods and attributes', () => {
+    const scopesAt = (text: string, needle: string): string[] => {
+        const idx = text.indexOf(needle);
+        return findOpenmcTokens(text)
+            .filter((t) => t.start >= idx && t.end <= idx + needle.length)
+            .map((t) => t.scope);
+    };
+
+    // The finder short-circuits on files that never mention openmc, so every
+    // sample includes the import line a real deck would have.
+    test('method call on a variable receiver is a function token', () => {
+        const text = "import openmc\nfuel.add_nuclide('U235', 0.045)\n";
+        assert.deepStrictEqual(scopesAt(text, 'add_nuclide'), ['support.function.openmc']);
+    });
+
+    test('attribute on a variable receiver is an attribute token', () => {
+        const text = 'import openmc\nsettings.batches = 150\ncell.temperature = 900.0\n';
+        assert.deepStrictEqual(scopesAt(text, 'batches'), ['support.variable.openmc']);
+        assert.deepStrictEqual(scopesAt(text, 'temperature'), ['support.variable.openmc']);
+    });
+
+    test('openmc.run stays module+function (anchored patterns win)', () => {
+        const text = 'openmc.run(threads=4)\n';
+        const tokens = findOpenmcTokens(text);
+        assert.deepStrictEqual(tokens.map((t) => t.scope),
+            ['variable.language.openmc', 'support.function.openmc']);
+    });
+
+    test('a called attribute name is not colored as an attribute', () => {
+        // `x.temperature(...)` is a call, not an attribute read; the attribute
+        // pattern must not claim it (and it is not on the method list).
+        const text = 'import openmc\nx.temperature(1)\n';
+        assert.deepStrictEqual(scopesAt(text, 'temperature'), []);
+    });
+
+    test('bare identifiers without a dot are never claimed', () => {
+        const text = 'import openmc\nbatches = 10\nfill = None\n';
+        assert.deepStrictEqual(scopesAt(text, 'batches'), []);
+        assert.deepStrictEqual(scopesAt(text, 'fill'), []);
+    });
+
+    test('strings and comments stay masked', () => {
+        const text = "s = 'settings.batches'\n# cell.temperature = 900\nimport openmc\n";
+        const tokens = findOpenmcTokens(text);
+        assert.deepStrictEqual(tokens.map((t) => t.scope), ['variable.language.openmc']);
     });
 });
 
@@ -65,7 +125,22 @@ suite('Highlight palettes — Custom', () => {
     test('unset custom colors fall back to Classic for every language', () => {
         setCustomColors(undefined);
         for (const lang of LANGUAGES) {
+            // OpenMC's Classic has a per-language attribute override; Custom
+            // deliberately falls back to the *base* Classic roles, so compare
+            // the languages whose Classic is the base palette.
+            if (lang === 'openmc') continue;
             assert.deepStrictEqual(buildRules(lang, 'custom'), buildRules(lang, 'classic'));
+        }
+        // OpenMC: everything matches Classic except the overridden attribute role.
+        const custom = buildRules('openmc', 'custom');
+        const classic = buildRules('openmc', 'classic');
+        for (let i = 0; i < custom.length; i++) {
+            if (custom[i].scope === 'support.variable.openmc') {
+                assert.strictEqual(custom[i].settings.foreground, '#CE9178'); // base classic modifier
+                assert.strictEqual(classic[i].settings.foreground, '#9CDCFE'); // openmc override
+            } else {
+                assert.deepStrictEqual(custom[i], classic[i]);
+            }
         }
     });
 

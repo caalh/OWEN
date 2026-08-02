@@ -6,7 +6,9 @@
     { "include": "#openmc-class" },
     { "include": "#openmc-func" },
     { "include": "#openmc-submodule" },
-    { "include": "#openmc-module" }
+    { "include": "#openmc-module" },
+    { "include": "#openmc-method" },
+    { "include": "#openmc-attribute" }
   ],
   "repository": {
     "openmc-class": {
@@ -35,6 +37,20 @@
     "openmc-module": {
       "match": "\\bopenmc\\b",
       "name": "variable.language.openmc"
+    },
+    "openmc-method": {
+      "comment": "Well-known OpenMC API methods on any receiver — keep in sync with OPENMC_METHODS in src/highlight/openmcTokens.ts",
+      "match": "\\.(add_nuclide|remove_nuclide|add_element|add_elements_from_formula|add_components|add_macroscopic|add_s_alpha_beta|set_density|mix_materials|get_nuclide_densities|get_nuclide_atom_densities|export_to_xml|export_to_model_xml|from_xml|to_xml_element|run|plot_geometry|calculate_volumes|sample_external_source|get_all_cells|get_all_materials|get_all_universes|get_all_lattices|add_cell|add_cells|remove_cell|clone|rotate|translate|differentiate_depletable_mats|find)(?=\\s*\\()",
+      "captures": {
+        "1": { "name": "support.function.openmc" }
+      }
+    },
+    "openmc-attribute": {
+      "comment": "Well-known OpenMC attributes on any receiver — keep in sync with OPENMC_ATTRIBUTES in src/highlight/openmcTokens.ts",
+      "match": "\\.(batches|inactive|particles|generations_per_batch|run_mode|seed|source|trigger_active|trigger_max_batches|photon_transport|energy_mode|output|cutoff|temperature|fill|region|root_universe|universes|boundary_type|albedo|periodic_surface|lower_left|upper_right|pitch|outer|ring_radii|num_rings|orientation|density|depletable|volume|isotropic|filters|scores|estimator|triggers|space|angle|energy|time|strength|particle|probability|geometry|settings|materials|tallies|plots)\\b(?!\\s*\\()",
+      "captures": {
+        "1": { "name": "support.variable.openmc" }
+      }
     }
   }
 }

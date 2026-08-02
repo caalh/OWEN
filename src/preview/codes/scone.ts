@@ -24,7 +24,7 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
-import { emitSconeRadialStructure } from '../radialStructure';
+import { BaffleNeighborhood, bafflePlates, emitSconeRadialStructure } from '../radialStructure';
 
 interface LeafBlock {
     name: string;
@@ -73,8 +73,10 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     const cellUniCells = new Map<number, number[]>(); // cellUniverse id -> cell ids
     const cellToUniverse = new Map<number, number>(); // cell id -> universe it is filled with
     const cellSurfaces = new Map<number, number[]>(); // cell id -> signed surface ids
+    const cellMaterial = new Map<number, string>(); // cell id -> material name (filltype mat)
     const surfaces = new Map<number, SurfaceDef>();
     const planeZ = new Map<number, number>(); // plane surface id -> z elevation
+    const planeXY = new Map<number, number>(); // axis-aligned x/y plane id -> |offset|
 
     for (const block of blocks) {
         const id = num(field(block.inner, 'id'));
@@ -118,6 +120,9 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                 if (ft === 'uni') {
                     const uni = num(field(block.inner, 'universe'));
                     if (uni !== null) cellToUniverse.set(id, uni);
+                } else if (ft === 'mat') {
+                    const mat = field(block.inner, 'material');
+                    if (mat) cellMaterial.set(id, mat);
                 }
             }
         } else if (type === 'plane' && id !== null) {
@@ -125,6 +130,11 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             // a x + b y + c z = d → z-plane when (a,b)=(0,0) and c != 0.
             if (coeffs.length >= 4 && coeffs[0] === 0 && coeffs[1] === 0 && coeffs[2] !== 0) {
                 planeZ.set(id, coeffs[3] / coeffs[2]);
+            } else if (coeffs.length >= 4 && coeffs[2] === 0) {
+                // Axis-aligned x/y plane → |offset| from the cell centre, for
+                // locating baffle plate bands.
+                if (coeffs[1] === 0 && coeffs[0] !== 0) planeXY.set(id, Math.abs(coeffs[3] / coeffs[0]));
+                else if (coeffs[0] === 0 && coeffs[1] !== 0) planeXY.set(id, Math.abs(coeffs[3] / coeffs[1]));
             }
         } else if (isSurfaceType(type) && id !== null) {
             const radius = num(field(block.inner, 'radius')) ?? undefined;
@@ -198,6 +208,40 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         axialCache.set(uid, segs);
         return segs;
     };
+
+    // Baffle universes: cellUniverses whose steel cells are bounded by
+    // axis-aligned x/y planes with no cylinder among the member cells
+    // (BEAVRS-style peripheral reflector cells). The steel cells' |plane
+    // offsets| give the plate band from the cell centre.
+    const baffleUniverses = new Set<number>();
+    const baffleBands = new Map<number, [number, number]>();
+    for (const [uid, cids] of cellUniCells) {
+        let steel = false;
+        let hasXY = false;
+        let cyl = false;
+        const offs = new Set<number>();
+        for (const cid of cids) {
+            const mat = cellMaterial.get(cid);
+            const isSteel = !!mat && /steel|ss-?304/i.test(mat);
+            for (const sid of cellSurfaces.get(cid) ?? []) {
+                const abs = Math.abs(sid);
+                if (planeXY.has(abs)) {
+                    hasXY = true;
+                    if (isSteel) {
+                        const v = planeXY.get(abs)!;
+                        if (v > 0.01) offs.add(Number(v.toFixed(5)));
+                    }
+                }
+                if (surfaces.get(abs)?.type.includes('cylinder')) cyl = true;
+            }
+            if (isSteel) steel = true;
+        }
+        if (steel && hasXY && !cyl) {
+            baffleUniverses.add(uid);
+            const sorted = [...offs].sort((a, b) => a - b);
+            if (sorted.length >= 2) baffleBands.set(uid, [sorted[0], sorted[sorted.length - 1]]);
+        }
+    }
 
     // Core lattice = largest pitch.
     let coreLatId: number | null = null;
@@ -338,11 +382,28 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         const core = latDefs.get(coreLatId)!;
         const cx0 = -(core.nx - 1) * core.pitch / 2;
         const cy0 = (core.ny - 1) * core.pitch / 2;
+        // Rows run north→south (y decreases with r): north = r-1. Assembly
+        // neighbors are the lattice-filled positions a baffle cell hugs.
+        const isAsm = (rr: number, cc: number): boolean => latDefs.has(core.grid[rr]?.[cc] ?? -1);
         for (let r = 0; r < core.grid.length; r++) {
             for (let c = 0; c < core.grid[r].length; c++) {
                 const ax = cx0 + c * core.pitch;
                 const ay = cy0 - r * core.pitch;
                 const uid = core.grid[r][c];
+                if (baffleUniverses.has(uid)) {
+                    const nb: BaffleNeighborhood = {
+                        east: isAsm(r, c + 1), west: isAsm(r, c - 1),
+                        north: isAsm(r - 1, c), south: isAsm(r + 1, c),
+                        ne: isAsm(r - 1, c + 1), nw: isAsm(r - 1, c - 1),
+                        se: isAsm(r + 1, c + 1), sw: isAsm(r + 1, c - 1),
+                    };
+                    cylinders.push(...bafflePlates(
+                        `core_r${r}c${c}_baffle`, ax, ay,
+                        core.pitch / 2, core.pitch / 2, nb,
+                        { height: coreHeight, zCenter: coreZ }, baffleBands.get(uid),
+                    ));
+                    continue;
+                }
                 if (latDefs.has(uid)) placeAssembly(uid, ax, ay, `asm_r${r}c${c}`);
                 else placeEntry(uid, ax, ay, `core_r${r}c${c}`);
             }
@@ -381,7 +442,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         for (const cyl of cylinders) footprint = Math.max(footprint, Math.hypot(cyl.x, cyl.y) + cyl.radius);
         const structN = emitSconeRadialStructure(text, cylinders, { height: coreHeight, zCenter: coreZ }, footprint);
         if (structN > 0) {
-            notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV).`);
+            notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, arc neutron-shield pads, downcomer, RPV). Baffle/former plates render as thin plates hugging the core-facing edges of peripheral lattice cells.`);
         }
     }
 

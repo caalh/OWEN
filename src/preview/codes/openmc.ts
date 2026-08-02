@@ -18,7 +18,7 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
-import { baffleBox, emitOpenmcRadialStructure } from '../radialStructure';
+import { BaffleNeighborhood, baffleBox, bafflePlates, emitOpenmcRadialStructure } from '../radialStructure';
 
 interface NamedValue {
     name: string;
@@ -306,8 +306,12 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         if (depth > 10 || cylinders.length >= maxInstances) return;
         if (node.kind === 'skip') return;
         if (node.kind === 'structure') {
+            // Baffle nodes are drawn by the parent lattice loop, which knows
+            // which neighbors are assemblies. A non-baffle structure node (or a
+            // baffle with no lattice context) keeps the legacy token box.
+            if (node.subtype === 'baffle') return;
             const hw = Math.max(pitchHint * 0.42, 1.0);
-            cylinders.push(baffleBox(`${label}_baffle`, cx, cy, hw, { height, zCenter: collapsedZ }));
+            cylinders.push(baffleBox(`${label}_struct`, cx, cy, hw, { height: collapsedHeight, zCenter: collapsedZ }));
             return;
         }
         if (node.kind === 'pin') {
@@ -346,9 +350,27 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
             x0 = cx - (cols - 1) * px / 2;
             y0 = cy + (rows - 1) * py / 2;
         }
+        // Rows run north→south here (y decreases with r): north = r-1.
+        const isAsm = (rr: number, cc: number): boolean => g[rr]?.[cc]?.kind === 'lattice';
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < g[r].length; c++) {
-                placeTree(g[r][c], x0 + c * px, y0 - r * py, `${label}_r${r}c${c}`, depth + 1, Math.max(px, py));
+                const child = g[r][c];
+                const x = x0 + c * px;
+                const y = y0 - r * py;
+                if (child.kind === 'structure' && child.subtype === 'baffle') {
+                    const nb: BaffleNeighborhood = {
+                        east: isAsm(r, c + 1), west: isAsm(r, c - 1),
+                        north: isAsm(r - 1, c), south: isAsm(r + 1, c),
+                        ne: isAsm(r - 1, c + 1), nw: isAsm(r - 1, c - 1),
+                        se: isAsm(r + 1, c + 1), sw: isAsm(r + 1, c - 1),
+                    };
+                    cylinders.push(...bafflePlates(
+                        `${label}_r${r}c${c}_baffle`, x, y, px / 2, py / 2, nb,
+                        { height: collapsedHeight, zCenter: collapsedZ },
+                    ));
+                    continue;
+                }
+                placeTree(child, x, y, `${label}_r${r}c${c}`, depth + 1, Math.max(px, py));
             }
         }
     };
@@ -367,10 +389,10 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         notes.push(`Expanded a ${rows}×${cols} lattice (${cylinders.length} ${discMode ? 'pins' : 'pin layers'}).`);
     }
 
-    // Radial containment shells (barrel, shields, downcomer, RPV) + baffle boxes above.
+    // Radial containment shells (barrel, shields, downcomer, RPV) + baffle plates above.
     const structN = emitOpenmcRadialStructure(text, cylinders, { height: collapsedHeight, zCenter: collapsedZ });
     if (structN > 0) {
-        notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV). Baffle universes render as thin boxes at peripheral lattice positions.`);
+        notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, arc neutron-shield pads, downcomer, RPV). Baffle universes render as thin plates hugging the core-facing edges of peripheral lattice cells.`);
     }
 
     if (discMode) {

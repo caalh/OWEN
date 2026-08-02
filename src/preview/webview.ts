@@ -386,11 +386,23 @@ function buildHtml(webview: vscode.Webview): string {
         const h = Math.max(0.01, c.height || 1);
         const inner = c.innerRadius || 0;
         const op = (typeof c.opacity === 'number') ? c.opacity : 1;
-        const solid = inner <= 0.0001 && op >= 0.9;
-        const shape = c.shape === 'box' ? 'box' : 'cyl';
+        const shape = c.shape === 'arc' ? 'arc' : (c.shape === 'box' ? 'box' : 'cyl');
+        const solid = shape !== 'cyl' ? op >= 0.9 : (inner <= 0.0001 && op >= 0.9);
         const segs = r > 8 ? 64 : 18;
-        const key = shape + '|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op)) + '|' + segs;
-        if (!byKey.has(key)) byKey.set(key, { solid, r, h, shape, segs, op, items: [] });
+        // Rectangular boxes (baffle plates) carry their own half-sizes; square
+        // boxes keep radius as the half-width. Arcs carry ring + span params.
+        const hx = shape === 'box' ? Math.max(0.01, (typeof c.halfX === 'number' ? c.halfX : r)) : 0;
+        const hy = shape === 'box' ? Math.max(0.01, (typeof c.halfY === 'number' ? c.halfY : r)) : 0;
+        const arcLen = shape === 'arc' ? Math.max(1, Math.min(360, c.thetaLength || 45)) : 0;
+        let key;
+        if (shape === 'box') {
+          key = 'box|' + (solid ? 'S' : 'T') + '|' + hx.toFixed(4) + '|' + hy.toFixed(4) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op));
+        } else if (shape === 'arc') {
+          key = 'arc|' + (solid ? 'S' : 'T') + '|' + inner.toFixed(3) + '|' + r.toFixed(3) + '|' + arcLen.toFixed(2) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op));
+        } else {
+          key = 'cyl|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op)) + '|' + segs;
+        }
+        if (!byKey.has(key)) byKey.set(key, { solid, r, h, shape, segs, op, hx, hy, inner, arcLen, items: [] });
         byKey.get(key).items.push(c);
 
         // bounds (world mapping: X=c.x, Y=c.z, Z=c.y)
@@ -403,7 +415,19 @@ function buildHtml(webview: vscode.Webview): string {
       for (const grp of byKey.values()) {
         let geo;
         if (grp.shape === 'box') {
-          geo = new THREE.BoxGeometry(grp.r * 2, grp.h, grp.r * 2);
+          geo = new THREE.BoxGeometry(grp.hx * 2, grp.h, grp.hy * 2);
+        } else if (grp.shape === 'arc') {
+          // Annular sector centered on plan angle 0, extruded to height h; each
+          // instance rotates it to its own thetaStart (see below).
+          const half = (grp.arcLen * Math.PI / 180) / 2;
+          const s = new THREE.Shape();
+          s.absarc(0, 0, grp.r, -half, half, false);
+          s.absarc(0, 0, Math.max(0.01, grp.inner), half, -half, true);
+          geo = new THREE.ExtrudeGeometry(s, { depth: grp.h, bevelEnabled: false, curveSegments: 24 });
+          // Shape plane (x,y) → world plan (X,Z); extrusion +z → world -Y, so
+          // recenter the height range on the instance origin.
+          geo.rotateX(Math.PI / 2);
+          geo.translate(0, grp.h / 2, 0);
         } else {
           geo = new THREE.CylinderGeometry(grp.r, grp.r, grp.h, grp.segs, 1, !grp.solid);
         }
@@ -423,6 +447,12 @@ function buildHtml(webview: vscode.Webview): string {
         grp.items.forEach((c, i) => {
           dummy.position.set(c.x, c.z || 0, c.y);
           dummy.rotation.set(0, 0, 0);
+          if (grp.shape === 'arc') {
+            // Geometry is centered on plan angle 0; rotate to the arc's own
+            // center. World Z = deck +y, so plan angle θ needs rotation.y = -θ.
+            const centerDeg = (c.thetaStart || 0) + grp.arcLen / 2;
+            dummy.rotation.y = -centerDeg * Math.PI / 180;
+          }
           dummy.scale.set(1, 1, 1);
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
@@ -433,6 +463,7 @@ function buildHtml(webview: vscode.Webview): string {
             comp: c.component || 'other', mat: c.material || '', ax: c.axialLayer || '',
             zc: (typeof c.z === 'number' ? c.z : 0),
             r: c.radius, ri: c.innerRadius || 0, h: grp.h,
+            hx: grp.hx || 0, hy: grp.hy || 0,
             shape: grp.shape, label: c.label || '',
             axIndex: (typeof c.axialIndex === 'number' ? c.axialIndex : null),
           });
@@ -736,7 +767,13 @@ function buildHtml(webview: vscode.Webview): string {
       if (inst.mat) rows.push(line('Material', inst.mat));
       if (inst.axIndex != null) rows.push(line('Axial layer', '#' + inst.axIndex + (inst.ax ? ' · ' + inst.ax : '')));
       if (inst.shape === 'box') {
-        rows.push(line('Half-width', fmtLen(inst.r) + ' cm'));
+        if (inst.hx && inst.hy && Math.abs(inst.hx - inst.hy) > 0.001) {
+          rows.push(line('Half-size', fmtLen(inst.hx) + ' × ' + fmtLen(inst.hy) + ' cm'));
+        } else {
+          rows.push(line('Half-width', fmtLen(inst.hx || inst.r) + ' cm'));
+        }
+      } else if (inst.shape === 'arc') {
+        rows.push(line('Ring', fmtLen(inst.ri) + ' → ' + fmtLen(inst.r) + ' cm'));
       } else {
         rows.push(line('Radius', fmtLen(inst.r) + ' cm'));
         rows.push(line('Diameter', fmtLen(diameter(inst.r)) + ' cm'));
@@ -804,6 +841,7 @@ function buildHtml(webview: vscode.Webview): string {
     function addRadiusMeasurement(pick) {
       const inst = pick.inst;
       if (inst.shape === 'box') { setMeasHint('That part is a box — radius applies to cylindrical shells.'); return; }
+      if (inst.shape === 'arc') { setMeasHint('That part is an arc segment — its ring spans ' + fmtLen(inst.ri) + ' → ' + fmtLen(inst.r) + ' cm.'); return; }
       const m = new THREE.Matrix4(); groups[pick.gi].mesh.getMatrixAt(pick.id, m);
       const center = new THREE.Vector3().setFromMatrixPosition(m);
       center.y = pick.point.y;                          // draw the radial line at the clicked elevation

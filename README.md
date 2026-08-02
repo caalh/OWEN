@@ -58,10 +58,12 @@ evidence rather than proof.
 High Contrast, Pastel, and **Custom** (your own colors) — rendered from the same color table the
 editor uses, so what you compare is what you get. Click a card to apply it. For OpenMC each
 built-in palette uses its own hue family (blue/teal, olive/blue, orange/yellow/green/cyan,
-lilac/rose/mint), so the options are distinct at a glance even though Python decks only show
-four token roles. Custom colors live in `owen.highlight.customColors` — set any of the ten
-token roles to a hex color (or `{foreground, fontStyle}`); roles you leave out fall back to
-Classic.
+lilac/rose/mint), and the palette reaches the whole API surface — not just `openmc.*`
+names but method calls (`fuel.add_nuclide`, `mats.export_to_xml`) and attributes
+(`settings.batches`, `cell.temperature`) on any variable, so switching palettes visibly
+recolors a real deck. Custom colors live in `owen.highlight.customColors` — set any of the
+ten token roles to a hex color (or `{foreground, fontStyle}`); roles you leave out fall
+back to Classic.
 
 <p align="center">
   <img alt="OWEN highlight palette preview showing Classic, Solarized, High Contrast and Pastel side by side for MCNP" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-highlight-palettes.png" width="880">

@@ -20,7 +20,8 @@ export type OpenmcScope =
     | 'variable.language.openmc'
     | 'support.type.openmc'
     | 'support.class.openmc'
-    | 'support.function.openmc';
+    | 'support.function.openmc'
+    | 'support.variable.openmc';
 
 export interface OpenmcToken {
     /** Offset of the first character, into the string that was scanned. */
@@ -32,6 +33,45 @@ export interface OpenmcToken {
 
 /** Submodules the grammar recognises after `openmc.`. */
 const SUBMODULES = 'model|stats|deplete|data|lib|mgxs';
+
+// The four `openmc.`-anchored patterns only touch a handful of tokens per
+// screen: in a real deck most of the OpenMC API surface appears as method
+// calls and attribute accesses on *variables* (`fuel.add_nuclide(...)`,
+// `settings.batches = 150`), which stayed theme-colored — so switching
+// palettes looked like it did almost nothing (user report, 2026-08-02).
+// These curated name lists extend the palette to any receiver. Curation keeps
+// it honest: only names that are unmistakably OpenMC API in a deck context.
+
+/** Well-known OpenMC method names, colored as functions on any receiver. */
+export const OPENMC_METHODS: readonly string[] = [
+    'add_nuclide', 'remove_nuclide', 'add_element', 'add_elements_from_formula',
+    'add_components', 'add_macroscopic', 'add_s_alpha_beta', 'set_density',
+    'mix_materials', 'get_nuclide_densities', 'get_nuclide_atom_densities',
+    'export_to_xml', 'export_to_model_xml', 'from_xml', 'to_xml_element',
+    'run', 'plot_geometry', 'calculate_volumes', 'sample_external_source',
+    'get_all_cells', 'get_all_materials', 'get_all_universes', 'get_all_lattices',
+    'add_cell', 'add_cells', 'remove_cell', 'clone', 'rotate', 'translate',
+    'differentiate_depletable_mats', 'find',
+];
+
+/** Well-known OpenMC attribute names (settings/cell/lattice/tally fields). */
+export const OPENMC_ATTRIBUTES: readonly string[] = [
+    // Settings
+    'batches', 'inactive', 'particles', 'generations_per_batch', 'run_mode',
+    'seed', 'source', 'trigger_active', 'trigger_max_batches', 'photon_transport',
+    'energy_mode', 'output', 'cutoff', 'temperature',
+    // Geometry / cells / lattices
+    'fill', 'region', 'root_universe', 'universes', 'boundary_type', 'albedo',
+    'periodic_surface', 'lower_left', 'upper_right', 'pitch', 'outer',
+    'ring_radii', 'num_rings', 'orientation',
+    // Materials
+    'density', 'depletable', 'volume', 'isotropic',
+    // Tallies / sources
+    'filters', 'scores', 'estimator', 'triggers', 'space', 'angle', 'energy',
+    'time', 'strength', 'particle', 'probability',
+    // Model wiring
+    'geometry', 'settings', 'materials', 'tallies', 'plots',
+];
 
 // Mirrors the four repository patterns in the injection grammar, in the same
 // order: the first to match a position claims it.
@@ -51,6 +91,17 @@ const PATTERNS: { re: RegExp; scopes: (OpenmcScope | undefined)[] }[] = [
     {
         re: /\b(openmc)\b/g,
         scopes: ['variable.language.openmc'],
+    },
+    // Any-receiver API methods and attributes. Lower precedence than the
+    // openmc.-anchored patterns above, so `openmc.run(` stays module+function
+    // and these claim only the `mat.add_nuclide(` / `settings.batches` forms.
+    {
+        re: new RegExp(`\\.(${OPENMC_METHODS.join('|')})(?=\\s*\\()`, 'g'),
+        scopes: ['support.function.openmc'],
+    },
+    {
+        re: new RegExp(`\\.(${OPENMC_ATTRIBUTES.join('|')})\\b(?!\\s*\\()`, 'g'),
+        scopes: ['support.variable.openmc'],
     },
 ];
 

@@ -33,10 +33,23 @@ export interface CylinderSpec {
     /** Raw material name (drives the material-based toggle group). */
     material?: string;
     /**
-     * Primitive shape. Defaults to 'cylinder'. 'box' uses `radius` as the
-     * half-width of a square prism (square grid sleeves / structural panels).
+     * Primitive shape. Defaults to 'cylinder'.
+     * - 'box' uses `radius` as the half-width of a square prism (square grid
+     *   sleeves / structural panels), unless `halfX`/`halfY` give a rectangle.
+     * - 'arc' is an annular sector (ring segment) between `innerRadius` and
+     *   `radius`, spanning `thetaLength` degrees starting at `thetaStart`
+     *   (degrees, CCW from +x in plan view). Used for curved structures that a
+     *   box misrepresents: neutron-shield pads, partial formers.
      */
-    shape?: 'cylinder' | 'box';
+    shape?: 'cylinder' | 'box' | 'arc';
+    /** Rectangular box half-size along x (cm). Falls back to `radius`. */
+    halfX?: number;
+    /** Rectangular box half-size along y (cm). Falls back to `radius`. */
+    halfY?: number;
+    /** Arc start angle in degrees (plan view, CCW from +x). */
+    thetaStart?: number;
+    /** Arc angular span in degrees. */
+    thetaLength?: number;
     /**
      * Axial layer (z-band) this cylinder belongs to when the scene is expanded
      * with axial detail. Drives the per-axial-layer show/hide toggle and the

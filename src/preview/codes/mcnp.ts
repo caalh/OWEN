@@ -26,7 +26,8 @@ import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, Fid
 import { componentColor, emitLayers, materialColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import {
-    baffleBox, emitMcnpRadialStructure, mcnpBaffleUniverses,
+    BaffleNeighborhood, bafflePlates, emitMcnpRadialStructure,
+    mcnpBaffleBand, mcnpBaffleUniverses,
 } from '../radialStructure';
 
 type SurfaceType =
@@ -278,12 +279,9 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     // into its z-segments; otherwise it collapses to its tallest (active-fuel)
     // segment over the full model height. A plain pin universe places directly.
     const placeEntry = (uid: number, cx: number, cy: number, label: string): void => {
-        if (baffleUniverses.has(uid)) {
-            if (cylinders.length >= maxInstances) { capped = true; return; }
-            const hw = Math.max(subPitch * 0.42, 1.0);
-            cylinders.push(baffleBox(`${label}_baffle`, cx, cy, hw, { height, zCenter: zmid }));
-            return;
-        }
+        // Baffle universes are handled at the lattice level (neighbor-aware
+        // plates); one reached outside a lattice has no core to hug — skip.
+        if (baffleUniverses.has(uid)) return;
         const segs = axialStacks.get(uid);
         if (segs) {
             if (axialOn) {
@@ -319,6 +317,18 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
             const p = lat.pitchX;
             const x0sq = cx - (nx - 1) * lat.pitchX / 2;
             const y0sq = cy - (ny - 1) * lat.pitchY / 2;
+
+            // Baffle universes hug the fueled positions: an "assembly-like"
+            // entry is a nested lattice (directly, or through an axial stack).
+            // Note grid rows run south→north here (y grows with j).
+            const isAsm = (j: number, i: number): boolean => {
+                const s = grid[j]?.[i] ?? 0;
+                if (s === 0) return false;
+                if (latUniverses.has(s)) return true;
+                const segs = axialStacks.get(s);
+                return !!segs && segs.some((seg) => latUniverses.has(seg.universe));
+            };
+
             for (let j = 0; j < ny; j++) {
                 for (let i = 0; i < nx; i++) {
                     const sub = grid[j]?.[i] ?? 0;
@@ -333,6 +343,22 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                     } else {
                         px = x0sq + i * lat.pitchX;
                         py = y0sq + j * lat.pitchY;
+                    }
+                    if (!lat.hex && baffleUniverses.has(sub)) {
+                        if (cylinders.length >= maxInstances) { capped = true; return; }
+                        const nb: BaffleNeighborhood = {
+                            east: isAsm(j, i + 1), west: isAsm(j, i - 1),
+                            north: isAsm(j + 1, i), south: isAsm(j - 1, i),
+                            ne: isAsm(j + 1, i + 1), nw: isAsm(j + 1, i - 1),
+                            se: isAsm(j - 1, i + 1), sw: isAsm(j - 1, i - 1),
+                        };
+                        const band = mcnpBaffleBand(sub, byUniverse, surfaces, materials);
+                        cylinders.push(...bafflePlates(
+                            `${label}_r${j}c${i}_baffle`, px, py,
+                            lat.pitchX / 2, lat.pitchY / 2, nb,
+                            { height, zCenter: zmid }, band,
+                        ));
+                        continue;
                     }
                     if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1, nextAncestors);
                     else placeEntry(sub, px, py, `${label}_r${j}c${i}`);
@@ -361,10 +387,10 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         return { cylinders: bare.cylinders, warnings, notes: bare.notes };
     }
 
-    // Radial containment: annular barrel / shields / downcomer / RPV + baffle boxes above.
+    // Radial containment: annular barrel / shields / downcomer / RPV + baffle plates above.
     const structCount = emitMcnpRadialStructure(surfaces, cells, cylinders, radialCtx, materials);
     if (structCount > 0) {
-        notes.push(`Drew ${structCount} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV). Baffle plates render as thin boxes at peripheral lattice positions.`);
+        notes.push(`Drew ${structCount} radial-structure primitive(s) (barrel, arc neutron-shield pads, downcomer, RPV). Baffle/former plates render as thin plates hugging the core-facing edges of peripheral lattice cells.`);
     }
 
     if (discMode) {

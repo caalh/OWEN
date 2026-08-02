@@ -17,7 +17,7 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
-import { emitSerpentRadialStructure } from '../radialStructure';
+import { BaffleNeighborhood, bafflePlates, emitSerpentRadialStructure } from '../radialStructure';
 
 /** Grid-size ceiling shared with the MCNP fill guard (5M cells ≈ full core ×20). */
 const MAX_LAT_CELLS = 5_000_000;
@@ -108,6 +108,40 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     for (const c of cells) {
         if (!cellsByUniverse.has(c.universe)) cellsByUniverse.set(c.universe, []);
         cellsByUniverse.get(c.universe)!.push(c);
+    }
+
+    // Baffle universes: steel plate cells bounded by px/py planes with no
+    // cylinder in the universe (BEAVRS-style peripheral reflector cells). The
+    // |plane offsets| of the steel cells give the plate band from the cell
+    // centre; rendered as thin plates on core-facing edges at lattice level.
+    const baffleUniverses = new Set<string>();
+    const baffleBands = new Map<string, [number, number]>();
+    for (const [uni, cs] of cellsByUniverse) {
+        let steel = false;
+        let pxpy = false;
+        let cyl = false;
+        const offs = new Set<number>();
+        for (const c of cs) {
+            const isSteel = !!c.material && /steel|ss-?304|\bss\b/i.test(c.material);
+            for (const sref of c.surfaces) {
+                const s = surfs.get(sref.id);
+                if (!s) continue;
+                if (s.type === 'px' || s.type === 'py') {
+                    pxpy = true;
+                    if (isSteel) {
+                        const v = Math.abs(s.params[0] ?? 0);
+                        if (v > 0.01) offs.add(Number(v.toFixed(5)));
+                    }
+                }
+                if (s.type === 'cyl' || s.type === 'cylz' || s.type === 'cylv') cyl = true;
+            }
+            if (isSteel) steel = true;
+        }
+        if (steel && pxpy && !cyl) {
+            baffleUniverses.add(uni);
+            const sorted = [...offs].sort((a, b) => a - b);
+            if (sorted.length >= 2) baffleBands.set(uni, [sorted[0], sorted[sorted.length - 1]]);
+        }
     }
 
     // Axial stacks: a universe whose cells each `fill` a sub-universe and are
@@ -317,9 +351,36 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             const yTop = cy + lat.y0 + (lat.ny - 1) * lat.pitch / 2;
             const ox = cx + lat.x0;
             const oy = cy + lat.y0;
+            // Assembly-like entries (nested lattices, directly or through an
+            // axial stack) — the neighbors a baffle cell's plates should hug.
+            // Rows run north→south (y decreases with row): north = row-1.
+            const isAsm = (rr: number, cc: number): boolean => {
+                const e = lat.grid[rr]?.[cc];
+                if (!e) return false;
+                if (lats.has(resolveFill(e))) return true;
+                const segs = axialStacks.get(e);
+                return !!segs && segs.some((s) => lats.has(resolveFill(s.universe)));
+            };
             for (let row = 0; row < lat.grid.length; row++) {
                 for (let col = 0; col < lat.grid[row].length; col++) {
                     const entry = lat.grid[row][col];
+                    if (!hex && (baffleUniverses.has(entry) || baffleUniverses.has(resolveFill(entry)))) {
+                        const key = baffleUniverses.has(entry) ? entry : resolveFill(entry);
+                        const bx = x0 + col * lat.pitch;
+                        const by = yTop - row * lat.pitch;
+                        const nb: BaffleNeighborhood = {
+                            east: isAsm(row, col + 1), west: isAsm(row, col - 1),
+                            north: isAsm(row - 1, col), south: isAsm(row + 1, col),
+                            ne: isAsm(row - 1, col + 1), nw: isAsm(row - 1, col - 1),
+                            se: isAsm(row + 1, col + 1), sw: isAsm(row + 1, col - 1),
+                        };
+                        cylinders.push(...bafflePlates(
+                            `${label}_r${row}c${col}_baffle`, bx, by,
+                            lat.pitch / 2, lat.pitch / 2, nb,
+                            { height: fullHeight, zCenter: fullZmid }, baffleBands.get(key),
+                        ));
+                        continue;
+                    }
                     let px: number;
                     let py: number;
                     if (hex) {
@@ -374,7 +435,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
         const structN = emitSerpentRadialStructure(text, surfs, cylinders, { height: fullHeight, zCenter: fullZmid }, footprint);
         if (structN > 0) {
-            notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, neutron-shield pads, downcomer, RPV).`);
+            notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, arc neutron-shield pads, downcomer, RPV). Baffle/former plates render as thin plates hugging the core-facing edges of peripheral lattice cells.`);
         }
     }
 

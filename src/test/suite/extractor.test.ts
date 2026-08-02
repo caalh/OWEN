@@ -1074,15 +1074,13 @@ geometry { universes {
         const struct = scene.cylinders.filter((c) =>
             c.component === 'vessel' || c.component === 'structure' || c.component === 'moderator');
         assert.ok(struct.length > 0, `expected radial structure primitives, got ${struct.length}`);
-        const baffles = scene.cylinders.filter((c) => c.component === 'structure' && c.shape === 'box');
-        assert.ok(baffles.length > 0, `expected MCNP baffle boxes, got ${baffles.length}`);
         assert.ok(struct.some((c) => c.innerRadius && c.innerRadius > 100),
             'expected annular barrel/RPV shells (innerRadius > 100 cm)');
         assert.ok(scene.components.some((c) => c.id === 'vessel' || c.id === 'structure'),
             'expected vessel/structure in component legend');
     });
 
-    test('BEAVRS OpenMC extract includes radial structure and baffle boxes', () => {
+    test('BEAVRS OpenMC extract includes radial structure and baffle plates', () => {
         const deckPath = path.join(PREBUILT_MODELS, 'beavrs_fullcore_openmc.py');
         if (!fs.existsSync(deckPath)) {
             console.log('BEAVRS OpenMC deck not bundled — skipping radial structure test');
@@ -1095,5 +1093,64 @@ geometry { universes {
         assert.ok(struct.length > 0, `expected radial/baffle structure, got ${struct.length}`);
         const pins = scene.cylinders.filter((c) => c.component === 'fuel' || c.component === 'guide_tube');
         assert.ok(pins.length > 50000, `expected full pin count, got ${pins.length}`);
+    });
+
+    // --- BEAVRS baffle plates + arc shield pads (all four languages) ---
+
+    const BEAVRS_DECKS: Array<[string, string]> = [
+        ['mcnp', 'beavrs_fullcore_mcnp.i'],
+        ['openmc', 'beavrs_fullcore_openmc.py'],
+        ['serpent', 'beavrs_fullcore_serpent.sss'],
+        ['scone', 'beavrs_fullcore_scone.scone'],
+    ];
+
+    for (const [lang, file] of BEAVRS_DECKS) {
+        test(`BEAVRS ${lang}: baffle renders as thin core-hugging plates, not blocks`, () => {
+            const deckPath = path.join(PREBUILT_MODELS, file);
+            if (!fs.existsSync(deckPath)) {
+                console.log(`BEAVRS ${lang} deck not bundled — skipping baffle plate test`);
+                return;
+            }
+            const deck = fs.readFileSync(deckPath, 'utf8');
+            const scene = buildScene(deck, lang, { detail: 'disc', axial: false });
+            const plates = scene.cylinders.filter((c) => c.component === 'baffle');
+            assert.ok(plates.length >= 50, `expected baffle plates, got ${plates.length}`);
+            // Plates are thin rectangles: one half-size is the plate thickness
+            // (~1.1 cm from the BEAVRS px/py band), the other spans the cell.
+            for (const p of plates) {
+                const hx = p.halfX ?? p.radius;
+                const hy = p.halfY ?? p.radius;
+                const thin = Math.min(hx, hy);
+                const long = Math.max(hx, hy);
+                assert.ok(thin < 2.0, `plate ${p.label}: thickness half-size ${thin} should be < 2 cm`);
+                assert.ok(long > 4.0, `plate ${p.label}: span half-size ${long} should be > 4 cm`);
+            }
+            // Every plate must hug the core-facing side of its reflector cell.
+            const pitch = 21.50364;
+            for (const p of plates) {
+                const cellX = Math.round(p.x / pitch) * pitch;
+                const cellY = Math.round(p.y / pitch) * pitch;
+                const dot = (p.x - cellX) * (0 - cellX) + (p.y - cellY) * (0 - cellY);
+                assert.ok(dot > 0, `plate ${p.label} at (${p.x.toFixed(1)}, ${p.y.toFixed(1)}) sits on the outward side of its cell`);
+            }
+            // No legacy full-cell baffle blocks: nothing square and cell-sized.
+            const blocks = scene.cylinders.filter((c) =>
+                c.shape === 'box' && (c.halfX === undefined || Math.abs((c.halfX ?? 0) - (c.halfY ?? 0)) < 0.01)
+                && c.radius > 4 && (c.component === 'structure' || c.component === 'baffle'));
+            assert.strictEqual(blocks.length, 0, `expected no cell-sized baffle blocks, got ${blocks.length}`);
+        });
+    }
+
+    test('BEAVRS MCNP: neutron-shield pads render as arc segments', () => {
+        const deckPath = path.join(PREBUILT_MODELS, 'beavrs_fullcore_mcnp.i');
+        if (!fs.existsSync(deckPath)) return;
+        const deck = fs.readFileSync(deckPath, 'utf8');
+        const scene = buildScene(deck, 'mcnp', { detail: 'disc', axial: false });
+        const arcs = scene.cylinders.filter((c) => c.shape === 'arc');
+        assert.strictEqual(arcs.length, 4, `expected 4 arc shield pads, got ${arcs.length}`);
+        for (const a of arcs) {
+            assert.ok((a.innerRadius ?? 0) > 100, 'pad ring should sit at vessel scale');
+            assert.ok((a.thetaLength ?? 0) > 10 && (a.thetaLength ?? 0) < 90, 'pad span should be a partial arc');
+        }
     });
 });

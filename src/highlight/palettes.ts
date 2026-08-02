@@ -131,33 +131,43 @@ const ROLE_COLORS: Record<PaletteId, Record<Role, TokenStyle>> = {
 };
 
 // ── Per-language overrides ───────────────────────────────────────────────────
-// OpenMC decks only ever show four roles (module / class / function /
-// submodule), and the base palettes differ mostly by saturation within the
-// same hue families — which made the OpenMC options nearly indistinguishable
-// in practice (user report, 2026-08-02). These overrides give each OpenMC
-// palette its own hue family so the choice is visible at a glance:
-//   classic       blue module    teal classes    violet functions  khaki submodules
-//   solarized     olive module   blue classes    magenta functions gold submodules
-//   highContrast  orange module  yellow classes  green functions   cyan submodules
-//   pastel        lilac module   rose classes    mint functions    peach submodules
-// Other languages use the base palettes unchanged.
+// OpenMC decks only ever show five roles (module / class / function /
+// submodule / attribute), and the base palettes differ mostly by saturation
+// within the same hue families — which made the OpenMC options nearly
+// indistinguishable in practice (user report, 2026-08-02). These overrides
+// give each OpenMC palette its own hue family so the choice is visible at a
+// glance:
+//   classic       blue module    teal classes    violet functions  khaki submodules  light-blue attributes
+//   solarized     olive module   blue classes    magenta functions gold submodules   teal attributes
+//   highContrast  orange module  yellow classes  green functions   cyan submodules   magenta attributes
+//   pastel        lilac module   rose classes    mint functions    peach submodules  periwinkle attributes
+// The `modifier` role is the any-receiver attribute coverage
+// (`settings.batches`, `cell.temperature`) added alongside the OpenMC method
+// list — most of a deck's visible API surface, which is what actually makes a
+// palette switch legible. Other languages use the base palettes unchanged.
 const ROLE_OVERRIDES: Partial<Record<Language, Partial<Record<PaletteId, Partial<Record<Role, TokenStyle>>>>>> = {
     openmc: {
+        classic: {
+            modifier: { foreground: '#9CDCFE' },
+        },
         solarized: {
             type: { foreground: '#268BD2' },
             func: { foreground: '#D33682' },
+            modifier: { foreground: '#2AA198' },
         },
         highContrast: {
             keyword: { foreground: '#FF9100' },
             type: { foreground: '#FFEA00' },
             func: { foreground: '#00E676' },
             entity: { foreground: '#40C4FF' },
+            modifier: { foreground: '#FF4081' },
         },
         pastel: {
             keyword: { foreground: '#C8A2C8' },
             type: { foreground: '#FFB3BA' },
             func: { foreground: '#A8E6CF' },
             entity: { foreground: '#FFDAC1' },
+            modifier: { foreground: '#C7CEEA' },
         },
     },
 };
@@ -240,6 +250,7 @@ const SCOPE_ROLES: Record<Language, Record<string, Role>> = {
         'support.class.openmc': 'type',
         'support.function.openmc': 'func',
         'support.type.openmc': 'entity',
+        'support.variable.openmc': 'modifier',
     },
     serpent: {
         'comment.line.serpent': 'comment',
