@@ -28,7 +28,7 @@
       "name": "keyword.control.mcnp"
     },
     "particleSuffix": {
-      "match": ":(n|p|e|h|photon|neutron|n,p|n p|p,e|e,p)\\b",
+      "match": ":(photon|neutron|[npehdtsa](,[npehdtsa])*)\\b",
       "name": "keyword.other.particle.mcnp"
     },
     "materialCard": {
@@ -140,11 +140,11 @@
       "name": "storage.type.surface.mcnp"
     },
     "thermalLib": {
-      "match": "\\b[a-zA-Z][\\w-]*\\.\\d{2}[cCpPdDyYtThH]\\b",
+      "match": "\\b[a-zA-Z][\\w-]*\\.\\d{2,}[tcdmgpuyehorsaTCDMGPUYEHORSA]\\b",
       "name": "constant.other.library.mcnp"
     },
     "zaid": {
-      "match": "\\b\\d{4,6}\\.\\d{2,3}[cCpPdDyYtThH]\\b",
+      "match": "\\b\\d{4,6}\\.\\d{2,}[tcdmgpuyehorsaTCDMGPUYEHORSA]\\b",
       "name": "constant.other.zaid.mcnp"
     },
     "number": {

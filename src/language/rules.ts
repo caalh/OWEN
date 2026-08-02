@@ -79,7 +79,12 @@ function isCommentLine(line: string, lang: 'mcnp' | 'serpent' | 'scone'): boolea
 // MCNP
 // ----------------------------------------------------------------------------
 
-const ZAID_RE = /\b(\d{4,6})\.(\d{2})([cnpht])\b/g;
+// Library identifier: "2-digit or more integer" (manual §1.2.3 — 1001.810h is
+// a real proton table). Class letter: the 14 physics identifiers of Table B.1
+// (t c d m g p u y e h o r s a) — note there is no 'n' and no 'j'.
+// MCNP6.3.1 manual (LA-UR-24-24602 Rev. 1) §1.2.3, Table B.1.
+const ZAID_RE = /\b(\d{4,6})\.(\d{2,})([tcdmgpuyehorsa])\b/gi;
+const ZAID_CLASS_LETTERS = 'tcdmgpuyehorsa';
 const MATERIAL_HEADER_RE = /^\s*m(\d+)\s+/i;
 const MT_CARD_RE = /^\s*mt(\d+)\s+/i;
 const CELL_CARD_RE = /^\s*(\d+)\s+(\d+|0)\s+(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)?\s+/;
@@ -87,10 +92,13 @@ const MACROBODY_RE = /^\s*(\d+)\s+(\*?)(rpp|rcc|rhp|box|hex|cyl|sph|rec|trc|ell|
 
 /**
  * Accepted parameter counts per macrobody. Several take a short form:
- * RHP omits the optional s and t facet vectors for a regular hexagon, and BOX
- * omits a3 to make the body infinite along the normal to a1 x a2. Fixed counts
+ * RHP omits the optional s and t facet vectors for a regular hexagon, BOX
+ * omits a3 to make the body infinite along the normal to a1 x a2, and REC's
+ * 10-entry form replaces the major-axis vector with a minor-axis radius.
+ * ARB is exactly 30 ("or MCNP6 gives an error message"). Fixed counts
  * flagged correct decks as errors.
- * MCNP6.3.1 Theory & User Manual (LA-UR-24-24602 Rev. 1) 5.3.4.1 (BOX), 5.3.4.5 (RHP).
+ * MCNP6.3.1 Theory & User Manual (LA-UR-24-24602 Rev. 1) 5.3.4.1 (BOX),
+ * 5.3.4.5 (RHP), 5.3.4.6 (REC), 5.3.4.10 (ARB).
  */
 const MACROBODY_PARAM_COUNTS: Record<string, number[]> = {
     rpp: [6],
@@ -99,9 +107,11 @@ const MACROBODY_PARAM_COUNTS: Record<string, number[]> = {
     hex: [9, 15],
     box: [9, 12],
     sph: [4],
+    rec: [10, 12],
     trc: [8],
     ell: [7],
     wed: [12],
+    arb: [30],
 };
 
 /**
@@ -130,6 +140,13 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
     interface MatHeader { line: number; matNum: string; zaids: string[]; signs: Set<'+' | '-'>; }
     const materials = new Map<string, MatHeader>();
     let activeMat: MatHeader | null = null;
+
+    // Importances don't have to sit on the cell cards: IMP:P is also a data
+    // card ("Data-card Form: IMP:P x1 x2 ... xK", manual §5.12.1), and with
+    // cell-based weight windows (WWN) IMP values are not required at all. If
+    // either form is present, missing per-cell imp is not a problem.
+    const impElsewhere = lines.some((l) =>
+        /^ {0,4}(imp:[a-z]|wwn\d*:[a-z])/i.test(l) && !isCommentLine(l, 'mcnp'));
 
     for (let i = 0; i < lines.length; i++) {
         const raw = lines[i];
@@ -187,7 +204,7 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
             for (let t = 0; t < toks.length; t++) {
                 const tok = toks[t];
                 if (t === 0 && MATERIAL_HEADER_RE.test(tok + ' ')) continue; // mN header
-                if (/^\d{1,6}\.\d{2}[a-z]$/i.test(tok)) continue; // ZAID.TTc
+                if (/^\d{1,6}\.\d{2,}[a-z]$/i.test(tok)) continue; // ZAID.NNx
                 if (!NUMBER_TOKEN.test(tok)) continue;
                 if (tok.startsWith('-')) activeMat.signs.add('-');
                 else activeMat.signs.add('+');
@@ -196,10 +213,18 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
 
         ZAID_RE.lastIndex = 0;
         const tokens = raw.split(/\s+/);
+        // Inside a material card any digits.suffix token is an attempted
+        // table identifier, so a truncated one (92235.71, class letter
+        // missing) is flagged too. Outside materials only letter-terminated
+        // tokens are candidates — a plain decimal such as a 12345.6
+        // coordinate is not a ZAID and must not be flagged.
+        const zaidCandidate = activeMat ? /^\d{4,6}\.\w+$/i : /^\d{4,6}\.\w*[a-z]$/i;
         for (const tok of tokens) {
-            if (/^\d{4,6}\.[A-Za-z0-9]+/.test(tok) && !/^\d{4,6}\.\d{2}[cnpht]$/.test(tok)) {
+            if (zaidCandidate.test(tok) &&
+                !new RegExp(`^\\d{4,6}\\.\\d{2,}[${ZAID_CLASS_LETTERS}]$`, 'i').test(tok)) {
                 pushLine(diags, lines, i,
-                    `Invalid ZAID '${tok}'. Expected ZAAA.TTc (e.g. 92235.80c).`,
+                    `Invalid ZAID '${tok}'. Expected ZAAA.NNx (e.g. 92235.80c) where x is a ` +
+                    `Table B.1 class letter (${ZAID_CLASS_LETTERS.split('').join(' ')}).`,
                     'warning',
                     'mcnp.zaid');
             }
@@ -218,8 +243,18 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
                     'mcnp.macrobody');
             } else if (kind in MACROBODY_PARAM_COUNTS) {
                 const accepted = MACROBODY_PARAM_COUNTS[kind];
-                const idIdx = tokens.findIndex((t) => /^\d+$/.test(t));
-                const params = tokens
+                // Entries continue onto following lines (an ARB's 30 entries
+                // never fit on one 128-column card image), so count across
+                // the whole logical card: this line plus 5+-space-indented
+                // continuations, with $ comments stripped.
+                const cardLines = [raw.replace(/\$.*$/, '')];
+                for (let j = i + 1; j < lines.length; j++) {
+                    if (!/^\s{5,}\S/.test(lines[j]) || isCommentLine(lines[j], 'mcnp')) break;
+                    cardLines.push(lines[j].replace(/\$.*$/, ''));
+                }
+                const cardTokens = cardLines.join(' ').trim().split(/\s+/);
+                const idIdx = cardTokens.findIndex((t) => /^\d+$/.test(t));
+                const params = cardTokens
                     .slice(idIdx + 1)
                     .filter((t) => /^[-+]?\d/.test(t));
                 if (params.length > 0 && !accepted.includes(params.length)) {
@@ -246,9 +281,12 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
                     'mcnp.density-sign');
                 densityNoteIssued = true;
             }
-            if (!/imp:n/i.test(raw) && !cellContinuesToImp(lines, i)) {
+            // Any particle's importance counts (a mode p problem carries
+            // imp:p, not imp:n), and a data-block IMP/WWN card covers every
+            // cell at once.
+            if (!impElsewhere && !/imp:[a-z]/i.test(raw) && !cellContinuesToImp(lines, i)) {
                 pushLine(diags, lines, i,
-                    `Cell ${cell[1]} is missing imp:n=… — particles entering this cell may be killed.`,
+                    `Cell ${cell[1]} has no importance — add imp:n=… (or an IMP data card / weight windows); particles entering this cell may be killed.`,
                     'warning',
                     'mcnp.cell-imp');
             }
@@ -311,7 +349,7 @@ function cellContinuesToImp(lines: string[], start: number): boolean {
     for (let i = start + 1; i < Math.min(lines.length, start + 5); i++) {
         const l = lines[i];
         if (l.trim() === '') return false;
-        if (/^\s{5,}/.test(l) && /imp:n/i.test(l)) return true;
+        if (/^\s{5,}/.test(l) && /imp:[a-z]/i.test(l)) return true;
         if (/^\s{5,}/.test(l)) continue;
         return false;
     }

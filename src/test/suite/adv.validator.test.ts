@@ -75,6 +75,37 @@ suite('ADV validator — MCNP', () => {
         assert.ok(codes(run('mcnp', text)).includes('mcnp.zaid'));
     });
 
+    test('all Table B.1 class letters are legal ZAID suffixes', () => {
+        // t c d m g p u y e h o r s a — manual Table B.1. 'n' and 'j' are not
+        // classes; .80x above already covers the invalid path.
+        for (const letter of 'tcdmgpuyehorsa') {
+            const c = codes(run('mcnp', `m1 92235.80${letter} 1.0`));
+            assert.ok(!c.includes('mcnp.zaid'), `false positive on .80${letter}: ${c}`);
+        }
+        assert.ok(codes(run('mcnp', 'm1 92235.80n 1.0')).includes('mcnp.zaid'),
+            '"n" is not a Table B.1 class letter');
+        assert.ok(codes(run('mcnp', 'm1 92235.80j 1.0')).includes('mcnp.zaid'),
+            '"j" is not a Table B.1 class letter');
+    });
+
+    test('3+-digit library identifiers are legal (manual §1.2.3, e.g. 1001.810h)', () => {
+        const c = codes(run('mcnp', 'm1 1001.810h 1.0'));
+        assert.ok(!c.includes('mcnp.zaid'), `false positive on 1001.810h: ${c}`);
+    });
+
+    test('plain decimals are not mistaken for ZAIDs', () => {
+        // 4-6 digits before the point used to be enough to enter the ZAID
+        // check, flagging coordinates like 12345.6.
+        const c = codes(run('mcnp', '10 pz 12345.6'));
+        assert.ok(!c.includes('mcnp.zaid'), `false positive on 12345.6: ${c}`);
+    });
+
+    test('a truncated ZAID inside a material card is still flagged', () => {
+        // In material context 92235.71 is a table identifier missing its
+        // class letter, not a coordinate.
+        assert.ok(codes(run('mcnp', 'm1 92235.71 0.045')).includes('mcnp.zaid'));
+    });
+
     test('CYL fires an error but HEX does not — HEX is an RHP alias', () => {
         assert.ok(codes(run('mcnp', '10 cyl 0 0 0 5')).includes('mcnp.macrobody'));
         const c = codes(run('mcnp', '10 hex 0 0 0  0 0 10  5 0 0'));
@@ -108,6 +139,31 @@ suite('ADV validator — MCNP', () => {
         }
     });
 
+    test('REC accepts 10 or 12 entries, rejects 11 (manual 5.3.4.6)', () => {
+        const rec10 = '10 rec 7.5 0 -1.5  0 0 3  0.25 0 0  0.5'; // 10th entry = minor radius
+        const rec12 = '10 rec 7.5 0 -1.5  0 0 3  0.25 0 0  0 0.5 0';
+        for (const card of [rec10, rec12]) {
+            const c = codes(run('mcnp', card));
+            assert.ok(!c.includes('mcnp.macrobody-params'), `false positive on ${card}: ${c}`);
+        }
+        assert.ok(codes(run('mcnp', '10 rec 7.5 0 -1.5  0 0 3  0.25 0 0  0.5 0'))
+            .includes('mcnp.macrobody-params'));
+    });
+
+    test('ARB counts its 30 entries across continuation lines (manual 5.3.4.10)', () => {
+        // Listing 5.12's ARB, verbatim: 8 corner triplets + 6 face integers.
+        const arb = [
+            '10 arb 15.5 -1 -1  16.5 -1 -1  16.5 1 -1  15.5 1 -1',
+            '      15.5 -1 1  16.5 -1 1  16.5 1 1  15.5 1 1',
+            '      1458 2367 1256 3478 1234 5678',
+        ].join('\n');
+        const c = codes(run('mcnp', arb));
+        assert.ok(!c.includes('mcnp.macrobody-params'), `false positive on 30-entry ARB: ${c}`);
+        const short = arb.replace(' 5678', '');
+        assert.ok(codes(run('mcnp', short)).includes('mcnp.macrobody-params'),
+            '29-entry ARB must be flagged');
+    });
+
     test('lattice fill rows are continuation lines, not cells missing imp:n', () => {
         const text = [
             '100 0 -1 lat=1 u=5 imp:n=1',
@@ -126,6 +182,32 @@ suite('ADV validator — MCNP', () => {
         const good = '10 1 -10.4 -1\n        imp:n=1';
         const c = codes(run('mcnp', good));
         assert.ok(!c.includes('mcnp.cell-imp'), `continuation imp missed: ${c}`);
+    });
+
+    test('imp:p on the cell satisfies the importance check (mode p problems)', () => {
+        const c = codes(run('mcnp', '10 1 -10.4 -1 imp:p=1'));
+        assert.ok(!c.includes('mcnp.cell-imp'), `false positive on imp:p: ${c}`);
+    });
+
+    test('a data-block IMP card suppresses per-cell importance warnings (manual 5.12.1)', () => {
+        const deck = [
+            '10 1 -10.4 -1',
+            '20 0 1',
+            '',
+            'imp:n 1 0',
+        ].join('\n');
+        const c = codes(run('mcnp', deck));
+        assert.ok(!c.includes('mcnp.cell-imp'), `false positive with IMP data card: ${c}`);
+    });
+
+    test('a WWN card suppresses per-cell importance warnings', () => {
+        const deck = [
+            '10 1 -10.4 -1',
+            '',
+            'wwn1:n 0.5',
+        ].join('\n');
+        const c = codes(run('mcnp', deck));
+        assert.ok(!c.includes('mcnp.cell-imp'), `false positive with WWN card: ${c}`);
     });
 });
 

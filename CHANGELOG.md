@@ -5,6 +5,35 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] — 2026-08-02
+
+### Fixed
+
+- **MCNP validator corrections from a full read of the MCNP 6.3.1 manual**
+  (LA-UR-24-24602 Rev. 1):
+  - ZAID class letters are the 14 physics identifiers of Table B.1
+    (`t c d m g p u y e h o r s a`). The rule previously accepted only
+    `c n p h t` — flagging nine legal classes (`.80d` discrete, `.03e`
+    electron, `.70u` photonuclear, deuteron/triton/helion/alpha tables, …) as
+    invalid while accepting `n`, which is not a class at all. Library
+    identifiers may be 2-**or-more**-digit integers (§1.2.3 — `1001.810h` is a
+    real proton table). Plain decimals such as a `12345.6` coordinate are no
+    longer mistaken for ZAIDs; inside a material card a truncated identifier
+    (`92235.71`, class letter missing) is still flagged.
+  - `REC` (10 or 12 entries, §5.3.4.6) and `ARB` (exactly 30, §5.3.4.10) were
+    missing from the macrobody parameter-count table, so wrong counts passed
+    silently. Counts are now taken across continuation lines — an `ARB`'s 30
+    entries never fit on one card image, and the old per-line count would have
+    flagged every correctly written `ARB`.
+  - Per-cell "missing `imp:n`" warnings are suppressed when the deck carries a
+    data-block `IMP:P x1 x2 … xK` card (§5.12.1) or cell-based weight windows
+    (`WWN`), both of which make per-cell entries unnecessary — and any
+    `imp:<particle>` on the cell now satisfies the check (a `mode p` problem
+    carries `imp:p`, not `imp:n`).
+- **MCNP grammar**: ZAID/thermal-library highlighting accepts all Table B.1
+  class letters and 3+-digit library identifiers; particle designators now
+  include `d`/`t`/`s`/`a` (deuteron, triton, helion, alpha) and comma lists.
+
 ## [1.1.2] — 2026-08-02
 
 ### Changed
