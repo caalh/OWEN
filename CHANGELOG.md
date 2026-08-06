@@ -5,7 +5,44 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.4] — 2026-08-02
+## [1.1.5] — 2026-08-06
+
+### Added
+
+- **`OWEN: Open Community Library on reactormc.net`** — opens the community library
+  in a browser, next to the existing search commands in the OWEN menus. This is the
+  submission path: OWEN browses and inserts decks but has no upload flow, so
+  uploading, rating, and commenting happen on the site. Being a plain external link,
+  it keeps working when the backend is unreachable and when the in-editor browser is
+  turned off. A configurable `owen.community.webUrl` backs it, and only `http(s)`
+  targets are honored so a bad setting cannot launch another URI scheme.
+
+### Changed
+
+- **The Community Library browser now works out of the box.** It shipped disabled
+  with empty credentials, which meant nobody used it: `owen.community.enabled` now
+  defaults to `true` and `owen.supabase.url` / `owen.supabase.anonKey` default to the
+  public ReactorMC project. The bundled key is a Supabase **publishable** key — public
+  by design, already served in the reactormc.net page bundle, and constrained by Row
+  Level Security to reading *approved* models. The client is still built with
+  `persistSession: false`, so it cannot authenticate or write. Set
+  `owen.community.enabled` to `false` to stop OWEN contacting the backend entirely;
+  bundled prebuilt models and snippets are unaffected.
+- **Failures are now actionable instead of raw.** ReactorMC runs on Supabase's free
+  tier, which pauses a project after roughly a week of inactivity, so an unreachable
+  backend is routine rather than a bug — and it surfaced as
+  `OWEN: community search failed: TypeError: Failed to fetch`. Network and gateway
+  failures are now recognized and reported as a temporary outage that explicitly says
+  nothing is wrong with the user's deck. Genuine query and permission errors still
+  show their real message. Every one of these prompts, plus the empty-result case,
+  now offers an **Open on reactormc.net** button.
+- An empty result no longer reads as a dead end: with no approved models for the
+  detected code, OWEN says yours could be the first and offers the upload page.
+
+### Notes
+
+- Marketplace and Open VSX remain behind pending publisher tokens; the VSIX on the
+  GitHub release is the installable artifact.
 
 ### Fixed
 

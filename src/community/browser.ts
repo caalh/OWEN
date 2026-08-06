@@ -14,8 +14,46 @@ interface CommunityModel {
 }
 
 const DISABLED_MESSAGE =
-    'Community Library is disabled. Set `owen.community.enabled` and configure ' +
-    '`owen.supabase.url`/`owen.supabase.anonKey` to enable.';
+    'OWEN: the Community Library browser is turned off (`owen.community.enabled`). ' +
+    'You can still browse it on the web.';
+
+const OPEN_ON_WEB = 'Open on reactormc.net';
+
+/** Message fragments meaning the backend was never reached, as opposed to a query
+ *  being refused. ReactorMC runs on Supabase's free tier, which pauses a project
+ *  after about a week of inactivity, so this is a routine condition rather than a
+ *  bug and must not be reported to the user as a raw `TypeError`. */
+const UNREACHABLE_SIGNATURES = [
+    'failed to fetch',
+    'fetch failed',
+    'networkerror',
+    'network request failed',
+    'load failed',
+    'is paused',
+    'service unavailable',
+    'bad gateway',
+    'gateway timeout',
+    'econnrefused',
+    'enotfound',
+    'etimedout',
+    'timeout',
+    'timed out',
+];
+
+/** Exported for tests. */
+export function isUnreachable(message: string): boolean {
+    const m = message.toLowerCase();
+    return UNREACHABLE_SIGNATURES.some((sig) => m.includes(sig));
+}
+
+/** Shows `message` with a button that opens the library in a browser. */
+async function offerWeb(message: string, kind: 'info' | 'warning' = 'info'): Promise<void> {
+    const show = kind === 'warning' ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
+    const choice = await show(message, OPEN_ON_WEB);
+    if (choice === OPEN_ON_WEB) {
+        await vscode.commands.executeCommand('owen.openCommunityLibrary');
+    }
+}
 
 function languageFilter(value: string | null | undefined): string | null {
     if (!value) return null;
@@ -30,16 +68,17 @@ function languageFilter(value: string | null | undefined): string | null {
 export function registerSearchReactorLibrary(): vscode.Disposable {
     return vscode.commands.registerCommand('owen.searchReactorLibrary', async () => {
         const cfg = vscode.workspace.getConfiguration('owen');
-        if (!cfg.get<boolean>('community.enabled', false)) {
-            vscode.window.showInformationMessage(DISABLED_MESSAGE);
+        if (!cfg.get<boolean>('community.enabled', true)) {
+            await offerWeb(DISABLED_MESSAGE);
             return;
         }
 
         const client = await getSupabaseClient();
         if (!client) {
-            vscode.window.showWarningMessage(
-                'OWEN: Community Library is enabled but Supabase credentials are missing. ' +
-                'Set `owen.supabase.url` and `owen.supabase.anonKey`.',
+            await offerWeb(
+                'OWEN: no Community Library backend is configured. Restore the defaults for ' +
+                '`owen.supabase.url` and `owen.supabase.anonKey`, or browse on the web instead.',
+                'warning',
             );
             return;
         }
@@ -69,12 +108,24 @@ export function registerSearchReactorLibrary(): vscode.Disposable {
         );
 
         if (result.error) {
-            vscode.window.showErrorMessage(`OWEN: community search failed: ${result.error.message}`);
+            if (isUnreachable(result.error.message)) {
+                await offerWeb(
+                    'OWEN: the Community Library is temporarily unreachable. Nothing is wrong with ' +
+                    'your deck — try again in a few minutes.',
+                    'warning',
+                );
+            } else {
+                vscode.window.showErrorMessage(`OWEN: community search failed: ${result.error.message}`);
+            }
             return;
         }
         const rows = result.data ?? [];
         if (rows.length === 0) {
-            vscode.window.showInformationMessage('OWEN: no approved community models found.');
+            await offerWeb(
+                detected
+                    ? `OWEN: no approved community models for ${detected} yet. Yours could be the first.`
+                    : 'OWEN: no approved community models yet. Yours could be the first.',
+            );
             return;
         }
 

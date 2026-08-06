@@ -9,6 +9,7 @@ import { registerInsertMaterial } from './commands/insertMaterial';
 import { registerOpenPrebuiltModel } from './commands/openPrebuiltModel';
 import { registerOpenTutorial } from './commands/openTutorial';
 import { registerSearchReactorLibrary } from './community/browser';
+import { registerOpenCommunityLibrary } from './community/openWeb';
 import { registerGeometryPreview } from './preview/webview';
 import { registerOpenmcNativeRender } from './preview/openmcNative/panel';
 import { registerVerifyGeometry } from './verify/panel';
@@ -82,6 +83,7 @@ export function activate(context: vscode.ExtensionContext) {
         registerOpenmcNativeRender(context),
         registerVerifyGeometry(context),
         registerSearchReactorLibrary(),
+        registerOpenCommunityLibrary(),
         registerInsertMaterial(context),
         registerOpenPrebuiltModel(context),
         registerOpenTutorial(context),

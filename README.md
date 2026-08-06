@@ -112,7 +112,7 @@ in `owen.highlight.customColors` — set any of the ten token roles to a hex col
 | **Simulation runner** | One-command launcher that starts the right solver (MCNP / OpenMC / Serpent / SCONE) in a dedicated terminal, with per-code executable settings and WSL support for SCONE on Windows. |
 | **Results Viewer** | `OWEN: View Results` parses the outputs of **all four codes** (OpenMC `statepoint.h5` via h5wasm + stdout fallback, MCNP `mctal`, Serpent `_res.m`, SCONE `.out`) and shows k-eff convergence, flux spectrum (log-log), a tally table, and mesh heatmaps — mesh tallies can be overlaid on the 3D geometry preview as a colored slice plane. |
 | **Parametric sweep + dashboard** | JSON-described parameter sweeps with per-run input mutation, output capture, k-eff parsing, and a manifest + TSV summary — then `OWEN: View Sweep Results` plots k-eff vs the swept parameter with error bars, per-run convergence small-multiples, and a run table. |
-| **Community Library** | Browse and insert community-approved models (opt-in via `owen.community.enabled`; you supply your own Supabase backend). |
+| **Community Library** | Browse and insert approved models shared on ReactorMC, filtered to the code you are editing. Enabled by default; disable with `owen.community.enabled`. |
 | **Tutorials** | In-editor **ReactorMC search** (`OWEN: Search ReactorMC (Tutorials & NRDP)`) over bundled (and optional live) site index — tutorials, NRDP pages, reactors, and tools open on reactormc.net in one click. |
 
 ## Install
@@ -160,7 +160,8 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | `OWEN: Search ReactorMC (Tutorials & NRDP)` | In-editor search over reactormc.net tutorials, NRDP, and site tools |
 | `OWEN: Choose Highlight Palette` | Switch between Classic / Solarized / High Contrast / Pastel / Custom |
 | `OWEN: Toggle Invisible Characters` | Reveal tabs/trailing whitespace that break fixed-format decks |
-| `OWEN: Search Reactor Library` | Community Library browser (disabled by default) |
+| `OWEN: Search Reactor Library` | Browse approved ReactorMC community models and insert one |
+| `OWEN: Open Community Library on reactormc.net` | Open the community library in a browser to upload, rate, or comment |
 
 ## Configuration
 
@@ -186,12 +187,18 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.nrdp.live` | `true` | Live-fetch NRDP snapshots when online |
 | `owen.nrdp.endpoint` | `https://reactormc.net/data` | Base URL for live NRDP JSON |
 | `owen.allen.dataBaseUrl` | `https://reactormc.net/data/allen` | Base URL for ALLEN σ(E) JSON; override for offline use |
-| `owen.community.enabled` | `false` | Enable the Community Library browser |
-| `owen.supabase.url` | `""` | Supabase project URL (you supply this) |
-| `owen.supabase.anonKey` | `""` | Supabase anon/public key (you supply this) |
+| `owen.community.enabled` | `true` | Browse the ReactorMC Community Library in the editor |
+| `owen.community.webUrl` | `https://reactormc.net/community` | Page opened by `OWEN: Open Community Library on reactormc.net` |
+| `owen.supabase.url` | ReactorMC project | Backend for the Community Library; override to browse a different one |
+| `owen.supabase.anonKey` | ReactorMC publishable key | Public read-only credential; override alongside the URL |
 
-> The Community Library is **off by default** and ships with **no credentials**. To use it,
-> point `owen.supabase.url` / `owen.supabase.anonKey` at your own Supabase project.
+> The Community Library now points at ReactorMC out of the box. The bundled key is a Supabase
+> **publishable** key, which is public by design — Row Level Security restricts it to reading
+> *approved* models, and OWEN's client is created with `persistSession: false`, so it cannot sign
+> in or write anything. Set `owen.community.enabled` to `false` to stop OWEN contacting the
+> backend at all; the bundled prebuilt models and snippets are unaffected either way.
+>
+> Uploading, rating, and commenting happen on the website — OWEN browses and inserts only.
 
 ## Requirements
 

@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -63,6 +63,7 @@
     "onCommand:owen.renderWithOpenmc",
     "onCommand:owen.verifyGeometry",
     "onCommand:owen.searchReactorLibrary",
+    "onCommand:owen.openCommunityLibrary",
     "onCommand:owen.openPrebuiltModel",
     "onCommand:owen.insertMaterial",
     "onCommand:owen.openTutorial",
@@ -219,6 +220,12 @@
         "command": "owen.searchReactorLibrary",
         "title": "OWEN: Search Reactor Library",
         "category": "OWEN"
+      },
+      {
+        "command": "owen.openCommunityLibrary",
+        "title": "OWEN: Open Community Library on reactormc.net",
+        "category": "OWEN",
+        "icon": "$(link-external)"
       },
       {
         "command": "owen.openPrebuiltModel",
@@ -416,6 +423,10 @@
         {
           "command": "owen.searchReactorLibrary",
           "group": "5_help@2"
+        },
+        {
+          "command": "owen.openCommunityLibrary",
+          "group": "5_help@3"
         }
       ],
       "editor/context": [
@@ -509,6 +520,10 @@
           "group": "4_help@2"
         },
         {
+          "command": "owen.openCommunityLibrary",
+          "group": "4_help@3"
+        },
+        {
           "command": "owen.chooseHighlightPalette",
           "group": "5_appearance@1"
         },
@@ -599,18 +614,23 @@
         },
         "owen.community.enabled": {
           "type": "boolean",
-          "default": false,
-          "description": "Enable the Community Library browser. Requires owen.supabase.url and owen.supabase.anonKey."
+          "default": true,
+          "description": "Browse the ReactorMC Community Library from inside the editor (OWEN: Search Reactor Library). Turn this off to stop OWEN contacting reactormc.net's backend entirely; the bundled prebuilt models and snippets keep working either way."
+        },
+        "owen.community.webUrl": {
+          "type": "string",
+          "default": "https://reactormc.net/community",
+          "description": "Page opened by 'OWEN: Open Community Library on reactormc.net'. Also where submissions are made — OWEN browses and inserts, but does not upload."
         },
         "owen.supabase.url": {
           "type": "string",
-          "default": "",
-          "description": "Supabase project URL backing the Community Library (e.g. https://xxxx.supabase.co)."
+          "default": "https://ahalgdduwfsgfbwoxbrr.supabase.co",
+          "markdownDescription": "Supabase project URL backing the Community Library. Ships pointed at the public ReactorMC project; override only to browse a different library."
         },
         "owen.supabase.anonKey": {
           "type": "string",
-          "default": "",
-          "description": "Supabase anon (public) API key for the Community Library."
+          "default": "sb_publishable_Kidb9yKwUxFNhbviHGte2Q_rUy3UFRc",
+          "markdownDescription": "Supabase **publishable** (anon) API key for the Community Library. This is a public credential by design — Row Level Security is what protects the data, and it grants read access to approved models only. Override only alongside `#owen.supabase.url#`."
         },
         "owen.nrdp.live": {
           "type": "boolean",
