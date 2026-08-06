@@ -92,8 +92,11 @@ export function registerSearchReactorLibrary(): vscode.Disposable {
             .eq('status', 'approved')
             .limit(100);
 
+        // `code` is public.model_code (Postgres enum). ILIKE / ~~* is not defined
+        // on enums — that surfaces as "operator does not exist: model_code ~~* unknown".
+        // detectMonteCarloLanguage already returns the exact enum label.
         if (detected) {
-            query = query.ilike('code', `%${detected}%`);
+            query = query.eq('code', detected);
         }
 
         const result = await vscode.window.withProgress<{

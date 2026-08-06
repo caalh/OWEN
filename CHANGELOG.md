@@ -5,6 +5,17 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] — 2026-08-06
+
+### Fixed
+
+- **Community Library search against a focused MCNP/OpenMC/Serpent/SCONE deck.**
+  Filtering used `.ilike('code', …)` on `public.models.code`, which is a Postgres
+  enum (`model_code`). Enums have no `~~*` / ILIKE operator, so every filtered
+  search failed with `operator does not exist: model_code ~~* unknown`. The
+  filter is now `.eq('code', detected)` — `detectMonteCarloLanguage` already
+  returns the exact enum label. Guarded by a source-level regression test.
+
 ## [1.1.5] — 2026-08-06
 
 ### Added

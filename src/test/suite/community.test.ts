@@ -118,8 +118,26 @@ suite('OWEN community library wiring', () => {
             'column models.nope does not exist',
             'JSON object requested, multiple (or no) rows returned',
             'duplicate key value violates unique constraint',
+            'operator does not exist: model_code ~~* unknown',
         ]) {
             assert.ok(!isUnreachable(message), `should NOT be treated as unreachable: ${message}`);
         }
+    });
+
+    // Regression: models.code is a Postgres enum. .ilike() compiles to ~~*, which
+    // does not exist for enums and fails every filtered search (1.1.5).
+    test('community search filters code with eq, never ilike', () => {
+        const src = fs.readFileSync(
+            path.join(REPO_ROOT, 'src', 'community', 'browser.ts'),
+            'utf8',
+        );
+        assert.ok(
+            !/\.ilike\(\s*['"]code['"]/.test(src),
+            'browser.ts must not .ilike() the code enum column',
+        );
+        assert.ok(
+            /\.eq\(\s*['"]code['"]/.test(src),
+            'browser.ts must .eq() the code enum column',
+        );
     });
 });
