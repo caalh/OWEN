@@ -32,6 +32,26 @@
  */
 export const DEFAULT_MAX_INSTANCES = 1_500_000;
 
+/**
+ * Triangle ceiling for CSG-meshed cells (plan Stage 4). Meshed polyhedra are
+ * individual (non-instanced) geometries, so their cost scales with triangle
+ * count, not instance count. CSG cells coarsen their tessellation under
+ * pressure — before the instanced pins ever lose layers.
+ */
+export const DEFAULT_MAX_CSG_TRIANGLES = 200_000;
+
+/**
+ * Pick the tangent-plane segment count for the next quadric mesh given how
+ * much of the triangle budget is already spent. Full detail (48 sides) while
+ * under half budget, then 24, then 12; floors at 12 so shapes stay readable.
+ */
+export function csgSegmentBudget(trianglesSoFar: number, maxTriangles: number = DEFAULT_MAX_CSG_TRIANGLES): number {
+    const frac = maxTriangles > 0 ? trianglesSoFar / maxTriangles : 1;
+    if (frac < 0.5) return 48;
+    if (frac < 0.8) return 24;
+    return 12;
+}
+
 export interface EstimateInput {
     /** Placed pin positions (before layering / axial expansion). */
     totalPins: number;

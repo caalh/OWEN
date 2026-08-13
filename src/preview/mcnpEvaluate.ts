@@ -228,8 +228,31 @@ function latticeBasis(model: McnpGeometryModel, cell: McnpCell): LatticeBasis | 
     // Pair opposing planes (n·p=d1 vs ±n·p=d2) in listed order. §5.5.5: the
     // FIRST listed surface of a pair is the one crossed toward the +index
     // neighbor, so the basis vector points from the partner plane toward it.
+    // A pair whose direction is linearly dependent on the accepted basis is
+    // skipped — a hexagonal window (rhp / synthesized hex) has three facet
+    // pairs in one plane, and only the first two are index directions; the
+    // third would make the fractional-index solve singular.
     const pairs: { n: Vec3; dFirst: number; dPartner: number }[] = [];
     const used = new Array(planes.length).fill(false);
+    const independent = (n: Vec3): boolean => {
+        if (pairs.length === 0) return true;
+        if (pairs.length === 1) {
+            const a = pairs[0].n;
+            const cross = [
+                a[1] * n[2] - a[2] * n[1],
+                a[2] * n[0] - a[0] * n[2],
+                a[0] * n[1] - a[1] * n[0],
+            ];
+            return Math.hypot(cross[0], cross[1], cross[2]) > 1e-6;
+        }
+        const a = pairs[0].n;
+        const b = pairs[1].n;
+        const det =
+            a[0] * (b[1] * n[2] - b[2] * n[1]) -
+            a[1] * (b[0] * n[2] - b[2] * n[0]) +
+            a[2] * (b[0] * n[1] - b[1] * n[0]);
+        return Math.abs(det) > 1e-6;
+    };
     for (let i = 0; i < planes.length && pairs.length < 3; i++) {
         if (used[i]) continue;
         for (let j = i + 1; j < planes.length; j++) {
@@ -239,25 +262,70 @@ function latticeBasis(model: McnpGeometryModel, cell: McnpCell): LatticeBasis | 
             const dj = dot > 0 ? planes[j].d : -planes[j].d;
             if (Math.abs(dj - planes[i].d) < 1e-12) continue; // same plane
             used[i] = used[j] = true;
-            pairs.push({ n: planes[i].n, dFirst: planes[i].d, dPartner: dj });
+            if (independent(planes[i].n)) {
+                pairs.push({ n: planes[i].n, dFirst: planes[i].d, dPartner: dj });
+            }
             break;
         }
     }
     if (pairs.length === 0) return null;
 
-    // Element center: solve n_k · c = midpoint for the pair normals (for
-    // axis-aligned pairs this is exact; residual directions default 0).
-    const origin: Vec3 = [0, 0, 0];
+    // Element center: solve n_k · c = midpoint_k for all pairs at once via
+    // normal equations (hex windows have non-orthogonal normals, so summing
+    // per-axis contributions would smear the origin). Unconstrained axes
+    // (e.g. z for a 2D window) are pinned to 0 by regularizing their row.
+    const N: number[][] = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    const rhs: Vec3 = [0, 0, 0];
     const a: Vec3[] = [];
     for (const pair of pairs) {
         const width = pair.dFirst - pair.dPartner; // signed: toward the first-listed plane
         a.push([pair.n[0] * width, pair.n[1] * width, pair.n[2] * width]);
         const mid = (pair.dFirst + pair.dPartner) / 2;
-        origin[0] += pair.n[0] * mid;
-        origin[1] += pair.n[1] * mid;
-        origin[2] += pair.n[2] * mid;
+        for (let r = 0; r < 3; r++) {
+            for (let c2 = 0; c2 < 3; c2++) N[r][c2] += pair.n[r] * pair.n[c2];
+            rhs[r] += pair.n[r] * mid;
+        }
     }
+    for (let r = 0; r < 3; r++) {
+        if (Math.abs(N[r][r]) < 1e-12) {
+            N[r] = [0, 0, 0];
+            N[r][r] = 1;
+            rhs[r] = 0;
+        }
+    }
+    const origin = solve3(N, rhs) ?? ([0, 0, 0] as Vec3);
     return { origin, a };
+}
+
+/** Solve a 3×3 linear system by Gaussian elimination; null when singular. */
+function solve3(M: number[][], b: Vec3): Vec3 | null {
+    const A = M.map((row) => row.slice());
+    const x = [b[0], b[1], b[2]];
+    for (let col = 0; col < 3; col++) {
+        let pivot = col;
+        for (let r = col + 1; r < 3; r++) if (Math.abs(A[r][col]) > Math.abs(A[pivot][col])) pivot = r;
+        if (Math.abs(A[pivot][col]) < 1e-15) return null;
+        if (pivot !== col) {
+            [A[pivot], A[col]] = [A[col], A[pivot]];
+            [x[pivot], x[col]] = [x[col], x[pivot]];
+        }
+        for (let r = col + 1; r < 3; r++) {
+            const f = A[r][col] / A[col][col];
+            for (let c2 = col; c2 < 3; c2++) A[r][c2] -= f * A[col][c2];
+            x[r] -= f * x[col];
+        }
+    }
+    const out: Vec3 = [0, 0, 0];
+    for (let r = 2; r >= 0; r--) {
+        let sum = x[r];
+        for (let c2 = r + 1; c2 < 3; c2++) sum -= A[r][c2] * out[c2];
+        out[r] = sum / A[r][r];
+    }
+    return out;
 }
 
 /** Solve fractional lattice coordinates t for p = origin + Σ t_k a_k. */
@@ -419,6 +487,11 @@ function findInUniverse(
             const kv = [i, j, kk][idx2] ?? 0;
             q = [q[0] - basis.a[idx2][0] * kv, q[1] - basis.a[idx2][1] * kv, q[2] - basis.a[idx2][2] * kv];
         }
+        // A whole-array fill transform shifts the filled universe's frame for
+        // every element (Serpent/SCONE lattices translate origin-centered
+        // universes to each element center; their synthesized lattice cells
+        // carry the constant offset here).
+        if (hit.fill.tr) q = toAux(hit.fill.tr, q);
         if (entry.tr) q = toAux(entry.tr, q);
         const deeper = findInUniverse(model, entry.universe, q, depth + 1, out);
         return deeper ?? hit;

@@ -5,6 +5,42 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-13
+
+### Added
+
+- **In-editor exact 2D slice view.** The 3D Geometry Preview gains a "2D
+  slice" mode: every pixel is classified against the parsed CSG on the
+  extension host (axis pick XY/XZ/YZ, plane-offset slider bound to the model
+  extents, 256/384/512 resolution, color by material or cell). Click a pixel
+  to identify cell / material / density, lost regions and overlaps render
+  magenta (OpenMC overlap-plot convention), and "Export PNG…" saves through a
+  standard save dialog. Ground-truth method — the same evaluator the MCNP
+  plotter idiom trusts, no meshing anywhere in the loop.
+- **Serpent and SCONE on the exact engine.** New engine parsers map both
+  codes onto the shared geometry model: Serpent `surf`/`cell`/`pin`/`lat`
+  cards (px/py/pz, plane, sph, cyl/cylx/cyly/cylz with truncation, sqc, cube,
+  cuboid, hexxc/hexyc, cone, torx/tory/torz, inf; square + hex lattices;
+  `trans s` translations) and SCONE dictionaries (sphere, x/y/zCylinder,
+  zTruncCylinder, planes, box/squareCylinders; rootUniverse, cellUniverse,
+  pinUniverse, latUniverse). The slice view therefore classifies MCNP,
+  Serpent, and SCONE decks; OpenMC stays with the native-render path.
+- **Mesh-clipped CSG for oblique cuts.** A cylinder, sphere, or one-sheet
+  cone intersected only by planes is convex, so the engine now meshes it from
+  midpoint-tangent half-spaces and clips exactly — watertight by
+  construction (validated by an edge-use test and a 1%-tolerance volume
+  check against the closed form). These cells count as rendered exactly in
+  the census. A triangle budget (default 200k) coarsens tessellation under
+  pressure before instanced pins ever lose layers.
+
+### Fixed
+
+- **Hexagonal lattice indexing beyond ring 1.** The lattice-basis math now
+  drops linearly dependent window-plane pairs (a hex window has three facet
+  pairs in one plane) and solves the element origin with proper normal
+  equations, so far-out hex elements index correctly instead of relying on
+  the nearest-neighbor rescue.
+
 ## [1.2.0] — 2026-08-12
 
 ### Added

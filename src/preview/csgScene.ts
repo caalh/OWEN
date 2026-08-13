@@ -24,8 +24,8 @@
 
 import { CylinderSpec, Component, ComponentId } from './types';
 import { materialColor } from './palette';
+import { csgSegmentBudget, DEFAULT_MAX_CSG_TRIANGLES } from './budget';
 import {
-    McnpCell,
     McnpGeometryModel,
     McnpSurface,
     RegionNode,
@@ -409,6 +409,110 @@ function dedupeFace(face: number[]): number[] {
     return out;
 }
 
+/** Triangle count of a face-list polyhedron (fan triangulation). */
+function polyTriangles(p: Poly): number {
+    let n = 0;
+    for (const f of p.faces) n += Math.max(0, f.length - 2);
+    return n;
+}
+
+// ---------------------------------------------------------------------------
+// Tangent-plane quadric meshing (Stage 4: mesh-clipped CSG)
+// ---------------------------------------------------------------------------
+//
+// A cylinder, sphere or one-sheet cone intersected with half-spaces is a
+// CONVEX solid, so the quadric can be replaced by its tangent half-spaces
+// (midpoint tangents, splitting the tessellation error to ±r·(1−cos(π/N))/2)
+// and the whole term clipped with the same convex plane-clipper used for
+// planar cells. The result is watertight by construction — caps appear
+// automatically where clip planes cut the solid.
+
+/** Midpoint-tangent half-spaces around an axis-aligned circular cylinder. */
+function cylinderTangentPlanes(cyl: CylC, segments: number): PlaneC[] {
+    const out: PlaneC[] = [];
+    // Circumscribed polygon overshoots by r(1/cos(π/N) − 1) at corners; use
+    // the midpoint radius so tessellation error splits evenly inside/outside.
+    const rEff = (cyl.r * (1 + 1 / Math.cos(Math.PI / segments))) / 2;
+    for (let s = 0; s < segments; s++) {
+        const ang = ((s + 0.5) / segments) * 2 * Math.PI;
+        const cu = Math.cos(ang);
+        const cv = Math.sin(ang);
+        let n: Vec3;
+        if (cyl.axis === 'x') n = [0, cu, cv];
+        else if (cyl.axis === 'y') n = [cu, 0, cv];
+        else n = [cu, cv, 0];
+        const d = cyl.u0 * cu + cyl.v0 * cv + rEff;
+        out.push({ n, d });
+    }
+    return out;
+}
+
+/** Tangent half-spaces around a sphere (spiral point distribution). */
+function sphereTangentPlanes(c: Vec3, r: number, count: number): PlaneC[] {
+    const out: PlaneC[] = [];
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < count; i++) {
+        const y = 1 - (2 * (i + 0.5)) / count;
+        const rad = Math.sqrt(Math.max(0, 1 - y * y));
+        const th = golden * i;
+        const n: Vec3 = [Math.cos(th) * rad, y, Math.sin(th) * rad];
+        out.push({ n, d: n[0] * c[0] + n[1] * c[1] + n[2] * c[2] + r });
+    }
+    return out;
+}
+
+/** Tangent half-spaces around a one-sheet axis-aligned cone. */
+function coneTangentPlanes(cone: ConeC, axis: Axis, segments: number): PlaneC[] {
+    const out: PlaneC[] = [];
+    const t = Math.sqrt(Math.max(1e-12, cone.t2));
+    const sign = cone.sheet >= 0 ? 1 : -1;
+    // Lateral tangent plane at angle θ: contains the apex, leans by the cone
+    // half-angle. Its unit normal is (cosθ·cosφ, sinθ·cosφ, −sign·sinφ) in
+    // (u, v, axis) components, where tanφ = t.
+    const phi = Math.atan(t);
+    const cphi = Math.cos(phi);
+    const sphi = Math.sin(phi);
+    for (let s = 0; s < segments; s++) {
+        const ang = ((s + 0.5) / segments) * 2 * Math.PI;
+        const cu = Math.cos(ang) * cphi;
+        const cv = Math.sin(ang) * cphi;
+        const ca = -sign * sphi;
+        let n: Vec3;
+        let apexDot: number;
+        if (axis === 'x') { n = [ca, cu, cv]; apexDot = n[0] * cone.apex[0] + n[1] * cone.apex[1] + n[2] * cone.apex[2]; }
+        else if (axis === 'y') { n = [cu, ca, cv]; apexDot = n[0] * cone.apex[0] + n[1] * cone.apex[1] + n[2] * cone.apex[2]; }
+        else { n = [cu, cv, ca]; apexDot = n[0] * cone.apex[0] + n[1] * cone.apex[1] + n[2] * cone.apex[2]; }
+        out.push({ n, d: apexDot });
+    }
+    return out;
+}
+
+/**
+ * Mesh a convex quadric-with-planes term as a clipped polytope. Returns null
+ * when clipping annihilates the region (legitimately empty).
+ */
+function emitConvexQuadricMesh(
+    quadricPlanes: PlaneC[],
+    clipPlanes: PlaneC[],
+    ctx: EmitCtx,
+    trianglesSoFar: { count: number },
+): Emission | null {
+    const poly = clipBoxByPlanes(ctx.bounds, [...quadricPlanes, ...clipPlanes]);
+    if (!poly || poly.verts.length < 4) return { spec: [], status: 'exact' };
+    trianglesSoFar.count += polyTriangles(poly);
+    const centroid = polyCentroid(poly);
+    const spec: CylinderSpec = {
+        x: centroid[0], y: centroid[1], z: centroid[2],
+        radius: 1, height: 1,
+        shape: 'polyhedron',
+        verts: poly.verts.flat(),
+        faces: poly.faces,
+        color: ctx.color, component: ctx.component, material: ctx.materialName,
+        label: `${ctx.label} (mesh)`,
+    };
+    return { spec: [spec], status: 'exact', detail: 'mesh-clipped quadric' };
+}
+
 function vdotp(a: Vec3, b: Vec3): number { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
 function polyCentroid(p: Poly): Vec3 {
@@ -428,6 +532,9 @@ interface EmitCtx {
     materialName: string;
     component: ComponentId;
     label: string;
+    /** Running CSG-mesh triangle count (drives tessellation coarsening). */
+    triCounter: { count: number };
+    maxTriangles: number;
 }
 
 type EmitStatus = 'exact' | 'approximated' | 'failed';
@@ -482,9 +589,16 @@ function emitCylinderTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
 
     const { lo, hi, leftovers } = axialWindow(bk.planes, cyl.axis, ctx.bounds);
     if (hi <= lo) return { spec: [], status: 'exact' }; // empty region: nothing to draw
+    if (leftovers.length > 0 && inner === 0 && extraOut.length === 0 && bk.unsupported.length === 0) {
+        // Oblique clips on a solid cylinder: the term is convex — mesh it
+        // from tangent half-spaces and clip exactly (Stage 4 mesh path).
+        const segs = csgSegmentBudget(ctx.triCounter.count, ctx.maxTriangles);
+        const meshed = emitConvexQuadricMesh(cylinderTangentPlanes(cyl, segs), bk.planes, ctx, ctx.triCounter);
+        if (meshed) return meshed;
+    }
     if (leftovers.length > 0) {
         status = 'approximated';
-        detail = 'oblique clipping plane(s) ignored';
+        detail = 'oblique clipping plane(s) ignored (annular/held-out constraints prevent meshing)';
     }
     if (extraOut.length > 0) {
         status = 'approximated';
@@ -515,6 +629,12 @@ function emitSphereTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
     if (bk.inCyl.length || bk.inCone.length || bk.inEllipsoid.length || bk.inEllCyl.length || bk.inTorus.length) return null;
     if (hasBlocking(bk)) return null;
     const s = bk.inSphere[0];
+    if (bk.planes.length > 0 && bk.outCyl.length === 0 && bk.outSphere.length === 0 && bk.unsupported.length === 0) {
+        // Sphere with plane clips is convex: mesh from tangent half-spaces.
+        const segs = csgSegmentBudget(ctx.triCounter.count, ctx.maxTriangles);
+        const meshed = emitConvexQuadricMesh(sphereTangentPlanes(s.c, s.r, Math.max(32, segs)), bk.planes, ctx, ctx.triCounter);
+        if (meshed) return meshed;
+    }
     let status: EmitStatus = 'exact';
     let detail: string | undefined;
     if (bk.planes.length > 0 || bk.outCyl.length > 0 || bk.unsupported.length > 0 || bk.outSphere.length > 0) {
@@ -557,6 +677,12 @@ function emitConeTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
     if (wHi <= wLo) return { spec: [], status: 'exact' };
     const rAtLo = Math.abs(wLo - apexS) * t;
     const rAtHi = Math.abs(wHi - apexS) * t;
+    if (leftovers.length > 0 && cone.sheet !== 0 && bk.unsupported.length === 0 && bk.outCyl.length === 0 && bk.outSphere.length === 0) {
+        // One-sheet cone with oblique clips is convex: mesh it.
+        const segs = csgSegmentBudget(ctx.triCounter.count, ctx.maxTriangles);
+        const meshed = emitConvexQuadricMesh(coneTangentPlanes(cone, axis, segs), bk.planes, ctx, ctx.triCounter);
+        if (meshed) return meshed;
+    }
     let status: EmitStatus = 'exact';
     let detail: string | undefined;
     if (leftovers.length > 0 || bk.unsupported.length > 0 || bk.outCyl.length > 0 || bk.outSphere.length > 0) {
@@ -654,6 +780,7 @@ function emitPolyhedronTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
     if (hasBlocking(bk)) return null;
     const poly = clipBoxByPlanes(ctx.bounds, bk.planes);
     if (!poly || poly.verts.length < 4) return { spec: [], status: 'exact' }; // empty region
+    ctx.triCounter.count += polyTriangles(poly);
     const centroid = polyCentroid(poly);
     const status: EmitStatus = bk.unsupported.length > 0 ? 'approximated' : 'exact';
     const spec: CylinderSpec = {
@@ -705,6 +832,8 @@ export interface BuildCsgOptions {
     maxPrimitives?: number;
     /** Cells to skip (already drawn by the fast path). */
     skipCells?: Set<number>;
+    /** Triangle ceiling for meshed cells (default DEFAULT_MAX_CSG_TRIANGLES). */
+    maxTriangles?: number;
 }
 
 /**
@@ -722,6 +851,8 @@ export function buildCsgScene(
     const census: CsgCensus = { exact: 0, approximated: 0, failed: 0, details: [] };
     const out: CylinderSpec[] = [];
     const maxPrims = opts.maxPrimitives && opts.maxPrimitives > 0 ? opts.maxPrimitives : 20000;
+    const maxTriangles = opts.maxTriangles && opts.maxTriangles > 0 ? opts.maxTriangles : DEFAULT_MAX_CSG_TRIANGLES;
+    const triCounter = { count: 0 };
 
     const rawBounds = worldBounds(model);
     // Pad the clip box: worldBounds is built from surface *positions*, so a
@@ -768,6 +899,8 @@ export function buildCsgScene(
             materialName: matInfo.name,
             component: matInfo.component,
             label: `cell ${cellId}`,
+            triCounter,
+            maxTriangles,
         };
         // Void cells are omitted from solid rendering like the fast path does
         // with moderator-less regions — but count them, don't hide the fact.
@@ -792,7 +925,6 @@ export function buildCsgScene(
         const cellSpecs: CylinderSpec[] = [];
         for (const term of dnf) {
             const bk = newBuckets();
-            let resolvedAll = true;
             for (const lit of term) {
                 const surf = resolveSurface(model, lit.surface);
                 if (!surf) {
@@ -847,7 +979,8 @@ export function buildCsgScene(
         notes.push(
             `CSG engine: ${census.exact} of ${total} cell(s) rendered exactly` +
             (census.approximated ? `, ${census.approximated} approximated` : '') +
-            (census.failed ? `, ${census.failed} as translucent bounds` : '') + '.',
+            (census.failed ? `, ${census.failed} as translucent bounds` : '') +
+            (triCounter.count > 0 ? ` (${triCounter.count.toLocaleString()} mesh triangles)` : '') + '.',
         );
     }
     return { cylinders: out, census, warnings, notes };

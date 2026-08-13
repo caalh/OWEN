@@ -439,7 +439,7 @@ export function buildTrTransform(nums: number[], degrees: boolean, warnings?: st
     }
     // Orthonormalize rows (MCNP "cleans up any small non-orthogonality").
     if (m) {
-        let r1 = vnorm([m[0], m[1], m[2]]);
+        const r1 = vnorm([m[0], m[1], m[2]]);
         let r2: Vec3 = [m[3], m[4], m[5]];
         r2 = vnorm(vsub(r2, vscale(r1, vdot(r1, r2))));
         let r3: Vec3 = [m[6], m[7], m[8]];
@@ -1082,6 +1082,22 @@ class RegionParser {
         this.order.push(surface);
         return { op: 'halfspace', surface, facet, sense };
     }
+}
+
+/**
+ * Parse a boolean region expression from pre-tokenized input (shared with the
+ * Serpent/SCONE engine parsers, whose cell grammars are subsets of MCNP's).
+ * Surface references must already be numeric.
+ */
+export function parseRegionExpression(tokens: string[]): { region: RegionNode | null; order: number[] } {
+    const rp = new RegionParser(tokens);
+    const region = rp.parse();
+    return { region, order: rp.surfaceOrder() };
+}
+
+/** Tokenize a region string, keeping (), :, # as their own tokens. */
+export function tokenizeRegion(s: string): string[] {
+    return tokenizeGeometry(s);
 }
 
 const CELL_KEYWORDS = new Set([

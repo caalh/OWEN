@@ -3,6 +3,10 @@ import { detectMonteCarloLanguage } from '../util/detectLanguage';
 import { buildScene, CylinderSpec } from './extractor';
 import { GeometryScene, FidelityOptions } from './types';
 import { distance3, deltas, angleDeg, diameter, fmtLen } from './measure';
+import { McnpGeometryModel } from './mcnpGeometry';
+import { parseDeckToModel, sliceSupportNote } from './engineDispatch';
+import { worldBounds } from './mcnpEvaluate';
+import { axisPlane, defaultWindow, identifyAt, sliceModel, sliceToRgba, SliceAxis, SliceRequest } from './slice';
 
 /**
  * Measurement math (`measure.ts`) is pure + unit-tested. We inject its source
@@ -28,6 +32,85 @@ let lastScene: GeometryScene | undefined;
 let lastText = '';
 let lastLanguage = 'mcnp';
 let fidelity: FidelityOptions = { detail: 'auto', axial: false };
+
+// Exact-engine model cache for the 2D slice view (plan Stage 3). Parsing a
+// full-core deck costs real time, so one model is kept per deck text.
+let sliceCache: { text: string; language: string; model: McnpGeometryModel | null } | null = null;
+
+function sliceModelFor(text: string, language: string): McnpGeometryModel | null {
+    if (sliceCache && sliceCache.text === text && sliceCache.language === language) {
+        return sliceCache.model;
+    }
+    let model: McnpGeometryModel | null = null;
+    try {
+        model = parseDeckToModel(text, language);
+    } catch {
+        model = null;
+    }
+    sliceCache = { text, language, model };
+    return model;
+}
+
+function sliceRequestFor(model: McnpGeometryModel, axis: SliceAxis, offset: number, res: number, colorBy: 'cell' | 'material'): SliceRequest {
+    const plane = axisPlane(axis, offset);
+    const win = defaultWindow(model, plane);
+    return { plane, halfU: win.halfU, halfV: win.halfV, width: res, height: res, colorBy };
+}
+
+/** Classify one slice on the host and post the colored image to the webview. */
+function handleSliceRequest(msg: { axis: SliceAxis; offset: number; res: number; colorBy: 'cell' | 'material' }): void {
+    if (!currentPanel) return;
+    const model = sliceModelFor(lastText, lastLanguage);
+    if (!model || model.cells.size === 0) {
+        currentPanel.webview.postMessage({
+            type: 'sliceUnavailable',
+            reason: sliceSupportNote(lastLanguage),
+        });
+        return;
+    }
+    const res = Math.max(64, Math.min(768, Math.floor(msg.res) || 384));
+    const req = sliceRequestFor(model, msg.axis, msg.offset, res, msg.colorBy);
+    const result = sliceModel(model, req);
+    const rgba = sliceToRgba(result);
+    const b = worldBounds(model);
+    const perp = msg.axis === 'xy' ? 2 : msg.axis === 'xz' ? 1 : 0;
+    currentPanel.webview.postMessage({
+        type: 'sliceResult',
+        axis: msg.axis,
+        offset: msg.offset,
+        width: result.width,
+        height: result.height,
+        rgbaB64: Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength).toString('base64'),
+        legend: result.legend,
+        lostCount: result.lostCount,
+        overlapCount: result.overlapCount,
+        offsetLo: b.min[perp],
+        offsetHi: b.max[perp],
+        window: result.window,
+    });
+}
+
+function handleSliceIdentify(msg: { axis: SliceAxis; offset: number; res: number; colorBy: 'cell' | 'material'; px: number; py: number }): void {
+    if (!currentPanel) return;
+    const model = sliceModelFor(lastText, lastLanguage);
+    if (!model) return;
+    const res = Math.max(64, Math.min(768, Math.floor(msg.res) || 384));
+    const req = sliceRequestFor(model, msg.axis, msg.offset, res, msg.colorBy);
+    const who = identifyAt(model, req, msg.px, msg.py);
+    currentPanel.webview.postMessage({ type: 'sliceIdentifyResult', ...who });
+}
+
+async function handleSliceSavePng(msg: { dataUrl: string; axis: string; offset: number }): Promise<void> {
+    const m = /^data:image\/png;base64,(.+)$/.exec(msg.dataUrl ?? '');
+    if (!m) return;
+    const uri = await vscode.window.showSaveDialog({
+        filters: { 'PNG image': ['png'] },
+        defaultUri: vscode.Uri.file(`slice-${msg.axis}-${Number(msg.offset).toFixed(2)}cm.png`),
+    });
+    if (!uri) return;
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(m[1], 'base64'));
+    vscode.window.setStatusBarMessage(`OWEN: slice saved to ${uri.fsPath}`, 5000);
+}
 
 function postScene(): void {
     if (currentPanel && webviewReady && lastScene) {
@@ -104,6 +187,12 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
                         axial: !!msg.axial,
                     };
                     rebuildScene();
+                } else if (msg.type === 'sliceRequest') {
+                    handleSliceRequest(msg);
+                } else if (msg.type === 'sliceIdentify') {
+                    handleSliceIdentify(msg);
+                } else if (msg.type === 'sliceSavePng') {
+                    void handleSliceSavePng(msg);
                 }
             }, null, context.subscriptions);
             currentPanel.webview.html = buildHtml(currentPanel.webview);
@@ -204,11 +293,24 @@ function buildHtml(webview: vscode.Webview): string {
     border-radius: 4px; padding: 1px 5px; font-size: 11px; font-variant-numeric: tabular-nums;
   }
   #labels .lbl.pt { border-color: #f9e2af; color: #f9e2af; padding: 0 4px; }
+  /* Exact 2D slice view (plan Stage 3). */
+  #sliceWrap { position: absolute; inset: 0; z-index: 8; display: none; align-items: center; justify-content: center; background: #0b1018; }
+  #sliceWrap.active { display: flex; }
+  #sliceCanvas { image-rendering: pixelated; max-width: 92%; max-height: 92%; border: 1px solid #2b3a5c; cursor: crosshair; }
+  #sliceStatus { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); font-size: 11px; background: var(--panel-bg); border: 1px solid #2b3a5c; border-radius: 5px; padding: 3px 10px; }
+  #slicePick { position: absolute; bottom: 10px; right: 12px; z-index: 15; max-width: 300px; background: var(--panel-bg); border: 1px solid #2b3a5c; border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5; display: none; }
+  #sliceLegend { margin-top: 6px; max-height: 160px; overflow-y: auto; }
+  #sliceLegend .sl { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 0; }
+  #sliceLegend .sw { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
+  #sliceProblem { color: #f5c2e7; font-size: 11px; margin-top: 4px; }
+  #viewBtns button { flex: 1; }
 </style>
 </head>
 <body>
   <div id="stage"></div>
   <div id="labels"></div>
+  <div id="sliceWrap"><canvas id="sliceCanvas"></canvas><div id="sliceStatus"></div></div>
+  <div id="slicePick"></div>
   <button id="toggle" title="Show/hide panel">☰ Layers</button>
   <div id="hud">drag: orbit • scroll: zoom • right-drag: pan • hover: inspect</div>
   <div id="readout"></div>
@@ -221,6 +323,45 @@ function buildHtml(webview: vscode.Webview): string {
     </header>
     <div id="warnings"></div>
     <div id="scroll">
+      <div class="section" id="viewModeSection">
+        <div class="title"><span>View mode</span></div>
+        <div class="btnrow" id="viewBtns">
+          <button id="view3d" class="active">3D view</button>
+          <button id="viewSlice" title="Pixel-exact CSG classification (MCNP / Serpent / SCONE)">2D slice</button>
+        </div>
+      </div>
+
+      <div class="section" id="sliceSection" style="display:none">
+        <div class="title"><span>2D Slice (exact)</span></div>
+        <div class="btnrow" id="sliceAxisBtns">
+          <button data-axis="xy" class="active">XY</button>
+          <button data-axis="xz">XZ</button>
+          <button data-axis="yz">YZ</button>
+        </div>
+        <div class="ctrl">
+          <label><span>Plane offset</span><span id="sliceOffVal">0.00 cm</span></label>
+          <input type="range" id="sliceOffset" min="-10" max="10" step="0.1" value="0" />
+        </div>
+        <div class="ctrl">
+          <label><span>Resolution</span></label>
+          <div class="btnrow" id="sliceResBtns">
+            <button data-res="256">256</button>
+            <button data-res="384" class="active">384</button>
+            <button data-res="512">512</button>
+          </div>
+        </div>
+        <div class="ctrl">
+          <label><span>Color by</span></label>
+          <div class="btnrow" id="sliceColorBtns">
+            <button data-color="material" class="active">Material</button>
+            <button data-color="cell">Cell</button>
+          </div>
+        </div>
+        <div class="btnrow"><button id="sliceExport">Export PNG…</button></div>
+        <div id="sliceProblem"></div>
+        <div id="sliceLegend"></div>
+      </div>
+
       <div class="section" id="layersSection">
         <div class="title"><span>Layers / Components</span></div>
         <div class="btnrow">
@@ -1053,8 +1194,167 @@ function buildHtml(webview: vscode.Webview): string {
 
     window.addEventListener('message', (event) => {
       const data = event.data;
-      if (data && data.type === 'scene' && data.scene) render(data.scene);
+      if (data && data.type === 'scene' && data.scene) {
+        render(data.scene);
+        if (sliceMode) requestSlice(); // deck changed while slicing
+      }
       if (data && data.type === 'meshOverlay' && data.mesh) applyMeshOverlay(data.mesh);
+      if (data && data.type === 'sliceResult') drawSlice(data);
+      if (data && data.type === 'sliceUnavailable') {
+        sliceBusy = false;
+        document.getElementById('sliceStatus').textContent = data.reason || '2D slices are unavailable for this deck.';
+        document.getElementById('sliceStatus').style.display = 'block';
+      }
+      if (data && data.type === 'sliceIdentifyResult') showSlicePick(data);
+    });
+
+    // ------- Exact 2D slice view (plan Stage 3) -------
+    let sliceMode = false;
+    let sliceAxis = 'xy';
+    let sliceRes = 384;
+    let sliceColorBy = 'material';
+    let sliceOffset = 0;
+    let sliceBusy = false;
+    let sliceTimer = null;
+    let lastSliceMeta = null; // { width, height, offsetLo, offsetHi }
+
+    function setActive(groupId, matchAttr, value) {
+      for (const b of document.getElementById(groupId).querySelectorAll('button')) {
+        b.classList.toggle('active', b.getAttribute(matchAttr) === String(value));
+      }
+    }
+
+    function setViewMode(slice) {
+      sliceMode = slice;
+      document.getElementById('sliceWrap').classList.toggle('active', slice);
+      document.getElementById('sliceSection').style.display = slice ? 'block' : 'none';
+      document.getElementById('slicePick').style.display = 'none';
+      document.getElementById('view3d').classList.toggle('active', !slice);
+      document.getElementById('viewSlice').classList.toggle('active', slice);
+      if (slice) requestSlice();
+    }
+
+    function requestSlice() {
+      if (!sliceMode) return;
+      sliceBusy = true;
+      const st = document.getElementById('sliceStatus');
+      st.textContent = 'classifying…';
+      st.style.display = 'block';
+      vscode.postMessage({ type: 'sliceRequest', axis: sliceAxis, offset: sliceOffset, res: sliceRes, colorBy: sliceColorBy });
+    }
+
+    function scheduleSlice() {
+      if (sliceTimer) clearTimeout(sliceTimer);
+      sliceTimer = setTimeout(requestSlice, 200);
+    }
+
+    function drawSlice(data) {
+      sliceBusy = false;
+      const canvas = document.getElementById('sliceCanvas');
+      canvas.width = data.width;
+      canvas.height = data.height;
+      const ctx = canvas.getContext('2d');
+      const bin = atob(data.rgbaB64);
+      const rgba = new Uint8ClampedArray(bin.length);
+      for (let i = 0; i < bin.length; i++) rgba[i] = bin.charCodeAt(i);
+      ctx.putImageData(new ImageData(rgba, data.width, data.height), 0, 0);
+      lastSliceMeta = data;
+
+      // Offset slider range follows the model bounds along the cut axis.
+      const off = document.getElementById('sliceOffset');
+      if (isFinite(data.offsetLo) && isFinite(data.offsetHi) && data.offsetHi > data.offsetLo) {
+        off.min = data.offsetLo;
+        off.max = data.offsetHi;
+        off.step = Math.max((data.offsetHi - data.offsetLo) / 200, 0.01);
+      }
+
+      const st = document.getElementById('sliceStatus');
+      const problems = (data.overlapCount || 0) + (data.lostCount || 0);
+      st.textContent = data.axis.toUpperCase() + ' @ ' + Number(data.offset).toFixed(2) + ' cm — ' +
+        data.width + '×' + data.height + (problems > 0 ? ' — ' + problems + ' problem px (magenta)' : '');
+      st.style.display = 'block';
+
+      const legend = document.getElementById('sliceLegend');
+      const entries = (data.legend || []).slice().sort((a, b) => b.count - a.count).slice(0, 30);
+      legend.innerHTML = entries.map((l) => {
+        const rgb = sliceHashColor(l.key);
+        return '<div class="sl"><span class="sw" style="background: rgb(' + rgb.join(',') + ')"></span>' +
+          '<span>' + escHtml(l.label) + '</span><span style="margin-left:auto; opacity:0.5">' + l.count.toLocaleString() + '</span></div>';
+      }).join('');
+      const prob = document.getElementById('sliceProblem');
+      prob.textContent = problems > 0
+        ? ((data.overlapCount || 0) + ' overlap / ' + (data.lostCount || 0) + ' lost pixels render magenta (OpenMC overlap-plot convention).')
+        : '';
+    }
+
+    // Mirror of the host palette (slice.ts hashColor) so legend swatches match.
+    function sliceHashColor(key) {
+      const hue = ((key * 137.508) % 360 + 360) % 360;
+      const s = 0.62, v = key === 0 ? 0.35 : 0.9;
+      const c = v * s, x = c * (1 - Math.abs(((hue / 60) % 2) - 1)), m = v - c;
+      let rgb;
+      if (hue < 60) rgb = [c, x, 0]; else if (hue < 120) rgb = [x, c, 0]; else if (hue < 180) rgb = [0, c, x];
+      else if (hue < 240) rgb = [0, x, c]; else if (hue < 300) rgb = [x, 0, c]; else rgb = [c, 0, x];
+      return [Math.round((rgb[0] + m) * 255), Math.round((rgb[1] + m) * 255), Math.round((rgb[2] + m) * 255)];
+    }
+
+    function showSlicePick(data) {
+      const el = document.getElementById('slicePick');
+      if (data.cell === null || data.cell === undefined) {
+        el.innerHTML = '<span style="color:#f5c2e7">No cell claims this point (lost region).</span>';
+      } else {
+        let html = 'Cell <b>' + data.cell + '</b> · ' + (data.material === 0 ? 'void' : 'm' + data.material);
+        if (data.density !== null && data.density !== undefined) {
+          html += '<br>ρ = ' + data.density + (data.density < 0 ? ' g/cm³' : ' atoms/b·cm');
+        }
+        if (data.overlaps && data.overlaps.length > 1) {
+          html += '<br><span style="color:#f5c2e7">Overlap: cells ' + data.overlaps.join(', ') + '</span>';
+        }
+        el.innerHTML = html;
+      }
+      el.style.display = 'block';
+    }
+
+    document.getElementById('view3d').addEventListener('click', () => setViewMode(false));
+    document.getElementById('viewSlice').addEventListener('click', () => setViewMode(true));
+    document.getElementById('sliceAxisBtns').addEventListener('click', (e) => {
+      const axis = e.target && e.target.getAttribute && e.target.getAttribute('data-axis');
+      if (!axis) return;
+      sliceAxis = axis;
+      setActive('sliceAxisBtns', 'data-axis', axis);
+      requestSlice();
+    });
+    document.getElementById('sliceResBtns').addEventListener('click', (e) => {
+      const res = e.target && e.target.getAttribute && e.target.getAttribute('data-res');
+      if (!res) return;
+      sliceRes = parseInt(res, 10);
+      setActive('sliceResBtns', 'data-res', res);
+      requestSlice();
+    });
+    document.getElementById('sliceColorBtns').addEventListener('click', (e) => {
+      const c = e.target && e.target.getAttribute && e.target.getAttribute('data-color');
+      if (!c) return;
+      sliceColorBy = c;
+      setActive('sliceColorBtns', 'data-color', c);
+      requestSlice();
+    });
+    document.getElementById('sliceOffset').addEventListener('input', (e) => {
+      sliceOffset = parseFloat(e.target.value);
+      document.getElementById('sliceOffVal').textContent = sliceOffset.toFixed(2) + ' cm';
+      scheduleSlice();
+    });
+    document.getElementById('sliceCanvas').addEventListener('click', (e) => {
+      if (!lastSliceMeta) return;
+      const canvas = document.getElementById('sliceCanvas');
+      const rect = canvas.getBoundingClientRect();
+      const px = Math.floor(((e.clientX - rect.left) / rect.width) * lastSliceMeta.width);
+      const py = Math.floor(((e.clientY - rect.top) / rect.height) * lastSliceMeta.height);
+      vscode.postMessage({ type: 'sliceIdentify', axis: sliceAxis, offset: sliceOffset, res: sliceRes, colorBy: sliceColorBy, px, py });
+    });
+    document.getElementById('sliceExport').addEventListener('click', () => {
+      const canvas = document.getElementById('sliceCanvas');
+      if (!lastSliceMeta) return;
+      vscode.postMessage({ type: 'sliceSavePng', dataUrl: canvas.toDataURL('image/png'), axis: sliceAxis, offset: sliceOffset });
     });
 
     let meshOverlayGroup = null;

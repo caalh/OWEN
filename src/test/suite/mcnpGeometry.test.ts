@@ -12,7 +12,6 @@ import { parseMcnpGeometry, Shape } from '../../preview/mcnpGeometry';
 import {
     cellContains,
     findCell,
-    shapeValue,
     surfaceValue,
     worldBounds,
 } from '../../preview/mcnpEvaluate';
@@ -720,6 +719,85 @@ suite('MCNP geometry engine — CSG scene builder (Stages 2 & 4)', () => {
         assert.strictEqual(scene.census.failed, 1, JSON.stringify(scene.census));
         assert.ok(scene.cylinders.some((c) => (c.opacity ?? 1) < 0.5), 'translucent fallback drawn');
         assert.ok(scene.warnings.some((w) => /cell 1/i.test(w)), 'warning names the cell');
+    });
+
+    test('oblique plane on a cylinder produces a watertight mesh with the right volume', () => {
+        // Cylinder r=1, z ∈ (−2, 2), cut by the oblique half-space x+z ≤ 0.
+        // For each (x, y) in the unit disk, z runs from −2 to −x (since
+        // |x| ≤ 1 < 2), so V = ∫∫ (−x + 2) dA = 2·(π·1²) − 0 = 2π.
+        const model = parseMcnpGeometry(deck([
+            'oblique cut',
+            '1 1 -8 -1 -2 3 -4 imp:n=1',
+            '9 0 1:2:(-3):4 imp:n=0',
+            '',
+            '1 cz 1',
+            '2 p 1 0 1 0',
+            '3 pz -2',
+            '4 pz 2',
+            '',
+            'm1 26056.80c 1',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        assert.strictEqual(scene.census.failed, 0, JSON.stringify(scene.census));
+        assert.strictEqual(scene.census.exact, 1, 'mesh-clipped cell counts as exact');
+        const poly = scene.cylinders.find((c) => c.shape === 'polyhedron');
+        assert.ok(poly && poly.verts && poly.faces, 'expected a mesh-clipped polyhedron');
+
+        // Watertight: every undirected edge is used by exactly two faces.
+        const edgeUse = new Map<string, number>();
+        for (const face of poly!.faces!) {
+            for (let i = 0; i < face.length; i++) {
+                const a = face[i];
+                const b = face[(i + 1) % face.length];
+                const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+                edgeUse.set(key, (edgeUse.get(key) ?? 0) + 1);
+            }
+        }
+        for (const [edge, uses] of edgeUse) {
+            assert.strictEqual(uses, 2, `edge ${edge} used ${uses}× (not watertight)`);
+        }
+
+        // Volume via centroid pyramids (orientation-independent for a convex
+        // solid): exact volume is 2π (half of the 4π full cylinder — the cut
+        // plane passes through the axis at z=0 and the geometry is symmetric).
+        const verts = poly!.verts!;
+        const nV = verts.length / 3;
+        const cx = [0, 0, 0];
+        for (let i = 0; i < nV; i++) { cx[0] += verts[i * 3]; cx[1] += verts[i * 3 + 1]; cx[2] += verts[i * 3 + 2]; }
+        cx[0] /= nV; cx[1] /= nV; cx[2] /= nV;
+        let vol = 0;
+        for (const face of poly!.faces!) {
+            let faceVol = 0;
+            for (let t = 1; t + 1 < face.length; t++) {
+                const idx = [face[0], face[t], face[t + 1]];
+                const v = idx.map((k) => [verts[k * 3] - cx[0], verts[k * 3 + 1] - cx[1], verts[k * 3 + 2] - cx[2]]);
+                faceVol += (
+                    v[0][0] * (v[1][1] * v[2][2] - v[1][2] * v[2][1]) -
+                    v[0][1] * (v[1][0] * v[2][2] - v[1][2] * v[2][0]) +
+                    v[0][2] * (v[1][0] * v[2][1] - v[1][1] * v[2][0])
+                ) / 6;
+            }
+            vol += Math.abs(faceVol);
+        }
+        const exact = 2 * Math.PI;
+        assert.ok(Math.abs(vol - exact) / exact < 0.01,
+            `mesh volume ${vol.toFixed(4)} vs exact ${exact.toFixed(4)}`);
+    });
+
+    test('sphere clipped by a plane meshes as a convex polytope (exact census)', () => {
+        const model = parseMcnpGeometry(deck([
+            'hemisphere',
+            '1 1 -8 -1 -2 imp:n=1',
+            '9 0 1:2 imp:n=0',
+            '',
+            '1 so 3',
+            '2 pz 0',
+            '',
+            'm1 26056.80c 1',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        assert.strictEqual(scene.census.exact, 1, JSON.stringify(scene.census));
+        assert.ok(scene.cylinders.some((c) => c.shape === 'polyhedron'), 'hemisphere is meshed');
     });
 
     test('union regions emit one primitive per branch', () => {

@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
