@@ -16,18 +16,45 @@ suite('Input Builder', () => {
 
     test('renderMaterial emits MCNP m cards with ZAIDs', () => {
         const code = renderMaterial('mcnp', baseMaterials[0]);
-        assert.match(code, /^c .+\nm1\s+92235\.80c/m);
+        // Rows follow the compendium's element order, so the m card opens on
+        // oxygen; what matters is that it is one m card carrying the actinides
+        // as weight fractions.
+        assert.match(code, /^m1\s+\d{4,6}\.80c\s+-/m);
+        assert.match(code, /92235\.80c\s+-0\.0264/);
+        assert.match(code, /92238\.80c\s+-0\.85/);
     });
 
     test('renderMaterial emits OpenMC Material blocks', () => {
         const code = renderMaterial('openmc', baseMaterials[2]);
         assert.match(code, /openmc\.Material/);
-        assert.match(code, /add_nuclide\('H1'/);
+        // Natural elements go in as elements so OpenMC expands them against
+        // whichever library the user configured.
+        assert.match(code, /add_element\('H', [\d.]+, percent_type='wo'\)/);
+        assert.match(code, /add_s_alpha_beta\('c_H_in_H2O'\)/);
     });
 
     test('renderMaterial emits Serpent mat cards', () => {
         const code = renderMaterial('serpent', baseMaterials[1]);
-        assert.match(code, /^% .+\nmat zirc_2/m);
+        assert.match(code, /^% .+\nmat zirc4 -6\.56/m);
+        assert.match(code, /^40090\.80c\s+-0\.49/m);
+    });
+
+    test('library cards are ASCII and fit a card image', () => {
+        for (const entry of MATERIAL_LIBRARY) {
+            for (const code of ['mcnp', 'serpent', 'scone'] as const) {
+                const card = renderMaterial(code, { ...entry, mcnpNumber: 7 });
+                for (const line of card.split('\n')) {
+                    assert.ok(
+                        !/[^\x20-\x7E\t]/.test(line),
+                        `${entry.id} ${code}: non-ASCII in "${line}"`,
+                    );
+                    assert.ok(
+                        line.length <= 80,
+                        `${entry.id} ${code}: ${line.length} columns in "${line}"`,
+                    );
+                }
+            }
+        }
     });
 
     test('buildDeck MCNP pin-cell includes kcode and materials', () => {
@@ -40,7 +67,8 @@ suite('Input Builder', () => {
             settings: DEFAULT_SETTINGS,
         });
         assert.match(deck, /kcode 10000/);
-        assert.match(deck, /m1\s+92235\.80c/);
+        assert.match(deck, /^m1\s/m);
+        assert.match(deck, /92235\.80c\s+-0\.0264/);
         assert.match(deck, /mt3\s+lwtr\.20t/);
     });
 

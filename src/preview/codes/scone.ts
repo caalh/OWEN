@@ -383,8 +383,38 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         const cx0 = -(core.nx - 1) * core.pitch / 2;
         const cy0 = (core.ny - 1) * core.pitch / 2;
         // Rows run north→south (y decreases with r): north = r-1. Assembly
-        // neighbors are the lattice-filled positions a baffle cell hugs.
-        const isAsm = (rr: number, cc: number): boolean => latDefs.has(core.grid[rr]?.[cc] ?? -1);
+        // neighbors are the lattice-filled positions a baffle cell hugs. A core
+        // map entry can be a latUniverse directly, or a cellUniverse / axial
+        // stack that wraps one — the MCNP and Serpent parsers already look
+        // through those, and a SCONE deck that wraps its assemblies would
+        // otherwise see no fuel neighbors and draw no plates at all.
+        const asmLike = new Map<number, boolean>();
+        const isAssemblyLike = (uid: number, depth = 0): boolean => {
+            if (latDefs.has(uid)) return true;
+            if (depth > 8) return false;
+            const cached = asmLike.get(uid);
+            if (cached !== undefined) return cached;
+            asmLike.set(uid, false); // cycle guard
+            let hit = false;
+            const segs = axialStack(uid);
+            if (segs) {
+                for (const seg of segs) {
+                    if (seg.universe !== uid && isAssemblyLike(seg.universe, depth + 1)) { hit = true; break; }
+                }
+            }
+            if (!hit) {
+                for (const cid of cellUniCells.get(uid) ?? []) {
+                    const ref = cellToUniverse.get(cid);
+                    if (ref !== undefined && ref !== uid && isAssemblyLike(ref, depth + 1)) { hit = true; break; }
+                }
+            }
+            asmLike.set(uid, hit);
+            return hit;
+        };
+        const isAsm = (rr: number, cc: number): boolean => {
+            const uid = core.grid[rr]?.[cc];
+            return uid !== undefined && !baffleUniverses.has(uid) && isAssemblyLike(uid);
+        };
         for (let r = 0; r < core.grid.length; r++) {
             for (let c = 0; c < core.grid[r].length; c++) {
                 const ax = cx0 + c * core.pitch;

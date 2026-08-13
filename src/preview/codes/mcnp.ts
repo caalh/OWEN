@@ -47,7 +47,7 @@ interface MCNPSurface {
     params: number[];
 }
 
-interface MaterialInfo {
+export interface MaterialInfo {
     name: string;
     component: ComponentId;
 }
@@ -111,6 +111,21 @@ const SURFACE_MNEMONICS = new Set([
 
 export function extractMcnpCylinders(text: string): CylinderSpec[] {
     return parseMcnp(text).cylinders;
+}
+
+/**
+ * Material number → classified name/component, without building a scene.
+ * The 2D slice view uses this so its legend reads "UO2 3.1%" / "Water" in the
+ * same colors as the 3D view instead of "m31" in an arbitrary hash color.
+ */
+export function mcnpMaterialLookup(text: string): Map<number, MaterialInfo> {
+    const out = new Map<number, MaterialInfo>();
+    for (const card of logicalCards(text)) {
+        if (classifyCard(card) !== 'material') continue;
+        const m = parseMaterial(card);
+        if (m) out.set(m.id, m.info);
+    }
+    return out;
 }
 
 export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {

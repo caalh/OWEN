@@ -58,6 +58,8 @@ export interface CsgSceneResult {
 
 const MAX_DNF_TERMS = 64;
 const MAX_TERM_LITERALS = 96;
+/** How many nested `#cell` substitutions to follow before giving up. */
+const MAX_COMPLEMENT_DEPTH = 8;
 
 // ---------------------------------------------------------------------------
 // DNF conversion
@@ -69,30 +71,75 @@ interface Literal {
     sense: 1 | -1;
 }
 
+/**
+ * What a DNF expansion needs beyond the region itself: the model, so a `#cell`
+ * complement can be substituted, a cycle guard, and somewhere to record why an
+ * expansion gave up — the panel repeats that reason back to the reader.
+ */
+interface DnfCtx {
+    model: McnpGeometryModel;
+    /** Cells currently being substituted, so `#` chains cannot recurse forever. */
+    stack: Set<number>;
+    reason?: string;
+}
+
 /** Push negations down to literals; expand and/or into DNF with caps. */
-function toDnf(node: RegionNode, negate: boolean): Literal[][] | null {
+function toDnf(node: RegionNode, negate: boolean, ctx?: DnfCtx): Literal[][] | null {
     switch (node.op) {
         case 'halfspace': {
             const sense = (negate ? -node.sense : node.sense) as 1 | -1;
             return [[{ surface: node.surface, facet: node.facet, sense }]];
         }
         case 'not':
-            return toDnf(node.kid, !negate);
-        case 'cellcomp':
-            return null; // resolved by the caller against the target cell
+            return toDnf(node.kid, !negate, ctx);
+        case 'cellcomp': {
+            // `#n` is the complement of cell n's region, so substituting that
+            // region under one more negation is an exact rewrite. Doing it here
+            // is what lets a deck built out of complements render as real solids
+            // instead of a wall of bounding boxes.
+            if (!ctx) return null;
+            if (ctx.stack.has(node.cell)) {
+                ctx.reason ??= `#${node.cell} refers back to a cell already being expanded`;
+                return null;
+            }
+            const target = ctx.model.cells.get(node.cell);
+            if (!target || !target.region) {
+                ctx.reason ??= `#${node.cell} names a cell with no region`;
+                return null;
+            }
+            if (target.trcl) {
+                // The referenced region's surfaces are placed by that cell's
+                // transform; pasting its literals here would put them in the
+                // wrong spot, so the bounding box is the honest answer.
+                ctx.reason ??= `#${node.cell} names a cell carrying a trcl`;
+                return null;
+            }
+            if (ctx.stack.size >= MAX_COMPLEMENT_DEPTH) {
+                ctx.reason ??= `# complements nest deeper than ${MAX_COMPLEMENT_DEPTH}`;
+                return null;
+            }
+            ctx.stack.add(node.cell);
+            const d = toDnf(target.region, !negate, ctx);
+            ctx.stack.delete(node.cell);
+            return d;
+        }
         case 'and':
         case 'or': {
             const isAnd = (node.op === 'and') !== negate; // De Morgan
             const kids: Literal[][][] = [];
             for (const k of node.kids) {
-                const d = toDnf(k, negate);
+                const d = toDnf(k, negate, ctx);
                 if (!d) return null;
                 kids.push(d);
             }
             if (!isAnd) {
                 const out: Literal[][] = [];
                 for (const d of kids) out.push(...d);
-                return out.length > MAX_DNF_TERMS ? null : out;
+                if (out.length > MAX_DNF_TERMS) {
+                    if (ctx) ctx.reason ??= `region expands past ${MAX_DNF_TERMS} union terms`;
+                    return null;
+                }
+                return out;
             }
             // AND: distribute (cartesian product of terms).
             let acc: Literal[][] = [[]];
@@ -100,9 +147,15 @@ function toDnf(node: RegionNode, negate: boolean): Literal[][] | null {
                 const next: Literal[][] = [];
                 for (const a of acc) {
                     for (const t of d) {
-                        if (a.length + t.length > MAX_TERM_LITERALS) return null;
+                        if (a.length + t.length > MAX_TERM_LITERALS) {
+                            if (ctx) ctx.reason ??= `one term needs more than ${MAX_TERM_LITERALS} surfaces`;
+                            return null;
+                        }
                         next.push([...a, ...t]);
-                        if (next.length > MAX_DNF_TERMS) return null;
+                        if (next.length > MAX_DNF_TERMS) {
+                            if (ctx) ctx.reason ??= `region expands past ${MAX_DNF_TERMS} union terms`;
+                            return null;
+                        }
                     }
                 }
                 acc = next;
@@ -624,11 +677,42 @@ function emitCylinderTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
     return { spec: [spec], status, detail };
 }
 
+/** Same centre to within a hair — concentric shells are the common case. */
+function sameCentre(a: Vec3, b: Vec3): boolean {
+    return Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9 && Math.abs(a[2] - b[2]) < 1e-9;
+}
+
 function emitSphereTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
-    if (bk.inSphere.length !== 1) return null;
+    if (bk.inSphere.length < 1) return null;
     if (bk.inCyl.length || bk.inCone.length || bk.inEllipsoid.length || bk.inEllCyl.length || bk.inTorus.length) return null;
     if (hasBlocking(bk)) return null;
-    const s = bk.inSphere[0];
+    // Concentric spheres intersect to the smallest one. Expanding a `#`
+    // complement routinely produces such terms, and they are exact, so collapse
+    // rather than falling through to a bounding box.
+    let s = bk.inSphere[0];
+    if (bk.inSphere.length > 1) {
+        if (!bk.inSphere.every((o) => sameCentre(o.c, s.c))) return null;
+        for (const o of bk.inSphere) if (o.r < s.r) s = o;
+    }
+    // A concentric subtracted sphere is an annulus (exact); one at least as big
+    // as the kept sphere leaves nothing at all, which is also exact.
+    const concentricOut = bk.outSphere.filter((o) => sameCentre(o.c, s.c));
+    const innerR = concentricOut.reduce((m, o) => Math.max(m, o.r), 0);
+    if (innerR >= s.r) return { spec: [], status: 'exact' };
+    const otherOut = bk.outSphere.filter((o) => !sameCentre(o.c, s.c));
+    if (innerR > 0 && bk.planes.length === 0 && bk.outCyl.length === 0
+        && otherOut.length === 0 && bk.unsupported.length === 0) {
+        return {
+            spec: [{
+                x: s.c[0], y: s.c[1], z: s.c[2],
+                radius: s.r, innerRadius: innerR, height: 2 * s.r,
+                shape: 'sphere',
+                color: ctx.color, component: ctx.component, material: ctx.materialName,
+                label: ctx.label,
+            }],
+            status: 'exact',
+        };
+    }
     if (bk.planes.length > 0 && bk.outCyl.length === 0 && bk.outSphere.length === 0 && bk.unsupported.length === 0) {
         // Sphere with plane clips is convex: mesh from tangent half-spaces.
         const segs = csgSegmentBudget(ctx.triCounter.count, ctx.maxTriangles);
@@ -644,6 +728,7 @@ function emitSphereTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
     const spec: CylinderSpec = {
         x: s.c[0], y: s.c[1], z: s.c[2],
         radius: s.r, height: 2 * s.r,
+        innerRadius: innerR > 0 ? innerR : undefined,
         shape: 'sphere',
         color: ctx.color, component: ctx.component, material: ctx.materialName,
         label: ctx.label,
@@ -909,9 +994,10 @@ export function buildCsgScene(
             continue;
         }
 
-        const dnf = cell.region ? toDnf(cell.region, false) : null;
+        const dnfCtx: DnfCtx = { model, stack: new Set([cellId]) };
+        const dnf = cell.region ? toDnf(cell.region, false, dnfCtx) : null;
         if (!dnf) {
-            const em = emitFallback(newBuckets(), ctx, 'region uses cell complements or is too complex for DNF');
+            const em = emitFallback(newBuckets(), ctx, dnfCtx.reason ?? 'region is too complex to expand');
             applyCellTransformToSpecs(em.spec, cell.trcl);
             out.push(...em.spec);
             census.failed++;

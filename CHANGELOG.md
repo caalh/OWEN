@@ -5,6 +5,198 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.4.1] - 2026-08-13
+
+### Fixed
+
+- **Material cards no longer name ACE tables that do not exist.** Every oxide in
+  PNNL-15870 contains 0.2 at% O-18, and ENDF/B-VII.1 has no O-18 evaluation, so
+  the cards OWEN inserted for more than half the compendium named `8018.80c`.
+  MCNP stops on the first table it cannot find, so those decks did not run at
+  all. OWEN now knows which of the 423 ZAIDs ENDF/B-VII.1 actually ships and
+  folds a nuclide the library lacks into the element's most abundant isotope,
+  preserving both the mass and the atom count, or collapses to the elemental
+  table where that is the only one (carbon is `6000`, and there is no `6012`).
+  Every card says in a comment which of those it had to do.
+- **The bundled material library was years out of date and disagreed with
+  reactormc.net.** `npm run export-nrdp` resolved the site repo one directory too
+  far up, found nothing, wrote empty arrays and exited successfully, so the VSIX
+  shipped whatever had last been committed by hand. It now searches the plausible
+  locations, honours `REACTORMC_REPO`, and fails loudly rather than quietly
+  shipping stale data.
+- **The runtime material fetch had never worked.** `owen.nrdp.live` pointed at
+  `reactormc.net/data/nrdp-materials.json`, which the site did not publish, so
+  every insert silently fell back to the bundled copy. The site publishes it now,
+  which means a material correction reaches your editor without an update — and
+  the reader accepts both the bare array the site serves and a payload that wraps
+  it, rather than treating anything unexpected as an outage.
+- **SCONE material inserts were physically meaningless.** `owen.insertMaterial`
+  wrote weight fractions into a `composition { }` block, which SCONE reads as
+  atom densities in atoms/barn-cm — a material roughly 10^22 times too dense,
+  from a deck that parses without complaint. SCONE blocks now carry real atom
+  densities with a temperature suffix that matches their `temp`.
+- **Two entries built from the same material no longer collide.** A moderator and
+  a reflector both filled with light water declared the same Serpent material and
+  the same `therm` name, so one definition overwrote the other and geometry
+  pointed at whichever survived. Names are now unique per deck.
+- **Cards fit a card image and are ASCII.** Provenance and folding comments ran
+  past column 80 and carried em dashes and subscript digits out of names like
+  `UZrH1.6`, which the Input Builder's own pre-insert check flagged. Comments are
+  wrapped and transliterated.
+
+### Changed
+
+- **The Input Builder's material list is generated from the ReactorMC data, not
+  typed.** It used to carry its own compositions, and they had drifted: UO2 at
+  10.97 g/cm3 with 3 *atom* percent U-235 under a "3 wt% enriched" label (about
+  1% light on fissile, and the same at 4.5% and 5%), SS304 at a nominal
+  19/10/2/69 instead of the measured composition, Zircaloy-4 naming an elemental
+  zirconium table. The dropdown now offers the full curated set of 40 materials,
+  each either a PNNL-15870 Rev. 2 entry verbatim or a derived recipe whose
+  provenance is on the card, and every card comes from the same generator the
+  website uses.
+- **Thermal scattering is attached wherever ENDF/B-VII.1 has an evaluation**, not
+  only to hydrogenous moderators: graphite, beryllium metal, BeO and zirconium
+  hydride get theirs (both bindings, where there are two). Nothing is attached to
+  a fuel or a plain metal.
+- The material picker shows density and whether an entry is a compendium material
+  or a derived recipe.
+
+## [1.4.0] — 2026-08-13
+
+### Added
+
+- **The Input Builder is a split screen you can actually build a deck in.** The
+  left pane is a list of sections — materials, pin cell, lattice, boundary, run
+  settings, tally, bare surface, bare cell, free text — and any kind can be added
+  more than once, reordered, duplicated, muted or deleted. The right pane is the
+  deck as it stands, with the selected section's lines highlighted, so you can see
+  what each control writes. Numbering is allocated centrally, so a second lattice
+  cannot land on the first one's cell, surface or universe numbers.
+- **Pre-insert checks.** Below the preview, a list of problems found in the
+  assembled deck: a boundary that cuts through the lattice, an MCNP volume tally
+  inside repeated structures with no `sd`, a tally naming a cell the deck never
+  defines, a source point outside the boundary, a material referenced with no
+  material section, a line over the dialect's column limit, non-ASCII in a SCONE
+  deck. Each row jumps to the line and the section that produced it. Errors hold
+  insertion behind a confirmation; warnings and notes do not.
+- **The MCNP → OpenMC converter handles the rest of the macrobodies**
+  ([#4](https://github.com/caalh/owen/issues/4)). `ELL` (both the focus form and
+  the centre form) becomes an exact `openmc.Quadric` spheroid, including
+  off-axis major axes; `REC` becomes an elliptical-cylinder quadric capped by two
+  planes; `TRC` becomes `openmc.model.ConicalFrustum` (OpenMC 0.15.0+); `WED` and
+  `ARB` become the intersection of their bounding planes. `BOX` no longer requires
+  12 axis-aligned entries — an oblique box converts as six planes, and the legal
+  9-entry form converts as the infinite prism it is. The point-defined `X`/`Y`/`Z`
+  surfaces convert by point count: plane, cylinder, one-sided cone, or the fitted
+  conic of revolution. Previously each of these stopped at "is not a supported
+  surface type" and left a TODO comment.
+
+### Fixed
+
+- **The Layers panel could not be scrolled on a deck that produced many
+  warnings** ([#3](https://github.com/caalh/owen/issues/3)). The warning block had
+  no height limit, so on a deck where dozens of cells reported the same thing it
+  filled the panel and pushed every control out of reach — and the list itself
+  could not shrink, so nothing scrolled. Warnings now occupy at most a third of
+  the panel and scroll on their own, and repeated messages collapse into one line
+  per distinct reason ("14 cells: …") with the affected cell numbers listed
+  underneath.
+- **`#cell` complements are rendered, not replaced by a bounding box**
+  ([#3](https://github.com/caalh/owen/issues/3)). The 3D builder rewrites each
+  region into a union of intersections, and it used to give up the moment it met a
+  `#`, which is how most people write a shell or a "everything but that" cell. The
+  referenced region is now substituted under one more negation, which is an exact
+  rewrite. Concentric spheres collapse to the smallest, a concentric subtraction
+  becomes an annulus, and a term that contradicts itself drops out instead of
+  failing. What genuinely cannot expand — a `#` cycle, a complement of a cell
+  placed by its own `trcl`, a region past the union budget — now names which of
+  those it hit, and the panel explains what to do about it.
+- **Baffle plates no longer intersect each other.** The stepped core outline was
+  drawn as full-span plates in both cardinal directions, so at every corner two
+  plates passed through one another. Plates are now butt-jointed: the second
+  direction's spans have the first's footprint subtracted, and stubs shorter than
+  the plate thickness are dropped.
+- **SCONE cores drew no baffle or vessel structure at all.** The radial-shell
+  reader matched the enclosing `surfaces` block instead of the individual cylinder
+  definitions, and the assembly test did not see through `cellUniverse` or axial
+  stack wrappers, which is how SCONE decks are usually written. Shell names are
+  now classified by role (barrel, neutron shield, liner, RPV) and wrapped
+  assemblies are recognised.
+- **Macrobody facet references are reported instead of silently widened.** A
+  region using `-10.2` converted as though it said `-10`, quietly producing a
+  different cell. The facet digit is now kept through parsing and the conversion
+  says which cell used it.
+- **Material library corrections** (shared with the material wizard, so these
+  affect every panel that writes a material card): SCONE compositions were
+  fractions where SCONE wants atom densities in atoms/barn-cm; Zircaloy-4 and
+  SS304 named elemental ZAIDs (`40000.80c`, `26000.80c`, …) that ENDF/B-VII.1 does
+  not ship, and are now expanded to natural isotopes; Serpent water, helium and
+  air had positive densities, which Serpent reads as atom density; Serpent light
+  water had `therm hwtr` and no `moder`; B₄C had no carbon in it; dry air had more
+  N-15 than N-14. OpenMC material references were derived from the display label
+  while the cards were named from the id, so a `fill=` could point at a name that
+  was never defined, and the OpenMC root cell was emitted before the lattice it
+  filled — a `NameError` at run time.
+- **The MCNP 80/128 toggle now moves the guide line.** OWEN 0.1.6–1.1.x wrote
+  `[mcnp].editor.rulers` without recording what it had written, and the
+  "don't clobber the user's ruler" guard added in 1.2.0 keyed on that record —
+  so on every pre-1.2 install the guard read OWEN's own ruler as
+  user-configured and refused to move it. The status bar and the diagnostics
+  followed the dialect; the vertical line stayed at column 80. A lone ruler
+  sitting at a limit OWEN manages (80, 128, or the configured custom value) is
+  now adopted, a deliberate layout (`[72]`, or several rulers) is still left
+  alone, and when it is left alone the toggle says so instead of appearing to
+  do nothing. The dialect is also written to the configuration scope it is
+  read back from, and the ruler, decorations and status bar all move in the
+  same turn as the click.
+- **The toggle is reachable from the menus.** `OWEN: Toggle MCNP Line Limit
+  (80/128)` now appears in the right-click OWEN submenu and the editor-title
+  OWEN menu for MCNP files, not only in the Command Palette and status bar.
+
+### Changed
+
+- **2D slice view is navigable and no longer aliases a lattice into
+  speckle.** A fitted whole-core view was one sample per pixel at ~1.28 cm/px
+  against a 1.26 cm pin pitch — below Nyquist for the lattice. The view gains
+  zoom (mouse wheel anchored under the cursor, ±, Fit), drag-to-pan,
+  resolutions up to 1024², selectable 1×/2×/3× supersampling (majority vote
+  per pixel; an overlap in any subsample still paints the pixel, since a
+  double-claimed sliver is a modeling error, not a shading detail), and a
+  one-pixel outline on region boundaries, which is what recovers the crispness
+  of a vector plot in a classified raster. A cm-per-pixel readout makes the
+  sampling budget visible.
+- **Slice colors and labels match the 3D view.** Materials are colored by the
+  shared palette and named from the deck (`UO2 3.1%`, `Water`) instead of
+  hash-colored `m31`; click-to-identify reports the material name and the
+  world coordinates of the point.
+- **Slices render progressively and no longer freeze the editor.**
+  Classification is a resumable job advanced in ~30 ms bands between
+  macrotasks, streamed to the webview as they finish. On a full-core BEAVRS
+  deck the first rows appear in ~46 ms and the worst host stall is ~41 ms,
+  where a 768²/2× render previously blocked the extension host in one
+  multi-second call. A new request cancels the one in flight; editing the deck
+  or closing the panel cancels too.
+- **Point membership is ~2.2× faster on lattices.** `findCell` was deriving a
+  lattice cell's plane-pair basis for every sampled point. The basis is now
+  memoized per model and carries a precomputed pseudo-inverse, so resolving
+  fractional lattice indices is one matrix-vector product rather than a
+  Gaussian elimination, and the `#cell` cycle guard allocates only when a
+  complement is actually evaluated. Full-core slice: 7.3 s → 3.2 s.
+- **A hollow shell is drawn see-through.** A sphere or cylinder with an inner
+  radius no longer renders as a solid, which had been hiding whatever it
+  contained.
+- **A crash inside a panel says so.** An exception in the Input Builder webview
+  used to leave the panel silently frozen with nothing in any log; it is now
+  reported to the host and surfaced.
+- **Panel scripts are parsed by the test suite.** Both panels ship UI JavaScript
+  embedded in a TypeScript template literal, where an escaping mistake produces a
+  panel that opens and does nothing. The suite now parses the emitted script of
+  the Geometry Preview and the Input Builder (and the preview's import map as
+  JSON), so that failure mode is a red test rather than a bug report.
+
 ## [1.3.0] — 2026-08-13
 
 ### Added

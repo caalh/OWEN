@@ -40,7 +40,7 @@ function buildMcnp(state: InputBuilderState): string {
     const s = state.settings;
     const lines: string[] = [
         'c ============================================================',
-        'c OWEN Input Builder — ' + (state.title || 'generated deck'),
+        'c OWEN Input Builder - ' + (state.title || 'generated deck'),
         'c ============================================================',
         '',
         'c --- Materials ---',
@@ -91,7 +91,7 @@ function buildOpenmc(state: InputBuilderState): string {
     const s = state.settings;
     const lines: string[] = [
         '#!/usr/bin/env python3',
-        '"""OWEN Input Builder — ' + (state.title || 'generated model') + '"""',
+        '"""OWEN Input Builder - ' + (state.title || 'generated model') + '"""',
         '',
         'import openmc',
         '',
@@ -144,7 +144,7 @@ function buildOpenmc(state: InputBuilderState): string {
 function buildSerpent(state: InputBuilderState): string {
     const s = state.settings;
     const lines: string[] = [
-        '% OWEN Input Builder — ' + (state.title || 'generated deck'),
+        '% OWEN Input Builder - ' + (state.title || 'generated deck'),
         '',
         '% --- Materials ---',
     ];
@@ -176,7 +176,7 @@ function buildSerpent(state: InputBuilderState): string {
 function buildScone(state: InputBuilderState): string {
     const s = state.settings;
     const lines: string[] = [
-        '// OWEN Input Builder — ' + (state.title || 'generated deck'),
+        '// OWEN Input Builder - ' + (state.title || 'generated deck'),
         '',
         'eigenPhysicsPackage {',
         '  numInactiveCycles ' + s.inactive + ';',

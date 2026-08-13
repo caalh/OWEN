@@ -66,6 +66,29 @@ export function baffleBox(
  * adjacent edge doing so gets an L-shaped corner piece (two half-length
  * plates), matching how BEAVRS models the stepped-outline corners.
  */
+/** Half-open interval along a plate's long axis, relative to the cell centre. */
+type Span = [number, number];
+
+/**
+ * `span` minus every interval in `cuts`. Used to butt-joint perpendicular
+ * plates: the plate that owns a corner square keeps its full run and the
+ * crossing plate is emitted as the one or two segments outside it, so the
+ * union is unchanged and no two plates share volume.
+ */
+function subtractSpans(span: Span, cuts: readonly Span[]): Span[] {
+    let parts: Span[] = [span];
+    for (const [c0, c1] of cuts) {
+        const next: Span[] = [];
+        for (const [p0, p1] of parts) {
+            if (c1 <= p0 || c0 >= p1) { next.push([p0, p1]); continue; }
+            if (c0 > p0) next.push([p0, c0]);
+            if (c1 < p1) next.push([c1, p1]);
+        }
+        parts = next;
+    }
+    return parts.filter(([a, b]) => b - a > 1e-6);
+}
+
 export interface BaffleNeighborhood {
     east: boolean;
     west: boolean;
@@ -131,14 +154,39 @@ export function bafflePlates(
         });
     };
 
-    if (nb.east) plate('e', cx + midX, cy, thickX, halfPitchY);
-    if (nb.west) plate('w', cx - midX, cy, thickX, halfPitchY);
+    /**
+     * A run of plate along y (an east or west plate), emitted as the segments
+     * of `span` that the north/south plates do not already cover. The N/S
+     * plates run the full width of the cell, so they own the corner squares
+     * where the wall turns; without this the two runs crossed and the viewer
+     * showed plates passing through each other at every stair step.
+     */
+    const runY = (suffix: string, x: number, span: Span, cuts: readonly Span[]): void => {
+        // A leftover shorter than the plate is thick is a chip between the
+        // perpendicular plate and the lattice-cell boundary (0.16 cm on BEAVRS
+        // pitch). Dropping it ends the run flush with the plate it butts
+        // against instead of adding a degenerate box per stair step.
+        const parts = subtractSpans(span, cuts).filter(([a, b]) => b - a >= 2 * thickX);
+        parts.forEach(([y0, y1], i) => {
+            plate(parts.length > 1 ? `${suffix}${i}` : suffix, x, cy + (y0 + y1) / 2, thickX, (y1 - y0) / 2);
+        });
+    };
+
+    const yCuts: Span[] = [];
+    if (nb.north) yCuts.push([ay, by]);
+    if (nb.south) yCuts.push([-by, -ay]);
+
+    if (nb.east) runY('e', cx + midX, [-halfPitchY, halfPitchY], yCuts);
+    if (nb.west) runY('w', cx - midX, [-halfPitchY, halfPitchY], yCuts);
     if (nb.north) plate('n', cx, cy + midY, halfPitchX, thickY);
     if (nb.south) plate('s', cx, cy - midY, halfPitchX, thickY);
 
-    // L-shaped corner pieces where only the diagonal faces the core.
+    // L-shaped corner pieces where only the diagonal faces the core. The
+    // along-y arm yields the corner square to the along-x arm, same rule.
     const corner = (suffix: string, sx: 1 | -1, sy: 1 | -1): void => {
-        plate(`${suffix}_x`, cx + sx * midX, cy + sy * halfPitchY / 2, thickX, halfPitchY / 2);
+        const armY: Span = sy > 0 ? [0, halfPitchY] : [-halfPitchY, 0];
+        const cut: Span = sy > 0 ? [ay, by] : [-by, -ay];
+        runY(`${suffix}_x`, cx + sx * midX, armY, [cut]);
         plate(`${suffix}_y`, cx + sx * halfPitchX / 2, cy + sy * midY, halfPitchX / 2, thickY);
     };
     if (nb.ne && !nb.north && !nb.east) corner('ne', 1, 1);
@@ -476,39 +524,94 @@ export function emitSerpentRadialStructure(
     return n;
 }
 
-/** SCONE zCylinder surfaces for barrel / RPV from the geometry block. */
+/**
+ * Named z-cylinder radii from a SCONE deck, as `{ name, r }` in declaration
+ * order. Only leaf blocks are matched (`[^{}]*` body): an enclosing
+ * `surfaces { … }` used to match first, so the wrapper's name and the first
+ * surface's radius were recorded as one entry and the real surface name was
+ * never seen.
+ */
+export function sconeCylinderRadii(text: string): { name: string; r: number }[] {
+    const out: { name: string; r: number }[] = [];
+    for (const m of text.matchAll(/([A-Za-z_]\w*)\s*\{([^{}]*)\}/g)) {
+        const body = m[2];
+        if (!/\btype\s+z(?:Trunc)?Cylinder\b/i.test(body)) continue;
+        const rm = /\bradius\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/i.exec(body);
+        if (!rm) continue;
+        const r = Number(rm[1]);
+        if (r > 0) out.push({ name: m[1].toLowerCase(), r });
+    }
+    return out;
+}
+
+type SconeShellRole = 'barrel' | 'shield' | 'water' | 'liner' | 'rpv';
+
+/**
+ * Which containment shell a SCONE surface name refers to. Deliberately not a
+ * BEAVRS name list: the reference deck calls its neutron-shield bounds
+ * `innerBoundNS` / `outerBoundNS`, which the old `innerneutron|innershield`
+ * patterns missed, so every SCONE core rendered with a barrel and nothing
+ * else. `liner` is tested before `rpv` because `innerRPVLiner` contains both.
+ */
+export function sconeShellRole(name: string): { role: SconeShellRole; side: 'inner' | 'outer' } | null {
+    const low = name.toLowerCase();
+    const side = low.includes('inner') ? 'inner' : low.includes('outer') ? 'outer' : null;
+    if (!side) return null;
+    let role: SconeShellRole | null = null;
+    if (/barrel/.test(low)) role = 'barrel';
+    else if (/liner/.test(low)) role = 'liner';
+    else if (/rpv|vessel/.test(low)) role = 'rpv';
+    else if (/neutron|shield|(?:^|[^a-z])ns(?:[^a-z]|$)|ns$/.test(low)) role = 'shield';
+    else if (/downcomer|barrelwater/.test(low)) role = 'water';
+    return role ? { role, side } : null;
+}
+
+/** SCONE zCylinder surfaces → barrel, neutron-shield pads, downcomer, RPV. */
 export function emitSconeRadialStructure(
     text: string,
     cylinders: CylinderSpec[],
     ctx: RadialContext,
     footprint: number,
 ): number {
-    const radii: { name: string; r: number }[] = [];
-    const re = /(\w+)\s*\{[^}]*type\s+z(?:Trunc)?Cylinder[^}]*radius\s+([\d.]+)/gi;
-    for (const m of text.matchAll(re)) {
-        const r = Number(m[2]);
-        if (r > footprint * 0.5 && r < 500) radii.push({ name: m[1].toLowerCase(), r });
-    }
+    const radii = sconeCylinderRadii(text).filter((x) => x.r > footprint * 0.5 && x.r < 500);
     radii.sort((a, b) => a.r - b.r);
     let n = 0;
-    const pushPair = (inner: string, outer: string, comp: ComponentId, mat: string, op: number) => {
-        const ri = radii.find((x) => inner.split('|').some((k) => x.name.includes(k)));
-        const ro = radii.find((x) => outer.split('|').some((k) => x.name.includes(k)));
+    const pick = (role: SconeShellRole, side: 'inner' | 'outer') => {
+        const hit = radii.find((x) => {
+            const c = sconeShellRole(x.name);
+            return c?.role === role && c.side === side;
+        });
+        return hit;
+    };
+    const pushPair = (
+        ri: { name: string; r: number } | undefined,
+        ro: { name: string; r: number } | undefined,
+        comp: ComponentId,
+        mat: string,
+        op: number,
+    ) => {
         if (ri && ro && ro.r > ri.r) {
             cylinders.push(annularShell(`${ri.name}_${ro.name}`, ri.r, ro.r, comp, mat, ctx, op));
             n++;
         }
     };
-    pushPair('innercorebarrel|innercore', 'outercorebarrel|outercore', Component.Vessel, 'SS304', 0.45);
-    pushPair('innerneutron|innershield', 'outerneutron|outershield', Component.Structure, 'SS304', 0.5);
-    pushPair('outerneutron|outershield', 'innerrpv|innerrpvliner|innerrpvliner', Component.Moderator, 'Water', 0.12);
-    pushPair('innerrpv|innerrpvliner', 'innerRPV|innerrpv', Component.Vessel, 'SS304', 0.4);
-    pushPair('innerRPV|innerrpv', 'outerRPV|outerrpv', Component.Vessel, 'CarbonSteel', 0.5);
 
-    const nsIn = radii.find((x) => x.name.includes('neutron') && x.name.includes('inner'));
-    const nsOut = radii.find((x) => x.name.includes('neutron') && x.name.includes('outer'));
-    if (nsIn && nsOut && nsOut.r > nsIn.r) {
-        cylinders.push(...neutronShieldPads(nsIn.r, nsOut.r, ctx, 'scone_ns'));
+    const barrelIn = pick('barrel', 'inner');
+    const barrelOut = pick('barrel', 'outer');
+    const shieldIn = pick('shield', 'inner');
+    const shieldOut = pick('shield', 'outer');
+    const linerIn = pick('liner', 'inner');
+    const rpvIn = pick('rpv', 'inner');
+    const rpvOut = pick('rpv', 'outer');
+
+    pushPair(barrelIn, barrelOut, Component.Vessel, 'SS304', 0.45);
+    // Downcomer water from the shield ring (or the barrel) out to the liner.
+    pushPair(shieldOut ?? barrelOut, linerIn ?? rpvIn, Component.Moderator, 'Water', 0.12);
+    pushPair(linerIn, rpvIn, Component.Vessel, 'SS304', 0.4);
+    pushPair(rpvIn, rpvOut, Component.Vessel, 'CarbonSteel', 0.5);
+
+    if (shieldIn && shieldOut && shieldOut.r > shieldIn.r) {
+        cylinders.push(...neutronShieldPads(shieldIn.r, shieldOut.r, ctx, 'scone_ns'));
         n += 4;
     }
     if (n === 0) {

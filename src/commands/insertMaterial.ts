@@ -16,22 +16,40 @@ import {
 interface MaterialComposition {
     zaid: string;
     name: string;
+    /** Weight fraction of the whole material. */
     fraction: number;
+    atomFraction?: number;
+    /** atoms/(barn*cm) */
+    atomDensity?: number;
     isElement?: boolean;
 }
 
+/**
+ * A row of the NRDP curated library, as published at
+ * https://reactormc.net/data/nrdp-materials.json and bundled in `data/`.
+ * Generated on the site side from scripts/nrdp/recipes.mjs — every card here
+ * comes from the same generator as the compendium cards, so the two agree.
+ */
 interface CommonMaterial {
     slug: string;
     name: string;
     formula?: string;
     category: string;
     density: number;
+    atomDensity?: number;
+    /** 'pnnl' (compendium verbatim), 'derived' (stated recipe), or 'void'. */
+    source?: string;
+    pnnlId?: string;
+    provenance?: string;
     description: string;
     composition: MaterialComposition[];
     sab?: string[];
+    /** What ENDF/B-VII.1 forced on the cards (folded or collapsed nuclides). */
+    libraryNotes?: string[];
     mcnpCode: string;
     serpentCode: string;
     openmcCode: string;
+    sconeCode?: string;
     notes?: string;
 }
 
@@ -39,12 +57,24 @@ let cachedMaterials: CommonMaterial[] | null = null;
 let cachedAt = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * The bundled snapshot is a bare array; the file the site publishes wraps the
+ * same array in `{ citation, reportUrl, materials }`. Accept either, or the
+ * live fetch degrades to the bundled copy without saying so.
+ */
+export function materialsFromJson(parsed: unknown): CommonMaterial[] | null {
+    if (Array.isArray(parsed)) return parsed as CommonMaterial[];
+    const wrapped = (parsed as { materials?: unknown } | null)?.materials;
+    if (Array.isArray(wrapped)) return wrapped as CommonMaterial[];
+    return null;
+}
+
 async function loadBundled(extensionUri: vscode.Uri): Promise<CommonMaterial[]> {
     const uri = vscode.Uri.joinPath(extensionUri, 'data', 'nrdp-materials.json');
     try {
         const bytes = await vscode.workspace.fs.readFile(uri);
         const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
-        return Array.isArray(parsed) ? parsed as CommonMaterial[] : [];
+        return materialsFromJson(parsed) ?? [];
     } catch (err) {
         console.warn('[owen.insertMaterial] failed to read bundled NRDP snapshot', err);
         return [];
@@ -60,7 +90,12 @@ async function loadLive(endpoint: string): Promise<CommonMaterial[] | null> {
             return null;
         }
         const data = await res.json();
-        return Array.isArray(data) ? data as CommonMaterial[] : null;
+        const materials = materialsFromJson(data);
+        if (!materials) {
+            console.warn('[owen.insertMaterial] live NRDP payload had no material array; falling back to bundled');
+            return null;
+        }
+        return materials;
     } catch (err) {
         console.warn('[owen.insertMaterial] live NRDP fetch failed; falling back to bundled', err);
         return null;
@@ -93,21 +128,15 @@ function codeForLanguage(mat: CommonMaterial, lang: MonteCarloLanguage | null): 
         case 'serpent':
             return mat.serpentCode || '';
         case 'scone':
-            return convertToSconeStub(mat);
+            // Generated on the site side. A SCONE composition is atom densities
+            // in atoms/barn-cm, not fractions: this used to write the weight
+            // fractions straight into the block, which described a material
+            // roughly 10^22 times too dense.
+            return mat.sconeCode || '';
         case 'mcnp':
         default:
             return mat.mcnpCode || '';
     }
-}
-
-function convertToSconeStub(mat: CommonMaterial): string {
-    const head = `! ${mat.name} (${mat.density} g/cm3)\n${mat.slug.replace(/[^A-Za-z0-9_]/g, '_')} {`;
-    const body = mat.composition.length
-        ? `\n  temp 600;\n  composition {\n${mat.composition
-            .map((c) => `    ${c.zaid}.06  ${c.fraction.toExponential(6)};`)
-            .join('\n')}\n  }`
-        : '';
-    return `${head}${body}\n}`;
 }
 
 export function registerInsertMaterial(context: vscode.ExtensionContext): vscode.Disposable {
@@ -127,13 +156,26 @@ export function registerInsertMaterial(context: vscode.ExtensionContext): vscode
             return;
         }
 
-        const items: (vscode.QuickPickItem & { pnnlId?: string })[] = materials
-            .filter((m) => codeForLanguage(m, lang).trim().length > 0)
-            .map((m) => ({
-                label: m.name,
-                description: m.formula ? `${m.formula} • ${m.category}` : m.category,
-                detail: m.description,
-            }));
+        const usable = materials.filter((m) => codeForLanguage(m, lang).trim().length > 0);
+        if (usable.length === 0) {
+            vscode.window.showErrorMessage(
+                `OWEN: the NRDP snapshot carries no ${lang ?? 'MCNP'} cards. If \`owen.nrdp.live\` is on, the `
+                + 'published snapshot is older than this extension — set it to false to use the bundled copy.',
+            );
+            return;
+        }
+
+        const items: (vscode.QuickPickItem & { pnnlId?: string })[] = usable.map((m) => ({
+            label: m.name,
+            description: [
+                m.formula,
+                `ρ=${m.density} g/cm³`,
+                m.source === 'pnnl' ? 'PNNL-15870' : m.source === 'derived' ? 'derived recipe' : m.category,
+            ]
+                .filter(Boolean)
+                .join(' • '),
+            detail: m.description,
+        }));
 
         // PNNL-15870 Rev. 2 compendium (411 materials) after the curated set.
         const pnnl = loadPnnlDataset();

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import {
+    classifyMcnpRuler,
     describeLineLimit,
     findOverlengthLines,
     LineLimitSettings,
@@ -49,24 +50,36 @@ function resolveForDocument(document: vscode.TextDocument): ResolvedLineLimit {
 
 /**
  * Keep [mcnp].editor.rulers at the effective limit without clobbering a ruler
- * the user configured themselves: we remember the value we last wrote in
- * globalState and only overwrite when the current value is ours (or absent).
+ * the user configured themselves. Ownership is decided by
+ * {@link classifyMcnpRuler}, which also adopts the memo-less rulers written by
+ * OWEN 0.1.6–1.1.x — otherwise the toggle moves the status bar and the
+ * diagnostics while the visible line stays at 80.
+ *
+ * @returns what happened, so an explicit toggle can explain a ruler it must leave alone.
  */
-async function ensureMcnpRuler(context: vscode.ExtensionContext, limit: number): Promise<void> {
+async function ensureMcnpRuler(
+    context: vscode.ExtensionContext,
+    limit: number,
+): Promise<'written' | 'unchanged' | 'user-owned'> {
     const editorCfg = vscode.workspace.getConfiguration('editor', { languageId: 'mcnp' });
     const inspected = editorCfg.inspect<number[]>('rulers');
     const existing = inspected?.globalLanguageValue;
     const memo = context.globalState.get<number>(RULER_MEMO_KEY);
-    if (Array.isArray(existing) && existing.length > 0) {
-        const ours = existing.length === 1 && memo !== undefined && existing[0] === memo;
-        if (!ours) return; // respect the user's own MCNP ruler(s)
-        if (existing[0] === limit) return; // already correct
+    const managed = [MCNP_LEGACY_LINE_LIMIT, MCNP_MODERN_LINE_LIMIT, limit];
+    const ownership = classifyMcnpRuler(existing, memo, managed);
+    if (ownership === 'user') return 'user-owned';
+    if (ownership === 'owen' && existing?.[0] === limit) {
+        // Already correct, but claim it so a later toggle can move it.
+        if (memo !== limit) await context.globalState.update(RULER_MEMO_KEY, limit);
+        return 'unchanged';
     }
     try {
         await editorCfg.update('rulers', [limit], vscode.ConfigurationTarget.Global, true);
         await context.globalState.update(RULER_MEMO_KEY, limit);
+        return 'written';
     } catch {
         // Non-fatal: a missing/readonly settings target shouldn't break activation.
+        return 'unchanged';
     }
 }
 
@@ -100,12 +113,31 @@ function refreshStatusBar(item: vscode.StatusBarItem, resolved: ResolvedLineLimi
 }
 
 /**
- * Toggle the MCNP dialect between 80 and 128 columns. Persists to the
- * workspace when one is open (per-workspace decks usually target one MCNP
- * version), else globally. A file directive still wins over the setting; say
- * so instead of silently doing nothing.
+ * Which configuration scope the dialect should be written to: the one
+ * {@link lineLimitSettings} would read it back from. Writing to Workspace
+ * while a workspace-folder value shadows it would move the setting without
+ * moving the effective limit.
  */
-async function toggleLineLimit(): Promise<void> {
+function dialectWriteTarget(): vscode.ConfigurationTarget {
+    const inspected = vscode.workspace.getConfiguration('owen').inspect<McnpDialect>('mcnp.dialect');
+    if (inspected?.workspaceFolderValue !== undefined) return vscode.ConfigurationTarget.WorkspaceFolder;
+    if (inspected?.workspaceValue !== undefined) return vscode.ConfigurationTarget.Workspace;
+    if (inspected?.globalValue !== undefined) return vscode.ConfigurationTarget.Global;
+    return vscode.workspace.workspaceFolders?.length
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global;
+}
+
+/**
+ * Toggle the MCNP dialect between 80 and 128 columns, then move the ruler,
+ * decorations and status bar in the same turn. A file directive still wins
+ * over the setting, and a ruler the user owns is left alone — both are said
+ * out loud instead of silently doing nothing.
+ */
+async function toggleLineLimit(
+    context: vscode.ExtensionContext,
+    refreshAll: () => void,
+): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     const settings = lineLimitSettings();
     const text = editor?.document.languageId === 'mcnp' ? editor.document.getText() : '';
@@ -115,10 +147,12 @@ async function toggleLineLimit(): Promise<void> {
         resolved.limit === MCNP_LEGACY_LINE_LIMIT ? 'mcnp6.2+' : 'mcnp6.1-and-earlier';
     const nextLimit = next === 'mcnp6.2+' ? MCNP_MODERN_LINE_LIMIT : MCNP_LEGACY_LINE_LIMIT;
 
-    const target = vscode.workspace.workspaceFolders?.length
-        ? vscode.ConfigurationTarget.Workspace
-        : vscode.ConfigurationTarget.Global;
-    await vscode.workspace.getConfiguration('owen').update('mcnp.dialect', next, target);
+    await vscode.workspace.getConfiguration('owen').update('mcnp.dialect', next, dialectWriteTarget());
+
+    // Don't wait for the configuration event: move everything now so the
+    // visible ruler and the highlighted tails agree with the status bar.
+    const rulerState = await ensureMcnpRuler(context, resolved.source === 'file-directive' ? resolved.limit : nextLimit);
+    refreshAll();
 
     if (resolved.source === 'file-directive') {
         void vscode.window.showInformationMessage(
@@ -126,12 +160,16 @@ async function toggleLineLimit(): Promise<void> {
             `('c owen: line-limit=${resolved.limit}' on line ${(resolved.directiveLine ?? 0) + 1}), ` +
             'which always wins. Remove the directive to follow the setting.',
         );
-    } else {
-        void vscode.window.showInformationMessage(
-            `OWEN: MCNP line limit is now ${nextLimit} columns ` +
-            `(${next === 'mcnp6.2+' ? 'MCNP 6.2+' : 'MCNP 6.1 and earlier'}).`,
-        );
+        return;
     }
+
+    let msg =
+        `OWEN: MCNP line limit is now ${nextLimit} columns ` +
+        `(${next === 'mcnp6.2+' ? 'MCNP 6.2+' : 'MCNP 6.1 and earlier'}).`;
+    if (rulerState === 'user-owned') {
+        msg += ` The editor ruler was left where you set it — edit "[mcnp]": { "editor.rulers": [${nextLimit}] } to move the guide line.`;
+    }
+    void vscode.window.showInformationMessage(msg);
 }
 
 /**
@@ -165,15 +203,22 @@ export function registerMcnpLineGuard(context: vscode.ExtensionContext): void {
         if (resolved) void ensureMcnpRuler(context, resolved.limit);
     };
 
+    const refreshAllVisible = () => {
+        for (const editor of vscode.window.visibleTextEditors) {
+            const resolved = refreshDecorations(editor, decoration);
+            if (editor === vscode.window.activeTextEditor) refreshStatusBar(statusItem, resolved);
+            if (resolved) void ensureMcnpRuler(context, resolved.limit);
+        }
+    };
+
     // Seed any already-open MCNP editors.
-    for (const editor of vscode.window.visibleTextEditors) {
-        const resolved = refreshDecorations(editor, decoration);
-        if (editor === vscode.window.activeTextEditor) refreshStatusBar(statusItem, resolved);
-        if (resolved) void ensureMcnpRuler(context, resolved.limit);
-    }
+    refreshAllVisible();
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('owen.toggleMcnpLineLimit', () => toggleLineLimit()),
+        vscode.commands.registerCommand(
+            'owen.toggleMcnpLineLimit',
+            () => toggleLineLimit(context, refreshAllVisible),
+        ),
         vscode.window.onDidChangeActiveTextEditor((editor) => refreshEditor(editor)),
         vscode.workspace.onDidChangeTextDocument((e) => {
             const editor = vscode.window.activeTextEditor;
@@ -186,13 +231,7 @@ export function registerMcnpLineGuard(context: vscode.ExtensionContext): void {
                 e.affectsConfiguration('owen.mcnp.lineLengthLimit')
                 || e.affectsConfiguration('owen.mcnp.dialect')
             ) {
-                for (const editor of vscode.window.visibleTextEditors) {
-                    const resolved = refreshDecorations(editor, decoration);
-                    if (editor === vscode.window.activeTextEditor) {
-                        refreshStatusBar(statusItem, resolved);
-                    }
-                    if (resolved) void ensureMcnpRuler(context, resolved.limit);
-                }
+                refreshAllVisible();
             }
         }),
     );

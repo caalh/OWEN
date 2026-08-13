@@ -178,6 +178,34 @@ export function describeLineLimit(resolved: ResolvedLineLimit): string {
     }
 }
 
+/** Who owns the `[mcnp].editor.rulers` value currently in settings. */
+export type McnpRulerOwnership = 'unset' | 'owen' | 'user';
+
+/**
+ * Decide whether OWEN may move the language-scoped MCNP ruler.
+ *
+ * OWEN 0.1.6–1.1.x wrote `[mcnp].editor.rulers` without recording what it
+ * wrote, so the memo is absent for every install that predates the dialect
+ * toggle. Treating "no memo" as "the user owns this" left the ruler pinned at
+ * 80 forever: the status bar and diagnostics followed the toggle while the
+ * visible line did not. A lone ruler whose value is one of the limits OWEN
+ * itself manages is therefore adopted as ours.
+ *
+ * @param existing  current `[mcnp].editor.rulers` (user-settings language override)
+ * @param memo      the value OWEN last wrote, when known
+ * @param managed   limits OWEN manages (80, 128, and any custom limit in effect)
+ */
+export function classifyMcnpRuler(
+    existing: readonly number[] | undefined,
+    memo: number | undefined,
+    managed: readonly number[] = [MCNP_LEGACY_LINE_LIMIT, MCNP_MODERN_LINE_LIMIT],
+): McnpRulerOwnership {
+    if (!Array.isArray(existing) || existing.length === 0) return 'unset';
+    if (existing.length !== 1) return 'user'; // a multi-ruler layout is deliberate
+    if (memo !== undefined && existing[0] === memo) return 'owen';
+    return managed.includes(existing[0]) ? 'owen' : 'user';
+}
+
 /**
  * Find every line whose tab-expanded width exceeds `limit`. Used by both the
  * diagnostic provider and the editor decoration so the two never disagree.

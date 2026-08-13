@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import {
+    classifyMcnpRuler,
     describeLineLimit,
     expandedWidth,
     findOverlengthLines,
@@ -158,5 +159,36 @@ suite('OWEN MCNP line-limit dialect resolution', () => {
             describeLineLimit(resolveLineLimit('c owen: line-limit=128', {})),
             /line-limit=128' on line 1/,
         );
+    });
+});
+
+suite('OWEN MCNP ruler ownership (regression: toggle must move the guide line)', () => {
+    test('no existing ruler is free to claim', () => {
+        assert.strictEqual(classifyMcnpRuler(undefined, undefined), 'unset');
+        assert.strictEqual(classifyMcnpRuler([], undefined), 'unset');
+    });
+
+    test('a ruler matching the memo is ours', () => {
+        assert.strictEqual(classifyMcnpRuler([80], 80), 'owen');
+        assert.strictEqual(classifyMcnpRuler([128], 128), 'owen');
+    });
+
+    test('a memo-less ruler at an OWEN-managed limit is adopted', () => {
+        // OWEN 0.1.6–1.1.x wrote [mcnp].editor.rulers with no memo. Treating
+        // that as user-owned pinned the guide line at 80 while the status bar
+        // and diagnostics followed the dialect toggle.
+        assert.strictEqual(classifyMcnpRuler([80], undefined), 'owen');
+        assert.strictEqual(classifyMcnpRuler([128], undefined), 'owen');
+    });
+
+    test('a custom limit in effect counts as managed', () => {
+        assert.strictEqual(classifyMcnpRuler([96], undefined, [80, 128, 96]), 'owen');
+        assert.strictEqual(classifyMcnpRuler([96], undefined), 'user');
+    });
+
+    test('a deliberate ruler layout is left alone', () => {
+        assert.strictEqual(classifyMcnpRuler([72], undefined), 'user');
+        assert.strictEqual(classifyMcnpRuler([80, 128], 80), 'user');
+        assert.strictEqual(classifyMcnpRuler([72], 80), 'user');
     });
 });

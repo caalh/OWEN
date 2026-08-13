@@ -108,8 +108,15 @@ export function surfaceValue(surface: McnpSurface, facet: number, p: Vec3): numb
 
 interface EvalCtx {
     model: McnpGeometryModel;
-    /** Cells currently being evaluated (cellcomp cycle guard). */
-    stack: Set<number>;
+    /** Cell this evaluation started from (seeds the cellcomp cycle guard). */
+    root: number;
+    /**
+     * Cells currently being evaluated (cellcomp cycle guard), allocated only
+     * once a `#cell` complement is actually reached. Slice rendering evaluates
+     * millions of regions and the vast majority contain no complement at all,
+     * so an eager Set per call was pure garbage-collector pressure.
+     */
+    stack: Set<number> | null;
 }
 
 function halfspaceContains(
@@ -149,6 +156,7 @@ function regionContains(ctx: EvalCtx, region: RegionNode, p: Vec3): boolean {
         case 'not':
             return !regionContains(ctx, region.kid, p);
         case 'cellcomp': {
+            if (!ctx.stack) ctx.stack = new Set([ctx.root]);
             if (ctx.stack.has(region.cell)) return false; // #-cycle: fail closed
             const target = ctx.model.cells.get(region.cell);
             if (!target || !target.region) return false;
@@ -170,7 +178,7 @@ function regionContains(ctx: EvalCtx, region: RegionNode, p: Vec3): boolean {
 export function cellContains(model: McnpGeometryModel, cellId: number, p: Vec3): boolean {
     const cell = model.cells.get(cellId);
     if (!cell || !cell.region) return false;
-    const ctx: EvalCtx = { model, stack: new Set([cellId]) };
+    const ctx: EvalCtx = { model, root: cellId, stack: null };
     const q = cell.trcl ? toAux(cell.trcl, p) : p;
     return regionContains(ctx, cell.region, q);
 }
@@ -195,7 +203,41 @@ export interface FoundCell {
 interface LatticeBasis {
     origin: Vec3;   // center of element (0,0,0)
     a: Vec3[];      // index basis vectors (1–3 of them)
+    /**
+     * (AᵀA)⁻¹Aᵀ for A = [a₁ … a_n], precomputed so resolving a point's
+     * fractional lattice coordinates is one small matrix-vector product
+     * instead of a Gaussian elimination. Absent when AᵀA is singular.
+     */
+    pinv?: number[][];
 }
+
+/**
+ * Per-model cache of derived lattice bases. Deriving a basis pairs the window
+ * planes and solves a 3×3 system; doing that per sampled point made a
+ * full-core slice tens of times slower than the membership tests it exists to
+ * serve. Keyed weakly by model so a re-parsed deck drops its cache.
+ */
+const latticeBasisCache = new WeakMap<McnpGeometryModel, Map<number, LatticeBasis | null>>();
+
+function cachedLatticeBasis(model: McnpGeometryModel, cell: McnpCell): LatticeBasis | null {
+    let perModel = latticeBasisCache.get(model);
+    if (!perModel) {
+        perModel = new Map();
+        latticeBasisCache.set(model, perModel);
+    }
+    if (perModel.has(cell.id)) return perModel.get(cell.id) ?? null;
+    const basis = latticeBasis(model, cell);
+    perModel.set(cell.id, basis);
+    return basis;
+}
+
+/** Neighborhood offsets for the hex/rhombic index verification search. */
+const NEIGHBOR_DELTAS: readonly number[][] = (() => {
+    const range = [0, 1, -1];
+    const out: number[][] = [];
+    for (const di of range) for (const dj of range) for (const dk of range) out.push([di, dj, dk]);
+    return out;
+})();
 
 /**
  * Derive the lattice element basis from the lattice cell's bounding planes.
@@ -298,7 +340,42 @@ function latticeBasis(model: McnpGeometryModel, cell: McnpCell): LatticeBasis | 
         }
     }
     const origin = solve3(N, rhs) ?? ([0, 0, 0] as Vec3);
-    return { origin, a };
+    return { origin, a, pinv: pseudoInverse(a) };
+}
+
+/**
+ * (AᵀA)⁻¹Aᵀ for the n ≤ 3 basis vectors of a lattice, as n rows of 3.
+ * Undefined when AᵀA is singular (degenerate window), in which case the
+ * per-point solve is used instead.
+ */
+function pseudoInverse(a: Vec3[]): number[][] | undefined {
+    const n = a.length;
+    if (n === 0) return undefined;
+    // AtA (n×n) augmented with Aᵀ (n×3); Gauss-Jordan yields (AᵀA)⁻¹Aᵀ.
+    const M: number[][] = [];
+    for (let i = 0; i < n; i++) {
+        const row: number[] = [];
+        for (let j = 0; j < n; j++) {
+            row.push(a[i][0] * a[j][0] + a[i][1] * a[j][1] + a[i][2] * a[j][2]);
+        }
+        row.push(a[i][0], a[i][1], a[i][2]);
+        M.push(row);
+    }
+    for (let col = 0; col < n; col++) {
+        let pivot = col;
+        for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[pivot][col])) pivot = r;
+        if (Math.abs(M[pivot][col]) < 1e-15) return undefined;
+        if (pivot !== col) { const t = M[pivot]; M[pivot] = M[col]; M[col] = t; }
+        const d = M[col][col];
+        for (let c = col; c < n + 3; c++) M[col][c] /= d;
+        for (let r = 0; r < n; r++) {
+            if (r === col) continue;
+            const f = M[r][col];
+            if (f === 0) continue;
+            for (let c = col; c < n + 3; c++) M[r][c] -= f * M[col][c];
+        }
+    }
+    return M.map((row) => row.slice(n, n + 3));
 }
 
 /** Solve a 3×3 linear system by Gaussian elimination; null when singular. */
@@ -332,6 +409,14 @@ function solve3(M: number[][], b: Vec3): Vec3 | null {
 function latticeFractions(basis: LatticeBasis, p: Vec3): number[] {
     const d: Vec3 = [p[0] - basis.origin[0], p[1] - basis.origin[1], p[2] - basis.origin[2]];
     const n = basis.a.length;
+    if (basis.pinv) {
+        const t = new Array<number>(n);
+        for (let i = 0; i < n; i++) {
+            const row = basis.pinv[i];
+            t[i] = row[0] * d[0] + row[1] * d[1] + row[2] * d[2];
+        }
+        return t;
+    }
     // Build and solve the small normal system Aᵀ A t = Aᵀ d (n ≤ 3).
     const AtA: number[][] = [];
     const Atd: number[] = [];
@@ -381,7 +466,7 @@ function elementWindowContains(
         q[1] -= basis.a[i][1] * k[i];
         q[2] -= basis.a[i][2] * k[i];
     }
-    const ctx: EvalCtx = { model, stack: new Set([cell.id]) };
+    const ctx: EvalCtx = { model, root: cell.id, stack: null };
     return cell.region ? regionContains(ctx, cell.region, q) : false;
 }
 
@@ -445,7 +530,7 @@ function findInUniverse(
     let local: Vec3 = hit.trcl ? toAux(hit.trcl, p) : p;
 
     if (hit.lat !== 0) {
-        const basis = latticeBasis(model, hit);
+        const basis = cachedLatticeBasis(model, hit);
         if (!basis) {
             // Un-analyzable lattice window: treat as the cell's own material.
             return hit;
@@ -455,10 +540,7 @@ function findInUniverse(
         // Rounding in a rhombic (hex) basis can land one element off near
         // corners; verify with the actual window and search the neighborhood.
         if (!elementWindowContains(model, hit, basis, k0, local)) {
-            const range = [0, 1, -1];
-            const deltas: number[][] = [];
-            for (const di of range) for (const dj of range) for (const dk of range) deltas.push([di, dj, dk]);
-            for (const delta of deltas) {
+            for (const delta of NEIGHBOR_DELTAS) {
                 const cand = k0.map((v, idx2) => v + (delta[idx2] ?? 0));
                 if (elementWindowContains(model, hit, basis, cand, local)) {
                     k0 = cand;

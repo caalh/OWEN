@@ -1,52 +1,30 @@
 import * as vscode from 'vscode';
-import {
-    buildDeck,
-    DEFAULT_SETTINGS,
-    type InputBuilderState,
-} from '../inputBuilder/deckBuilder';
-import { MATERIAL_LIBRARY, type MonteCarloCode } from '../inputBuilder/materials';
+import { checkDeck, summarizeChecks } from '../inputBuilder/deckChecks';
+import { buildDeckDocument, type DeckModel } from '../inputBuilder/deckModel';
+import { MATERIAL_LIBRARY } from '../inputBuilder/materials';
 import { searchPnnlMaterials, findPnnlMaterial, loadPnnlDataset } from '../inputBuilder/pnnlData';
-import { formatValidationSummary, validateSnippet } from '../inputBuilder/snippetValidator';
-import {
-    INPUT_BUILDER_TEMPLATES,
-    SAB_OPTIONS,
-    SURFACE_TEMPLATES,
-    cellWizardCard,
-    latticeWizardCard,
-    materialWizardCard,
-    settingsWizardCard,
-    sourceWizardCard,
-    surfaceWizardCard,
-    type CellWizardInput,
-    type LatticeWizardInput,
-    type MaterialWizardInput,
-    type SettingsWizardInput,
-    type SourceWizardInput,
-    type SurfaceWizardInput,
-} from '../inputBuilder/wizards';
+import { SAB_OPTIONS, SURFACE_TEMPLATES } from '../inputBuilder/wizards';
 import {
     isSingleMcnpMaterialBlock,
     nextMcnpMaterialNumber,
     remapMcnpMaterialCard,
 } from '../references/mcnpReferences';
-import {
-    genMCNP,
-    genOpenMC,
-    genSerpent,
-    genSCONE,
-    defaultPinTypes,
-    defaultStructuralIds,
-    type LatticeSpec,
-} from './latticeCodegen';
 import { inputBuilderWebviewHtml } from './inputBuilderWebview';
 
+/**
+ * Host side of the Input Builder.
+ *
+ * The webview owns the section model and the forms; this class owns code
+ * generation, the checks, and everything that touches the editor. On every edit
+ * the webview posts its model, and the host answers with the assembled deck,
+ * the per-line provenance the split view highlights with, and the check list.
+ */
 export class InputBuilderPanel {
     public static currentPanel: InputBuilderPanel | undefined;
     private static readonly viewType = 'owen.inputBuilder';
-    private static _pendingFocusTab: string | undefined;
+    private static _pendingFocus: string | undefined;
 
     private readonly _panel: vscode.WebviewPanel;
-    private readonly _extensionUri: vscode.Uri;
     private _disposables: vscode.Disposable[] = [];
     private _targetEditor: vscode.TextEditor | undefined;
 
@@ -54,14 +32,10 @@ export class InputBuilderPanel {
         const activeEditor = vscode.window.activeTextEditor;
         const column = activeEditor ? activeEditor.viewColumn : undefined;
 
-        if (options?.focusTab) {
-            InputBuilderPanel._pendingFocusTab = options.focusTab;
-        }
+        if (options?.focusTab) InputBuilderPanel._pendingFocus = options.focusTab;
 
         if (InputBuilderPanel.currentPanel) {
-            if (activeEditor) {
-                InputBuilderPanel.currentPanel._targetEditor = activeEditor;
-            }
+            if (activeEditor) InputBuilderPanel.currentPanel._targetEditor = activeEditor;
             InputBuilderPanel.currentPanel._panel.reveal(column);
             InputBuilderPanel.currentPanel._applyPendingFocus();
             return;
@@ -80,77 +54,109 @@ export class InputBuilderPanel {
     }
 
     private _applyPendingFocus() {
-        const tab = InputBuilderPanel._pendingFocusTab;
-        if (!tab) return;
-        this._panel.webview.postMessage({ command: 'focusTab', tab });
+        if (!InputBuilderPanel._pendingFocus) return;
+        this._panel.webview.postMessage({ command: 'focusSection', tab: InputBuilderPanel._pendingFocus });
     }
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+    private constructor(panel: vscode.WebviewPanel, _extensionUri: vscode.Uri) {
         this._panel = panel;
-        this._extensionUri = extensionUri;
-        this._panel.webview.html = this._getHtml();
+        this._panel.webview.html = inputBuilderWebviewHtml(this._injectedScript(), MATERIAL_LIBRARY.length);
 
         vscode.window.onDidChangeActiveTextEditor((editor) => {
             if (editor) this._targetEditor = editor;
         }, null, this._disposables);
 
         this._panel.webview.onDidReceiveMessage(async (msg) => {
-            if (msg.command === 'preview') {
-                const code = buildDeck(msg.state as InputBuilderState);
-                const issues = validateSnippet((msg.state as InputBuilderState).code, code);
-                this._panel.webview.postMessage({
-                    command: 'previewResult',
-                    code,
-                    validation: issues,
-                    validationSummary: formatValidationSummary(issues),
-                });
-            } else if (msg.command === 'wizardPreview') {
-                let code = this._buildWizardSnippet(msg.wizard, msg.state);
-                code = this._autoNumberMcnpMaterial(code);
-                const lang = String(msg.state?.code ?? 'mcnp') as MonteCarloCode;
-                const issues = validateSnippet(lang, code);
-                this._panel.webview.postMessage({
-                    command: 'wizardPreviewResult',
-                    code,
-                    validation: issues,
-                    validationSummary: formatValidationSummary(issues),
-                });
-            } else if (msg.command === 'latticePreview') {
-                const spec = msg.spec as LatticeSpec;
-                const lang = String(msg.code ?? 'mcnp') as MonteCarloCode;
-                const code = this._latticeCode(lang, spec);
-                const issues = validateSnippet(lang, code);
-                this._panel.webview.postMessage({
-                    command: 'wizardPreviewResult',
-                    code,
-                    validation: issues,
-                    validationSummary: formatValidationSummary(issues),
-                });
-            } else if (msg.command === 'insertCode') {
-                let code = msg.code || buildDeck(msg.state as InputBuilderState);
-                code = this._autoNumberMcnpMaterial(code);
-                await this._insertCode(code);
-            } else if (msg.command === 'newFile') {
-                const code = msg.code || buildDeck(msg.state as InputBuilderState);
-                await this._newFile(code, msg.codeLang);
-            } else if (msg.command === 'ready' || msg.command === 'focusAck') {
-                if (msg.command === 'focusAck') {
-                    InputBuilderPanel._pendingFocusTab = undefined;
+            switch (msg.command) {
+                case 'model':
+                    this._sendDocument(msg.model as DeckModel);
+                    break;
+                case 'insert':
+                    await this._insertCode(this._autoNumberMcnpMaterial(String(msg.text ?? '')));
+                    break;
+                case 'insertWithErrors': {
+                    const count = Number(msg.errors ?? 0);
+                    const pick = await vscode.window.showWarningMessage(
+                        `The deck has ${count} problem${count === 1 ? '' : 's'} that will stop the run.`,
+                        { modal: true },
+                        'Insert anyway',
+                    );
+                    if (pick === 'Insert anyway') {
+                        await this._insertCode(this._autoNumberMcnpMaterial(String(msg.text ?? '')));
+                    }
+                    break;
                 }
-                this._applyPendingFocus();
-            } else if (msg.command === 'pnnlSearch') {
-                const results = searchPnnlMaterials(String(msg.query ?? ''), 50);
-                const total = loadPnnlDataset()?.materials.length ?? 0;
-                this._panel.webview.postMessage({ command: 'pnnlResults', results, total });
-            } else if (msg.command === 'pnnlAdd') {
-                const mat = findPnnlMaterial(String(msg.id ?? ''));
-                if (mat) {
-                    this._panel.webview.postMessage({ command: 'pnnlMaterial', material: mat });
+                case 'newFile':
+                    await this._newFile(String(msg.text ?? ''), String(msg.codeLang ?? 'mcnp'));
+                    break;
+                case 'copy':
+                    await vscode.env.clipboard.writeText(String(msg.text ?? ''));
+                    vscode.window.setStatusBarMessage('OWEN: deck copied to the clipboard', 2500);
+                    break;
+                case 'pnnlSearch': {
+                    const results = searchPnnlMaterials(String(msg.query ?? ''), 50);
+                    const total = loadPnnlDataset()?.materials.length ?? 0;
+                    this._panel.webview.postMessage({
+                        command: 'pnnlResults', results, total, sectionId: msg.sectionId,
+                    });
+                    break;
                 }
+                case 'pnnlAdd': {
+                    const material = findPnnlMaterial(String(msg.id ?? ''));
+                    if (material) {
+                        this._panel.webview.postMessage({
+                            command: 'pnnlMaterial', material, sectionId: msg.sectionId,
+                        });
+                    }
+                    break;
+                }
+                case 'clientError': {
+                    const where = Number(msg.line ?? 0) > 0 ? ` (line ${msg.line})` : '';
+                    vscode.window.showErrorMessage(
+                        `OWEN Input Builder hit an error and may have stopped updating${where}: ${String(msg.message ?? '')}`,
+                    );
+                    break;
+                }
+                case 'ready':
+                    this._applyPendingFocus();
+                    break;
+                case 'focusAck':
+                    InputBuilderPanel._pendingFocus = undefined;
+                    break;
             }
         }, null, this._disposables);
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+    }
+
+    /** Assemble, check, and hand the whole result back for rendering. */
+    private _sendDocument(model: DeckModel) {
+        let doc;
+        let checks;
+        try {
+            doc = buildDeckDocument(model);
+            checks = checkDeck(model, doc);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this._panel.webview.postMessage({
+                command: 'document',
+                text: '', lines: [], owners: [], sections: [],
+                counts: { materials: 0, surfaces: 0, cells: 0, lattices: 0, tallies: 0 },
+                checks: [{ severity: 'error', origin: 'model', message: `Input Builder could not assemble the deck: ${message}` }],
+            });
+            return;
+        }
+        const summary = summarizeChecks(checks);
+        this._panel.webview.postMessage({
+            command: 'document',
+            text: doc.text,
+            lines: doc.lines,
+            owners: doc.owners,
+            sections: doc.sections,
+            counts: doc.counts,
+            checks,
+            summary,
+        });
     }
 
     private _editorTextForMaterialNumbering(): string {
@@ -177,10 +183,6 @@ export class InputBuilderPanel {
     }
 
     private async _newFile(code: string, codeLang: string) {
-        const extMap: Record<string, string> = {
-            mcnp: 'i', openmc: 'py', serpent: 'sss', scone: 'scone',
-        };
-        const ext = extMap[codeLang] || 'txt';
         const doc = await vscode.workspace.openTextDocument({
             content: code,
             language: codeLang === 'openmc' ? 'python' : codeLang,
@@ -203,52 +205,11 @@ export class InputBuilderPanel {
         }
     }
 
-    private _latticeCode(code: MonteCarloCode, spec: LatticeSpec): string {
-        switch (code) {
-            case 'mcnp': return genMCNP(spec) + '\n';
-            case 'openmc': return genOpenMC(spec) + '\n';
-            case 'serpent': return genSerpent(spec) + '\n';
-            case 'scone': return genSCONE(spec) + '\n';
-            default: return genMCNP(spec) + '\n';
-        }
-    }
-
-    private _buildWizardSnippet(wizard: string, state: Record<string, unknown>): string {
-        switch (wizard) {
-            case 'material':
-                return materialWizardCard(state as unknown as MaterialWizardInput) + '\n';
-            case 'surface':
-                return surfaceWizardCard(state as unknown as SurfaceWizardInput) + '\n';
-            case 'cell':
-                return cellWizardCard(state as unknown as CellWizardInput) + '\n';
-            case 'lattice':
-                return latticeWizardCard(state as unknown as LatticeWizardInput) + '\n';
-            case 'source':
-                return sourceWizardCard(state as unknown as SourceWizardInput) + '\n';
-            case 'settings':
-                return settingsWizardCard(state as unknown as SettingsWizardInput) + '\n';
-            default:
-                return `c unknown wizard: ${wizard}\n`;
-        }
-    }
-
     private _injectedScript(): string {
         return [
-            'const MATERIAL_LIBRARY = ' + JSON.stringify(MATERIAL_LIBRARY) + ';',
-            'const DEFAULT_SETTINGS = ' + JSON.stringify(DEFAULT_SETTINGS) + ';',
-            'const DEFAULT_PINS = ' + JSON.stringify(defaultPinTypes()) + ';',
-            'const DEFAULT_STRUCT = ' + JSON.stringify(defaultStructuralIds()) + ';',
-            'const genMCNP = ' + genMCNP.toString() + ';',
-            'const genOpenMC = ' + genOpenMC.toString() + ';',
-            'const genSerpent = ' + genSerpent.toString() + ';',
-            'const genSCONE = ' + genSCONE.toString() + ';',
-            'const INPUT_BUILDER_TEMPLATES = ' + JSON.stringify(INPUT_BUILDER_TEMPLATES) + ';',
-            'const SAB_OPTIONS = ' + JSON.stringify(SAB_OPTIONS) + ';',
-            'const SURFACE_TEMPLATES = ' + JSON.stringify(SURFACE_TEMPLATES) + ';',
+            `const MATERIAL_LIBRARY = ${JSON.stringify(MATERIAL_LIBRARY)};`,
+            `const SAB_OPTIONS = ${JSON.stringify(SAB_OPTIONS)};`,
+            `const SURFACE_TEMPLATES = ${JSON.stringify(SURFACE_TEMPLATES)};`,
         ].join('\n');
-    }
-
-    private _getHtml(): string {
-        return inputBuilderWebviewHtml(this._injectedScript(), MATERIAL_LIBRARY.length);
     }
 }

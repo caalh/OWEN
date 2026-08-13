@@ -2,6 +2,12 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import { extractCylinders, buildScene } from '../../preview/extractor';
+import {
+    bafflePlates,
+    defaultBaffleBand,
+    sconeCylinderRadii,
+    sconeShellRole,
+} from '../../preview/radialStructure';
 import { PREBUILT_MODELS } from '../paths';
 
 function distinctX(cyls: { x: number }[]): number {
@@ -1220,6 +1226,115 @@ geometry { universes {
             assert.strictEqual(blocks.length, 0, `expected no cell-sized baffle blocks, got ${blocks.length}`);
         });
     }
+
+    // --- Baffle plates must not pass through each other (Aug 2026) ---
+
+    function plateBox(p: { x: number; y: number; halfX?: number; halfY?: number; radius: number }) {
+        const hx = p.halfX ?? p.radius;
+        const hy = p.halfY ?? p.radius;
+        return { x0: p.x - hx, x1: p.x + hx, y0: p.y - hy, y1: p.y + hy };
+    }
+
+    /** Overlapping footprint pairs and total shared area among box plates. */
+    function plateOverlaps(plates: Array<{ x: number; y: number; halfX?: number; halfY?: number; radius: number }>) {
+        let pairs = 0;
+        let area = 0;
+        for (let i = 0; i < plates.length; i++) {
+            for (let j = i + 1; j < plates.length; j++) {
+                const a = plateBox(plates[i]);
+                const b = plateBox(plates[j]);
+                const ox = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+                const oy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+                if (ox > 1e-6 && oy > 1e-6) { pairs++; area += ox * oy; }
+            }
+        }
+        return { pairs, area };
+    }
+
+    test('bafflePlates: no neighborhood emits plates that intersect', () => {
+        const ctx = { height: 10, zCenter: 0 };
+        const hp = 10.75182;
+        let emitted = 0;
+        for (let mask = 0; mask < 256; mask++) {
+            const nb = {
+                east: !!(mask & 1), west: !!(mask & 2), north: !!(mask & 4), south: !!(mask & 8),
+                ne: !!(mask & 16), nw: !!(mask & 32), se: !!(mask & 64), sw: !!(mask & 128),
+            };
+            const plates = bafflePlates(`m${mask}`, 0, 0, hp, hp, nb, ctx);
+            emitted += plates.length;
+            const { pairs, area } = plateOverlaps(plates);
+            assert.strictEqual(pairs, 0,
+                `neighborhood ${JSON.stringify(nb)} emitted ${pairs} intersecting plate pair(s), ${area.toFixed(3)} cm² shared`);
+        }
+        assert.ok(emitted > 400, `expected plates across the 256 neighborhoods, got ${emitted}`);
+    });
+
+    test('bafflePlates: butt joints preserve the wall area of crossing runs', () => {
+        const ctx = { height: 10, zCenter: 0 };
+        const hp = 10.75182;
+        const [inner, outer] = defaultBaffleBand(hp);
+        const thick = outer - inner;
+        const nb = { east: true, west: false, north: true, south: false, ne: false, nw: false, se: false, sw: false };
+        const plates = bafflePlates('corner', 0, 0, hp, hp, nb, ctx);
+        const got = plates.reduce((sum, p) => sum + 4 * (p.halfX ?? p.radius) * (p.halfY ?? p.radius), 0);
+        // Union of a full-length east run and a full-width north run, minus the
+        // square where they cross: what the two overlapping boxes used to cover.
+        const union = thick * 2 * hp + thick * 2 * hp - thick * thick;
+        assert.ok(Math.abs(got - union) / union < 0.02,
+            `butt-jointed plates cover ${got.toFixed(2)} cm², crossing runs covered ${union.toFixed(2)} cm²`);
+    });
+
+    for (const [lang, file] of BEAVRS_DECKS) {
+        test(`BEAVRS ${lang}: baffle plates do not intersect each other`, () => {
+            const deckPath = path.join(PREBUILT_MODELS, file);
+            if (!fs.existsSync(deckPath)) return;
+            const deck = fs.readFileSync(deckPath, 'utf8');
+            const scene = buildScene(deck, lang, { detail: 'disc', axial: false });
+            const plates = scene.cylinders.filter((c) => c.component === 'baffle');
+            assert.ok(plates.length >= 50, `expected baffle plates, got ${plates.length}`);
+            const { pairs, area } = plateOverlaps(plates);
+            assert.strictEqual(pairs, 0, `${pairs} intersecting plate pair(s) sharing ${area.toFixed(2)} cm²`);
+        });
+    }
+
+    test('BEAVRS SCONE: barrel, shield pads, downcomer and RPV all render', () => {
+        const deckPath = path.join(PREBUILT_MODELS, 'beavrs_fullcore_scone.scone');
+        if (!fs.existsSync(deckPath)) return;
+        const deck = fs.readFileSync(deckPath, 'utf8');
+        const scene = buildScene(deck, 'scone', { detail: 'disc', axial: false });
+        const shells = scene.cylinders.filter((c) => c.shape === 'cylinder' && (c.innerRadius ?? 0) > 100);
+        const arcs = scene.cylinders.filter((c) => c.shape === 'arc');
+        assert.ok(shells.length >= 4,
+            `expected barrel + liner + RPV + downcomer shells, got ${shells.length}: ${shells.map((s) => s.label).join(', ')}`);
+        assert.strictEqual(arcs.length, 4, `expected 4 arc shield pads, got ${arcs.length}`);
+        assert.ok(shells.some((s) => /barrel/.test(s.label ?? '')), 'expected a core barrel shell');
+        assert.ok(shells.some((s) => /rpv/.test(s.label ?? '')), 'expected an RPV shell');
+    });
+
+    test('sconeCylinderRadii reads leaf surface blocks, not the surfaces wrapper', () => {
+        const text = [
+            'surfaces {',
+            '    outerRPV      { id 1; type zTruncCylinder; radius 241.3; origin (0.0 0.0 230.0); halfwidth 230.0; }',
+            '    innerRPV      { id 2; type zCylinder; radius 219.710; origin (0.0 0.0 0.0); }',
+            '    innerRPVLiner { id 3; type zCylinder; radius 219.150; origin (0.0 0.0 0.0); }',
+            '    outerBoundNS  { id 4; type zCylinder; radius 201.630; origin (0.0 0.0 0.0); }',
+            '}',
+        ].join('\n');
+        const radii = sconeCylinderRadii(text);
+        const names = radii.map((r) => r.name);
+        assert.ok(!names.includes('surfaces'), `wrapper block captured as a surface: ${names.join(', ')}`);
+        assert.deepStrictEqual(names, ['outerrpv', 'innerrpv', 'innerrpvliner', 'outerboundns']);
+        assert.ok(Math.abs(radii[0].r - 241.3) < 1e-9, 'outerRPV radius');
+    });
+
+    test('sconeShellRole classifies BEAVRS and generic containment names', () => {
+        assert.deepStrictEqual(sconeShellRole('innerCoreBarrel'), { role: 'barrel', side: 'inner' });
+        assert.deepStrictEqual(sconeShellRole('outerBoundNS'), { role: 'shield', side: 'outer' });
+        assert.deepStrictEqual(sconeShellRole('innerNeutronShield'), { role: 'shield', side: 'inner' });
+        assert.deepStrictEqual(sconeShellRole('innerRPVLiner'), { role: 'liner', side: 'inner' });
+        assert.deepStrictEqual(sconeShellRole('outerRPV'), { role: 'rpv', side: 'outer' });
+        assert.strictEqual(sconeShellRole('pinFuel'), null);
+    });
 
     test('BEAVRS MCNP: neutron-shield pads render as arc segments', () => {
         const deckPath = path.join(PREBUILT_MODELS, 'beavrs_fullcore_mcnp.i');

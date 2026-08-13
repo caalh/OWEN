@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.3.0",
+  "version": "1.4.1",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -423,6 +423,11 @@
           "group": "4_view@2"
         },
         {
+          "command": "owen.toggleMcnpLineLimit",
+          "group": "4_view@3",
+          "when": "editorLangId == mcnp"
+        },
+        {
           "command": "owen.openTutorial",
           "group": "5_help@1"
         },
@@ -536,6 +541,11 @@
         {
           "command": "owen.toggleInvisibleCharacters",
           "group": "5_appearance@2"
+        },
+        {
+          "command": "owen.toggleMcnpLineLimit",
+          "group": "5_appearance@3",
+          "when": "editorLangId == mcnp"
         }
       ],
       "commandPalette": [
@@ -843,6 +853,7 @@
     "package": "vsce package",
     "publish": "vsce publish",
     "export-nrdp": "node ./scripts/export-nrdp-snapshot.mjs",
+    "sync-nrdp-cards": "node ./scripts/sync-nrdp-cards.mjs",
     "export-tutorials": "node ./scripts/export-tutorial-links.mjs && node ./scripts/export-search-index.mjs"
   },
   "devDependencies": {

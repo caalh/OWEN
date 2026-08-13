@@ -47,6 +47,100 @@ function num(p: string[], i: number): number {
     return parseFloat(p[i]);
 }
 
+// ---------------------------------------------------------------------------
+// Vector / quadric helpers for the macrobodies
+//
+// The MCNP macrobodies are exactly representable in OpenMC — a spheroid and an
+// elliptical cylinder are quadrics, a TRC is openmc.model.ConicalFrustum, and
+// WED/ARB/BOX are intersections of planes. The geometry here mirrors what the
+// preview engine in src/preview/mcnpGeometry.ts computes for the same cards, so
+// a deck previews and converts to the same solid.
+// ---------------------------------------------------------------------------
+
+type V3 = [number, number, number];
+
+const vsub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vadd = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const vscale = (a: V3, s: number): V3 => [a[0] * s, a[1] * s, a[2] * s];
+const vdot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vlen = (a: V3): number => Math.hypot(a[0], a[1], a[2]);
+const vcross = (a: V3, b: V3): V3 => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+];
+function vunit(a: V3): V3 {
+    const l = vlen(a);
+    return l > 1e-12 ? vscale(a, 1 / l) : [0, 0, 1];
+}
+
+/** Symmetric 3×3 as [m11, m22, m33, m12, m13, m23]. */
+type Sym3 = [number, number, number, number, number, number];
+
+const symApply = (m: Sym3, v: V3): V3 => [
+    m[0] * v[0] + m[3] * v[1] + m[4] * v[2],
+    m[3] * v[0] + m[1] * v[1] + m[5] * v[2],
+    m[4] * v[0] + m[5] * v[1] + m[2] * v[2],
+];
+
+/** u uᵀ scaled, accumulated into a symmetric matrix. */
+function symOuter(u: V3, s: number): Sym3 {
+    return [u[0] * u[0] * s, u[1] * u[1] * s, u[2] * u[2] * s,
+        u[0] * u[1] * s, u[0] * u[2] * s, u[1] * u[2] * s];
+}
+
+const symAdd = (a: Sym3, b: Sym3): Sym3 =>
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3], a[4] + b[4], a[5] + b[5]];
+
+/**
+ * `openmc.Quadric` for (x−c)ᵀM(x−c) = 1, which is how every centred conic of
+ * revolution in the macrobody set is written. Inside is the negative sense in
+ * both codes, so the MCNP sense carries over unchanged.
+ */
+function quadricFromForm(id: number, m: Sym3, c: V3, bnd: string): string {
+    const mc = symApply(m, c);
+    const k = vdot(c, mc) - 1;
+    return `openmc.Quadric(surface_id=${id}, a=${fmt(m[0])}, b=${fmt(m[1])}, c=${fmt(m[2])}`
+        + `, d=${fmt(2 * m[3])}, e=${fmt(2 * m[5])}, f=${fmt(2 * m[4])}`
+        + `, g=${fmt(-2 * mc[0])}, h=${fmt(-2 * mc[1])}, j=${fmt(-2 * mc[2])}, k=${fmt(k)}${bnd})`;
+}
+
+interface FacePlane {
+    /** Unit normal. */
+    n: V3;
+    /** Offset: the plane is n·x = d. */
+    d: number;
+}
+
+/**
+ * A body bounded by planes (BOX, WED, ARB), emitted as one `openmc.Plane` per
+ * face with the region written as the intersection of the half-spaces that
+ * contain `interior`.
+ */
+function planeBody(
+    v: string,
+    id: number,
+    faces: FacePlane[],
+    interior: V3,
+    bnd: string,
+    comment: string,
+): SurfaceEmit {
+    const names = faces.map((_, i) => (i === 0 ? v : `${v}_f${i}`));
+    const terms = faces.map((f, i) => (vdot(f.n, interior) < f.d ? `-${names[i]}` : `+${names[i]}`));
+    const decl = (i: number): string =>
+        `openmc.Plane(${i === 0 ? `surface_id=${id}, ` : ''}a=${fmt(faces[i].n[0])}, b=${fmt(faces[i].n[1])}`
+        + `, c=${fmt(faces[i].n[2])}, d=${fmt(faces[i].d)}${bnd})`;
+    const inside = `(${terms.join(' & ')})`;
+    return {
+        code: decl(0),
+        composite: false,
+        extra: faces.slice(1).map((_, i) => `${names[i + 1]} = ${decl(i + 1)}`),
+        insideExpr: inside,
+        outsideExpr: `~${inside}`,
+        comment,
+    };
+}
+
 function surfaceToOpenmc(
     s: McnpSurface,
     boundaryOverride: string | null,
@@ -187,13 +281,28 @@ function surfaceToOpenmc(
             };
         }
         case 'box': {
-            if (p.length < 12) return fail('BOX needs 12 parameters');
+            // 9 entries is legal and means the box is infinite along a1 × a2.
+            if (p.length !== 9 && p.length !== 12) return fail('BOX needs 9 or 12 parameters');
             const n = p.map(parseFloat);
             const [px0, py0, pz0] = n.slice(0, 3);
-            const a = n.slice(3, 6), b = n.slice(6, 9), c = n.slice(9, 12);
+            const a = n.slice(3, 6), b = n.slice(6, 9), c = p.length === 12 ? n.slice(9, 12) : null;
             const axisAligned = (vec: number[]) => vec.filter((x) => x !== 0).length === 1;
-            if (!(axisAligned(a) && axisAligned(b) && axisAligned(c))) {
-                return fail('is not axis-aligned — convert to intersecting openmc.Plane surfaces manually');
+            if (!c || !(axisAligned(a) && axisAligned(b) && axisAligned(c))) {
+                // Oblique or semi-infinite: still exact, just as bounding planes.
+                const base: V3 = [px0, py0, pz0];
+                const vecs: V3[] = [a as V3, b as V3, ...(c ? [c as V3] : [])];
+                const faces: FacePlane[] = [];
+                for (const vec of vecs) {
+                    const un = vunit(vec);
+                    faces.push({ n: un, d: vdot(un, base) });
+                    faces.push({ n: un, d: vdot(un, vadd(base, vec)) });
+                }
+                let mid: V3 = base;
+                for (const vec of vecs) mid = vadd(mid, vscale(vec, 0.5));
+                return planeBody(
+                    v, s.id, faces, mid, bnd,
+                    c ? 'oblique BOX as 6 bounding planes' : 'BOX with no a3 — infinite along a1 × a2',
+                );
             }
             let xmin = px0, xmax = px0, ymin = py0, ymax = py0, zmin = pz0, zmax = pz0;
             for (const vec of [a, b, c]) {
@@ -236,6 +345,194 @@ function surfaceToOpenmc(
                 comment: `hexagonal prism, apothem ${fmt(apothem)}, z ${fmt(zmin)}..${fmt(zmax)}`,
             };
         }
+        case 'ell': {
+            if (p.length !== 7) return fail('ELL needs 7 parameters');
+            const n = p.map(parseFloat);
+            const r = n[6];
+            let center: V3;
+            let axis: V3;
+            let semiMajor: number;
+            let semiMinor: number;
+            if (r > 0) {
+                // v1, v2 are the foci and r is the semi-major axis.
+                const f1: V3 = [n[0], n[1], n[2]];
+                const f2: V3 = [n[3], n[4], n[5]];
+                const half = vlen(vsub(f2, f1)) / 2;
+                if (r <= half) return fail('semi-major axis is not longer than the focal half-distance');
+                center = vscale(vadd(f1, f2), 0.5);
+                axis = half > 1e-12 ? vunit(vsub(f2, f1)) : [0, 0, 1];
+                semiMajor = r;
+                semiMinor = Math.sqrt(r * r - half * half);
+            } else {
+                // r < 0: v1 is the centre, v2 the major-axis vector, |r| the minor radius.
+                center = [n[0], n[1], n[2]];
+                const major: V3 = [n[3], n[4], n[5]];
+                semiMajor = vlen(major);
+                if (semiMajor < 1e-12) return fail('major-axis vector has zero length');
+                axis = vunit(major);
+                semiMinor = Math.abs(r);
+            }
+            if (semiMinor < 1e-12) return fail('minor radius is zero');
+            const m = symAdd(
+                symOuter(axis, 1 / (semiMajor * semiMajor) - 1 / (semiMinor * semiMinor)),
+                [1 / (semiMinor * semiMinor), 1 / (semiMinor * semiMinor), 1 / (semiMinor * semiMinor), 0, 0, 0],
+            );
+            return {
+                code: quadricFromForm(s.id, m, center, bnd),
+                composite: false, extra: [],
+                comment: `ELL spheroid, semi-axes ${fmt(semiMajor)} / ${fmt(semiMinor)}`,
+            };
+        }
+        case 'rec': {
+            if (p.length !== 10 && p.length !== 12) return fail('REC needs 10 or 12 parameters');
+            const n = p.map(parseFloat);
+            const base: V3 = [n[0], n[1], n[2]];
+            const h: V3 = [n[3], n[4], n[5]];
+            const v1: V3 = [n[6], n[7], n[8]];
+            const hu = vunit(h);
+            const r1 = vlen(v1);
+            let e2: V3;
+            let r2: number;
+            if (p.length === 12) {
+                const v2: V3 = [n[9], n[10], n[11]];
+                r2 = vlen(v2);
+                e2 = vunit(v2);
+            } else {
+                r2 = n[9];
+                e2 = vunit(vcross(hu, vunit(v1)));
+            }
+            if (r1 < 1e-12 || r2 < 1e-12) return fail('has a zero-length semi-axis');
+            if (vlen(h) < 1e-12) return fail('has a zero-length height vector');
+            const m = symAdd(symOuter(vunit(v1), 1 / (r1 * r1)), symOuter(e2, 1 / (r2 * r2)));
+            const top = vadd(base, h);
+            const inside = `(-${v} & +${v}_lo & -${v}_hi)`;
+            return {
+                code: quadricFromForm(s.id, m, base, bnd),
+                composite: false,
+                extra: [
+                    `${v}_lo = openmc.Plane(a=${fmt(hu[0])}, b=${fmt(hu[1])}, c=${fmt(hu[2])}, d=${fmt(vdot(hu, base))}${bnd})`,
+                    `${v}_hi = openmc.Plane(a=${fmt(hu[0])}, b=${fmt(hu[1])}, c=${fmt(hu[2])}, d=${fmt(vdot(hu, top))}${bnd})`,
+                ],
+                insideExpr: inside,
+                outsideExpr: `~${inside}`,
+                comment: `REC elliptical cylinder, semi-axes ${fmt(r1)} / ${fmt(r2)}`,
+            };
+        }
+        case 'trc': {
+            if (p.length !== 8) return fail('TRC needs 8 parameters');
+            const n = p.map(parseFloat);
+            if (vlen([n[3], n[4], n[5]]) < 1e-12) return fail('has a zero-length height vector');
+            return {
+                code: `openmc.model.ConicalFrustum((${fmt(n[0])}, ${fmt(n[1])}, ${fmt(n[2])}), `
+                    + `(${fmt(n[3])}, ${fmt(n[4])}, ${fmt(n[5])}), ${fmt(n[6])}, ${fmt(n[7])}${bnd})`,
+                composite: true, extra: [],
+                comment: 'TRC — needs OpenMC 0.15.0 or newer for ConicalFrustum',
+            };
+        }
+        case 'wed': {
+            if (p.length !== 12) return fail('WED needs 12 parameters');
+            const n = p.map(parseFloat);
+            const base: V3 = [n[0], n[1], n[2]];
+            const v1: V3 = [n[3], n[4], n[5]];
+            const v2: V3 = [n[6], n[7], n[8]];
+            const v3: V3 = [n[9], n[10], n[11]];
+            const p1 = vadd(base, v1);
+            const p2 = vadd(base, v2);
+            const p3 = vadd(base, v3);
+            // Centroid of the six vertices: the triangle's centroid, half way up v3.
+            const interior = vadd(base, vadd(vscale(vadd(v1, v2), 1 / 3), vscale(v3, 0.5)));
+            const slant = vunit(vcross(vsub(p2, p1), v3));
+            const n2 = vunit(vcross(v2, v3));
+            const n3 = vunit(vcross(v1, v3));
+            const cap = vunit(v3);
+            if (vlen(vcross(v1, v2)) < 1e-12) return fail('has collinear base vectors');
+            return planeBody(v, s.id, [
+                { n: slant, d: vdot(slant, p1) },
+                { n: n2, d: vdot(n2, base) },
+                { n: n3, d: vdot(n3, base) },
+                { n: cap, d: vdot(cap, p3) },
+                { n: cap, d: vdot(cap, base) },
+            ], interior, bnd, 'WED wedge as 5 bounding planes');
+        }
+        case 'arb': {
+            if (p.length !== 30) return fail('ARB needs exactly 30 parameters');
+            const n = p.map(parseFloat);
+            const corners: V3[] = [];
+            for (let i = 0; i < 8; i++) corners.push([n[i * 3], n[i * 3 + 1], n[i * 3 + 2]]);
+            const sides = n.slice(24, 30);
+            const digitsOf = (x: number): number[] =>
+                String(Math.abs(Math.trunc(x))).split('').map((d) => parseInt(d, 10)).filter((d) => d >= 1 && d <= 8);
+            const used = new Set<number>();
+            for (const face of sides) for (const d of digitsOf(face)) used.add(d);
+            if (used.size === 0) return fail('has no face descriptors');
+            let interior: V3 = [0, 0, 0];
+            for (const c of used) interior = vadd(interior, corners[c - 1]);
+            interior = vscale(interior, 1 / used.size);
+            const faces: FacePlane[] = [];
+            for (const face of sides) {
+                const idx = digitsOf(face);
+                if (idx.length < 3) continue; // a zero descriptor means the face is absent
+                const [a1, b1, c1] = [corners[idx[0] - 1], corners[idx[1] - 1], corners[idx[2] - 1]];
+                const nrm = vcross(vsub(b1, a1), vsub(c1, a1));
+                if (vlen(nrm) < 1e-12) continue;
+                const un = vunit(nrm);
+                faces.push({ n: un, d: vdot(un, a1) });
+            }
+            if (faces.length < 4) return fail('has fewer than four usable faces');
+            return planeBody(v, s.id, faces, interior, bnd, `ARB polyhedron, ${faces.length} faces`);
+        }
+        case 'x': case 'y': case 'z': {
+            const n = p.map(parseFloat);
+            const pairs: [number, number][] = [];
+            for (let i = 0; i + 1 < n.length; i += 2) pairs.push([n[i], n[i + 1]]);
+            if (pairs.length < 1 || pairs.length > 3) return fail('needs 1, 2 or 3 coordinate pairs');
+            const A = s.type.toUpperCase() as 'X' | 'Y' | 'Z';
+            const at = (val: number): string =>
+                A === 'X' ? `x0=${fmt(val)}` : A === 'Y' ? `y0=${fmt(val)}` : `z0=${fmt(val)}`;
+            if (pairs.length === 1) {
+                return {
+                    code: `openmc.${A}Plane(surface_id=${s.id}, ${at(pairs[0][0])}${bnd})`,
+                    composite: false, extra: [], comment: `${A} surface through one point`,
+                };
+            }
+            if (pairs.length === 2) {
+                const [s1, r1] = pairs[0];
+                const [s2, r2] = pairs[1];
+                if (Math.abs(s2 - s1) < 1e-12) return fail('has two points at the same axial coordinate');
+                const slope = (r2 - r1) / (s2 - s1);
+                if (Math.abs(slope) < 1e-12) {
+                    return {
+                        code: `openmc.${A}Cylinder(surface_id=${s.id}, r=${fmt(Math.abs(r1))}${bnd})`,
+                        composite: false, extra: [], comment: `${A} surface — constant radius`,
+                    };
+                }
+                const apex = s1 - r1 / slope;
+                const up = s1 - apex >= 0;
+                return {
+                    code: `openmc.model.${A}ConeOneSided(${at(apex)}, r2=${fmt(slope * slope)}, up=${up ? 'True' : 'False'}${bnd})`,
+                    composite: true, extra: [],
+                    comment: `${A} surface — cone, apex at ${fmt(apex)}`,
+                };
+            }
+            // Three pairs: fit r² = q0 + q1·s + q2·s², which is the SQ form MCNP reports.
+            const [[s1, r1], [s2, r2], [s3, r3]] = pairs;
+            const det = (s2 - s1) * (s3 - s1) * (s3 - s2);
+            if (Math.abs(det) < 1e-12) return fail('has a degenerate point set');
+            const y1 = r1 * r1, y2 = r2 * r2, y3 = r3 * r3;
+            const q2 = ((y3 - y1) * (s2 - s1) - (y2 - y1) * (s3 - s1)) / det;
+            const q1 = ((y2 - y1) - q2 * (s2 * s2 - s1 * s1)) / (s2 - s1);
+            const q0 = y1 - q1 * s1 - q2 * s1 * s1;
+            const co = { a: 1, b: 1, c: 1, g: 0, h: 0, j: 0 };
+            if (A === 'X') { co.a = -q2; co.g = -q1; }
+            else if (A === 'Y') { co.b = -q2; co.h = -q1; }
+            else { co.c = -q2; co.j = -q1; }
+            return {
+                code: `openmc.Quadric(surface_id=${s.id}, a=${fmt(co.a)}, b=${fmt(co.b)}, c=${fmt(co.c)}`
+                    + `, d=0, e=0, f=0, g=${fmt(co.g)}, h=${fmt(co.h)}, j=${fmt(co.j)}, k=${fmt(-q0)}${bnd})`,
+                composite: false, extra: [],
+                comment: `${A} surface — conic of revolution through three points`,
+            };
+        }
         default:
             return fail('is not a supported surface type');
     }
@@ -267,6 +564,15 @@ function emitRegion(
             if (!expr) {
                 issues.push({ sourceLine: ctx.line, message: `Cell ${ctx.cellId} references undefined or unconvertible surface ${node.surface}` });
                 return 'None';
+            }
+            if (node.facet) {
+                // The whole body is not the same region as one of its facets, so
+                // say it rather than emit a silently different cell.
+                issues.push({
+                    sourceLine: ctx.line,
+                    message: `Cell ${ctx.cellId} uses macrobody facet ${node.surface}.${node.facet}; `
+                        + 'the converter emitted the whole body — split the facet out into its own surface',
+                });
             }
             return expr;
         }

@@ -9,7 +9,8 @@
 // ---------------------------------------------------------------------------
 
 export type RegionNode =
-    | { kind: 'half'; surface: number; sense: 1 | -1 }
+    /** `facet` is the macrobody facet digit from `10.2`, or 0 for a plain surface. */
+    | { kind: 'half'; surface: number; sense: 1 | -1; facet?: number }
     | { kind: 'and'; children: RegionNode[] }
     | { kind: 'or'; children: RegionNode[] }
     | { kind: 'cellcomp'; cell: number }
@@ -75,9 +76,14 @@ export function parseRegion(raw: string): RegionNode | null {
             if (!Number.isFinite(cell)) throw new Error(`bad complement token '${t}' in region '${raw}'`);
             return { kind: 'cellcomp', cell };
         }
-        const num = parseFloat(t);
-        if (!Number.isFinite(num) || num === 0) throw new Error(`bad surface token '${t}' in region '${raw}'`);
-        return { kind: 'half', surface: Math.abs(Math.trunc(num)), sense: num < 0 ? -1 : 1 };
+        // `-10.2` is facet 2 of macrobody 10, not surface 10 — keeping the digit
+        // lets the emitter say so instead of quietly using the whole body.
+        const fm = /^([-+]?)(\d+)(?:\.(\d+))?$/.exec(t);
+        if (!fm) throw new Error(`bad surface token '${t}' in region '${raw}'`);
+        const surface = parseInt(fm[2], 10);
+        if (!Number.isFinite(surface) || surface === 0) throw new Error(`bad surface token '${t}' in region '${raw}'`);
+        const facet = fm[3] ? parseInt(fm[3], 10) : 0;
+        return { kind: 'half', surface, sense: fm[1] === '-' ? -1 : 1, ...(facet ? { facet } : {}) };
     }
 
     const ast = parseUnion();

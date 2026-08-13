@@ -6,7 +6,12 @@ import { distance3, deltas, angleDeg, diameter, fmtLen } from './measure';
 import { McnpGeometryModel } from './mcnpGeometry';
 import { parseDeckToModel, sliceSupportNote } from './engineDispatch';
 import { worldBounds } from './mcnpEvaluate';
-import { axisPlane, defaultWindow, identifyAt, sliceModel, sliceToRgba, SliceAxis, SliceRequest } from './slice';
+import {
+    axisPlane, beginSlice, defaultWindow, hexToRgb, identifyAt, sliceRowsToRgba,
+    SliceAxis, SliceJob, SliceRequest,
+} from './slice';
+import { mcnpMaterialLookup } from './codes/mcnp';
+import { componentColor, materialColor } from './palette';
 
 /**
  * Measurement math (`measure.ts`) is pure + unit-tested. We inject its source
@@ -47,18 +52,106 @@ function sliceModelFor(text: string, language: string): McnpGeometryModel | null
     } catch {
         model = null;
     }
+    // A render still streaming rows belongs to the previous model.
+    cancelSliceJob();
     sliceCache = { text, language, model };
     return model;
 }
 
-function sliceRequestFor(model: McnpGeometryModel, axis: SliceAxis, offset: number, res: number, colorBy: 'cell' | 'material'): SliceRequest {
-    const plane = axisPlane(axis, offset);
-    const win = defaultWindow(model, plane);
-    return { plane, halfU: win.halfU, halfV: win.halfV, width: res, height: res, colorBy };
+/** View state the webview owns: which plane, how far in, and how it is sampled. */
+interface SliceViewMsg {
+    axis: SliceAxis;
+    offset: number;
+    res: number;
+    colorBy: 'cell' | 'material';
+    /** Fraction of the fitted window shown (1 = fit, 0.1 = 10× zoom). */
+    zoom?: number;
+    /** Window center in plane coordinates (cm). */
+    centerU?: number;
+    centerV?: number;
+    samples?: number;
+    edges?: boolean;
 }
 
-/** Classify one slice on the host and post the colored image to the webview. */
-function handleSliceRequest(msg: { axis: SliceAxis; offset: number; res: number; colorBy: 'cell' | 'material' }): void {
+const SLICE_MIN_RES = 64;
+const SLICE_MAX_RES = 1536;
+/**
+ * Ceiling on total point-membership evaluations for one slice. Supersampling
+ * multiplies res² by samples², so 1536² at 3× would be 21 M findCell calls on
+ * the extension host; the factor is reduced instead of freezing the editor.
+ */
+const SLICE_MAX_SAMPLES_TOTAL = 4_500_000;
+
+function clampRes(res: number): number {
+    return Math.max(SLICE_MIN_RES, Math.min(SLICE_MAX_RES, Math.floor(res) || 384));
+}
+
+/** Highest supersample factor that keeps the render inside the sample budget. */
+function budgetedSamples(res: number, requested: number): number {
+    let s = Math.max(1, Math.min(3, Math.floor(requested) || 1));
+    while (s > 1 && res * res * s * s > SLICE_MAX_SAMPLES_TOTAL) s--;
+    return s;
+}
+
+/** Material names/colors for the legend; empty for languages without a lookup. */
+function sliceMaterialNames(): Map<number, { name: string; component: string }> {
+    if (lastLanguage !== 'mcnp') return new Map();
+    try {
+        return mcnpMaterialLookup(lastText);
+    } catch {
+        return new Map();
+    }
+}
+
+function sliceRequestFor(model: McnpGeometryModel, msg: SliceViewMsg): SliceRequest {
+    const plane = axisPlane(msg.axis, msg.offset);
+    const fit = defaultWindow(model, plane);
+    const zoom = Math.max(0.002, Math.min(1, msg.zoom ?? 1));
+    const res = clampRes(msg.res);
+    const mats = msg.colorBy === 'material' ? sliceMaterialNames() : null;
+    return {
+        plane,
+        halfU: fit.halfU * zoom,
+        halfV: fit.halfV * zoom,
+        centerU: Number.isFinite(msg.centerU as number) ? (msg.centerU as number) : fit.centerU,
+        centerV: Number.isFinite(msg.centerV as number) ? (msg.centerV as number) : fit.centerV,
+        width: res,
+        height: res,
+        colorBy: msg.colorBy,
+        samples: budgetedSamples(res, msg.samples ?? 1),
+        labelFor: (key) => {
+            if (msg.colorBy === 'cell') return `cell ${key}`;
+            if (key === 0) return 'void';
+            return mats?.get(key)?.name ?? `m${key}`;
+        },
+    };
+}
+
+/**
+ * The slice render currently in flight. Classification of a full core is
+ * seconds of arithmetic and the extension host is single-threaded, so a job is
+ * advanced in short bands between macrotasks: the editor stays responsive, the
+ * image fills in progressively, and a newer request cancels the old one
+ * instead of queueing behind it.
+ */
+let sliceJob: { id: number; job: SliceJob; cancelled: boolean } | null = null;
+let sliceJobSeq = 0;
+
+/**
+ * Milliseconds of classification per band. The check happens between steps, so
+ * a band overruns by at most one step's cost — hence the small step size
+ * below: on a full core a single row can cost several milliseconds.
+ */
+const SLICE_BAND_BUDGET_MS = 30;
+const SLICE_ROWS_PER_STEP = 2;
+
+function cancelSliceJob(): void {
+    if (sliceJob) sliceJob.cancelled = true;
+    sliceJob = null;
+}
+
+/** Classify one slice on the host and stream the colored image to the webview. */
+function handleSliceRequest(msg: SliceViewMsg): void {
     if (!currentPanel) return;
     const model = sliceModelFor(lastText, lastLanguage);
     if (!model || model.cells.size === 0) {
@@ -68,36 +161,103 @@ function handleSliceRequest(msg: { axis: SliceAxis; offset: number; res: number;
         });
         return;
     }
-    const res = Math.max(64, Math.min(768, Math.floor(msg.res) || 384));
-    const req = sliceRequestFor(model, msg.axis, msg.offset, res, msg.colorBy);
-    const result = sliceModel(model, req);
-    const rgba = sliceToRgba(result);
+    cancelSliceJob();
+
+    const req = sliceRequestFor(model, msg);
+    const job = beginSlice(model, req);
+    const id = ++sliceJobSeq;
+    const entry = { id, job, cancelled: false };
+    sliceJob = entry;
+
     const b = worldBounds(model);
     const perp = msg.axis === 'xy' ? 2 : msg.axis === 'xz' ? 1 : 0;
+    const fit = defaultWindow(model, axisPlane(msg.axis, msg.offset));
+    // Color by the same palette the 3D view uses, so a fuel pin is gold in
+    // both places; unknown materials keep the hash palette.
+    const mats = msg.colorBy === 'material' ? sliceMaterialNames() : null;
+    const colorFor = (key: number): [number, number, number] | undefined => {
+        const info = mats?.get(key);
+        if (!info) return undefined;
+        return hexToRgb(materialColor(info.name)) ?? hexToRgb(componentColor(info.component)) ?? undefined;
+    };
+
     currentPanel.webview.postMessage({
-        type: 'sliceResult',
+        type: 'sliceBegin',
+        id,
         axis: msg.axis,
         offset: msg.offset,
-        width: result.width,
-        height: result.height,
-        rgbaB64: Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength).toString('base64'),
-        legend: result.legend,
-        lostCount: result.lostCount,
-        overlapCount: result.overlapCount,
+        width: job.result.width,
+        height: job.result.height,
         offsetLo: b.min[perp],
         offsetHi: b.max[perp],
-        window: result.window,
+        window: job.result.window,
+        samples: job.result.samples,
+        cmPerPixel: job.result.cmPerPixel,
+        centerU: req.centerU,
+        centerV: req.centerV,
+        fitHalfU: fit.halfU,
+        fitHalfV: fit.halfV,
+        fitCenterU: fit.centerU,
+        fitCenterV: fit.centerV,
     });
+
+    const pump = (): void => {
+        if (entry.cancelled || !currentPanel) return;
+        const started = Date.now();
+        const y0 = job.rowsDone;
+        // Rows cost wildly different amounts (void vs deep in a lattice), so
+        // measure instead of assuming a fixed band height.
+        do {
+            job.step(SLICE_ROWS_PER_STEP);
+        } while (!job.done && Date.now() - started < SLICE_BAND_BUDGET_MS);
+        const y1 = job.rowsDone;
+
+        if (y1 > y0) {
+            const colors = job.result.legend.map((e) => colorFor(e.key));
+            const band = sliceRowsToRgba(job.result, y0, y1, {
+                colors: colors as [number, number, number][],
+                edges: msg.edges !== false,
+            });
+            currentPanel.webview.postMessage({
+                type: 'sliceBand',
+                id,
+                y0,
+                y1,
+                rgbaB64: Buffer.from(band.buffer, band.byteOffset, band.byteLength).toString('base64'),
+                progress: job.rowsDone / job.result.height,
+            });
+        }
+
+        if (job.done) {
+            const colors = job.result.legend.map((e) => colorFor(e.key));
+            currentPanel.webview.postMessage({
+                type: 'sliceDone',
+                id,
+                legend: job.result.legend,
+                colors,
+                lostCount: job.result.lostCount,
+                overlapCount: job.result.overlapCount,
+            });
+            if (sliceJob === entry) sliceJob = null;
+            return;
+        }
+        setTimeout(pump, 0);
+    };
+    setTimeout(pump, 0);
 }
 
-function handleSliceIdentify(msg: { axis: SliceAxis; offset: number; res: number; colorBy: 'cell' | 'material'; px: number; py: number }): void {
+function handleSliceIdentify(msg: SliceViewMsg & { px: number; py: number }): void {
     if (!currentPanel) return;
     const model = sliceModelFor(lastText, lastLanguage);
     if (!model) return;
-    const res = Math.max(64, Math.min(768, Math.floor(msg.res) || 384));
-    const req = sliceRequestFor(model, msg.axis, msg.offset, res, msg.colorBy);
+    const req = sliceRequestFor(model, msg);
     const who = identifyAt(model, req, msg.px, msg.py);
-    currentPanel.webview.postMessage({ type: 'sliceIdentifyResult', ...who });
+    const mats = sliceMaterialNames();
+    currentPanel.webview.postMessage({
+        type: 'sliceIdentifyResult',
+        ...who,
+        materialName: who.material !== null ? mats.get(who.material)?.name : undefined,
+    });
 }
 
 async function handleSliceSavePng(msg: { dataUrl: string; axis: string; offset: number }): Promise<void> {
@@ -175,7 +335,11 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
                 vscode.ViewColumn.Beside,
                 { enableScripts: true, retainContextWhenHidden: true },
             );
-            currentPanel.onDidDispose(() => { currentPanel = undefined; webviewReady = false; }, null, context.subscriptions);
+            currentPanel.onDidDispose(() => {
+                cancelSliceJob();
+                currentPanel = undefined;
+                webviewReady = false;
+            }, null, context.subscriptions);
             currentPanel.webview.onDidReceiveMessage((msg) => {
                 if (!msg) return;
                 if (msg.type === 'ready') {
@@ -215,6 +379,11 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
     });
 }
 
+/** Exported for the test that parses the injected script (see webviewHtml.test.ts). */
+export function buildPreviewHtml(webview: vscode.Webview): string {
+    return buildHtml(webview);
+}
+
 function buildHtml(webview: vscode.Webview): string {
     const cspSource = webview.cspSource;
     const nonce = makeNonce();
@@ -239,7 +408,9 @@ function buildHtml(webview: vscode.Webview): string {
   #panel header { padding: 10px 12px 6px; border-bottom: 1px solid #1f2940; }
   #panel h1 { font-size: 13px; margin: 0 0 2px; letter-spacing: 0.3px; }
   #panel .sub { font-size: 11px; opacity: 0.6; }
-  #scroll { overflow-y: auto; padding: 8px 12px 16px; flex: 1; }
+  /* min-height:0 is what actually lets this shrink inside the flex column; without
+     it a tall warning block pushes the controls out of reach and nothing scrolls. */
+  #scroll { overflow-y: auto; padding: 8px 12px 16px; flex: 1 1 auto; min-height: 0; }
   .section { margin-top: 12px; }
   .section > .title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; opacity: 0.6; margin-bottom: 6px; display: flex; justify-content: space-between; cursor: pointer; }
   .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; cursor: pointer; user-select: none; }
@@ -255,9 +426,15 @@ function buildHtml(webview: vscode.Webview): string {
   .ctrl { font-size: 11px; margin-top: 8px; }
   .ctrl label { display: flex; justify-content: space-between; opacity: 0.8; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
-  #warnings { padding: 8px 12px; font-size: 11px; border-bottom: 1px solid #1f2940; }
+  #warnings {
+    padding: 8px 12px; font-size: 11px; border-bottom: 1px solid #1f2940;
+    flex: 0 1 auto; max-height: 34%; overflow-y: auto;
+  }
   .warn { color: #f38ba8; margin-bottom: 4px; }
   .note { color: #a6adc8; opacity: 0.8; margin-bottom: 3px; }
+  .warn .wcells { color: #a6adc8; opacity: 0.75; margin: 2px 0 0 12px; word-break: break-all; }
+  .warn .wmore { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
+  .warn .whelp { display: block; color: #a6adc8; opacity: 0.85; margin: 2px 0 0 12px; }
   #toggle { position: absolute; top: 8px; left: 8px; z-index: 30; }
   #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 40px; text-align: center; z-index: 5; }
   #empty .big { font-size: 15px; color: #f38ba8; max-width: 480px; }
@@ -296,7 +473,9 @@ function buildHtml(webview: vscode.Webview): string {
   /* Exact 2D slice view (plan Stage 3). */
   #sliceWrap { position: absolute; inset: 0; z-index: 8; display: none; align-items: center; justify-content: center; background: #0b1018; }
   #sliceWrap.active { display: flex; }
-  #sliceCanvas { image-rendering: pixelated; max-width: 92%; max-height: 92%; border: 1px solid #2b3a5c; cursor: crosshair; }
+  #sliceCanvas { image-rendering: pixelated; max-width: 96%; max-height: 96%; border: 1px solid #2b3a5c; cursor: crosshair; }
+  #sliceCanvas.panning { cursor: grabbing; }
+  #sliceHud { position: absolute; bottom: 10px; left: 12px; z-index: 15; font-size: 11px; opacity: 0.75; background: var(--panel-bg); border: 1px solid #2b3a5c; border-radius: 5px; padding: 3px 8px; }
   #sliceStatus { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); font-size: 11px; background: var(--panel-bg); border: 1px solid #2b3a5c; border-radius: 5px; padding: 3px 10px; }
   #slicePick { position: absolute; bottom: 10px; right: 12px; z-index: 15; max-width: 300px; background: var(--panel-bg); border: 1px solid #2b3a5c; border-radius: 6px; padding: 8px 10px; font-size: 11px; line-height: 1.5; display: none; }
   #sliceLegend { margin-top: 6px; max-height: 160px; overflow-y: auto; }
@@ -309,7 +488,7 @@ function buildHtml(webview: vscode.Webview): string {
 <body>
   <div id="stage"></div>
   <div id="labels"></div>
-  <div id="sliceWrap"><canvas id="sliceCanvas"></canvas><div id="sliceStatus"></div></div>
+  <div id="sliceWrap"><canvas id="sliceCanvas"></canvas><div id="sliceStatus"></div><div id="sliceHud">scroll: zoom at cursor • drag: pan • click: identify</div></div>
   <div id="slicePick"></div>
   <button id="toggle" title="Show/hide panel">☰ Layers</button>
   <div id="hud">drag: orbit • scroll: zoom • right-drag: pan • hover: inspect</div>
@@ -343,11 +522,28 @@ function buildHtml(webview: vscode.Webview): string {
           <input type="range" id="sliceOffset" min="-10" max="10" step="0.1" value="0" />
         </div>
         <div class="ctrl">
+          <label><span>Zoom</span><span id="sliceZoomVal">fit</span></label>
+          <div class="btnrow" id="sliceZoomBtns">
+            <button data-zoom="out" title="Zoom out">−</button>
+            <button data-zoom="in" title="Zoom in">+</button>
+            <button data-zoom="fit" title="Frame the whole model">Fit</button>
+          </div>
+        </div>
+        <div class="ctrl">
           <label><span>Resolution</span></label>
           <div class="btnrow" id="sliceResBtns">
-            <button data-res="256">256</button>
-            <button data-res="384" class="active">384</button>
+            <button data-res="384">384</button>
             <button data-res="512">512</button>
+            <button data-res="768" class="active">768</button>
+            <button data-res="1024">1024</button>
+          </div>
+        </div>
+        <div class="ctrl">
+          <label><span>Sampling</span><span id="sliceSamplesNote"></span></label>
+          <div class="btnrow" id="sliceSampleBtns">
+            <button data-samples="1" title="One point per pixel — fastest, aliases on a lattice">1×</button>
+            <button data-samples="2" class="active" title="2×2 subpixels, majority wins">2×</button>
+            <button data-samples="3" title="3×3 subpixels — slowest, cleanest">3×</button>
           </div>
         </div>
         <div class="ctrl">
@@ -357,6 +553,7 @@ function buildHtml(webview: vscode.Webview): string {
             <button data-color="cell">Cell</button>
           </div>
         </div>
+        <div class="row"><label><input type="checkbox" id="sliceEdges" checked /> Outline region boundaries</label></div>
         <div class="btnrow"><button id="sliceExport">Export PNG…</button></div>
         <div id="sliceProblem"></div>
         <div id="sliceLegend"></div>
@@ -530,7 +727,8 @@ function buildHtml(webview: vscode.Webview): string {
         const op = (typeof c.opacity === 'number') ? c.opacity : 1;
         const known = ['box', 'arc', 'sphere', 'cone', 'torus', 'ellipsoid', 'ellcyl', 'polyhedron'];
         const shape = known.indexOf(c.shape) >= 0 ? c.shape : 'cyl';
-        const solid = shape !== 'cyl' ? op >= 0.9 : (inner <= 0.0001 && op >= 0.9);
+        // A hollow shell has to be see-through or it hides whatever it contains.
+        const solid = (shape === 'cyl' || shape === 'sphere') ? (inner <= 0.0001 && op >= 0.9) : op >= 0.9;
         const segs = r > 8 ? 64 : 18;
         const axis = c.axis === 'x' || c.axis === 'y' ? c.axis : 'z';
         // Rectangular boxes (baffle plates) carry their own half-sizes; square
@@ -749,13 +947,90 @@ function buildHtml(webview: vscode.Webview): string {
       for (const g of groups) g.mesh.material.clippingPlanes = planes;
     }
 
+    /**
+     * One line per distinct reason. A deck that uses the same construct in 300
+     * cells produced 300 identical lines, which buried the rest of the panel.
+     */
+    function groupWarnings(list) {
+      const byReason = new Map();
+      for (const w of list) {
+        const m = /^Cell (\\S+?): (.*)$/.exec(w);
+        const reason = m ? m[2] : w;
+        const g = byReason.get(reason) || { reason: reason, cells: [] };
+        if (m) g.cells.push(m[1]);
+        byReason.set(reason, g);
+      }
+      return Array.from(byReason.values());
+    }
+
+    /** The affected cell numbers, truncated until asked for in full. */
+    function cellList(cells) {
+      const wrap = document.createElement('div');
+      wrap.className = 'wcells';
+      const SHOWN = 8;
+      const render = (all) => {
+        wrap.textContent = (all ? cells : cells.slice(0, SHOWN)).join(', ');
+        if (!all && cells.length > SHOWN) {
+          wrap.appendChild(document.createTextNode(' '));
+          const more = document.createElement('span');
+          more.className = 'wmore';
+          more.textContent = '+' + (cells.length - SHOWN) + ' more';
+          more.onclick = () => render(true);
+          wrap.appendChild(more);
+        }
+      };
+      render(false);
+      return wrap;
+    }
+
+    /** Plain-language follow-up for the warnings people actually ask about. */
+    const WARN_HELP = [
+      {
+        match: 'already being expanded',
+        text: 'Two cells name each other with #, so substituting one never terminates. '
+          + 'Writing one of them out of surfaces instead of a complement clears it.',
+      },
+      {
+        match: 'carrying a trcl',
+        text: 'The cell behind the # is placed by its own trcl, so its surfaces do not sit '
+          + 'where this region would read them. The bounding box avoids drawing it in the '
+          + 'wrong place; the 2D slice view evaluates the real region and is unaffected.',
+      },
+      {
+        match: 'union terms',
+        text: 'Rewriting the region as a union of intersections multiplied out past the '
+          + 'budget. Splitting the cell in two, or replacing a deep nest of unions with a '
+          + 'macrobody, renders exactly.',
+      },
+      {
+        match: 'outside cone',
+        text: 'A cone with no sheet selector is two nappes, so the renderer cannot tell which '
+          + 'half you meant. Add ±1 as the last entry on the surface card.',
+      },
+    ];
+
     function buildPanel(sc) {
       document.getElementById('meta').textContent =
         sc.primitiveCount.toLocaleString() + ' primitives • ' + (sc.language || '').toUpperCase();
 
       const warn = document.getElementById('warnings');
       warn.innerHTML = '';
-      for (const w of (sc.warnings || [])) { const d = document.createElement('div'); d.className = 'warn'; d.textContent = '⚠ ' + w; warn.appendChild(d); }
+      for (const g of groupWarnings(sc.warnings || [])) {
+        const d = document.createElement('div');
+        d.className = 'warn';
+        d.textContent = '⚠ ' + (g.cells.length > 1
+          ? g.cells.length + ' cells: ' + g.reason
+          : (g.cells.length === 1 ? 'Cell ' + g.cells[0] + ': ' : '') + g.reason);
+        if (g.cells.length > 1) d.appendChild(cellList(g.cells));
+        const help = WARN_HELP.find((h) => g.reason.indexOf(h.match) !== -1);
+        if (help) {
+          const h = document.createElement('span');
+          h.className = 'whelp';
+          h.textContent = help.text;
+          d.appendChild(h);
+        }
+        warn.appendChild(d);
+      }
       for (const n of (sc.notes || [])) { const d = document.createElement('div'); d.className = 'note'; d.textContent = n; warn.appendChild(d); }
       warn.style.display = (warn.childElementCount ? 'block' : 'none');
 
@@ -1199,7 +1474,9 @@ function buildHtml(webview: vscode.Webview): string {
         if (sliceMode) requestSlice(); // deck changed while slicing
       }
       if (data && data.type === 'meshOverlay' && data.mesh) applyMeshOverlay(data.mesh);
-      if (data && data.type === 'sliceResult') drawSlice(data);
+      if (data && data.type === 'sliceBegin') beginSliceImage(data);
+      if (data && data.type === 'sliceBand') drawSliceBand(data);
+      if (data && data.type === 'sliceDone') finishSliceImage(data);
       if (data && data.type === 'sliceUnavailable') {
         sliceBusy = false;
         document.getElementById('sliceStatus').textContent = data.reason || '2D slices are unavailable for this deck.';
@@ -1211,12 +1488,20 @@ function buildHtml(webview: vscode.Webview): string {
     // ------- Exact 2D slice view (plan Stage 3) -------
     let sliceMode = false;
     let sliceAxis = 'xy';
-    let sliceRes = 384;
+    let sliceRes = 768;
     let sliceColorBy = 'material';
     let sliceOffset = 0;
     let sliceBusy = false;
     let sliceTimer = null;
-    let lastSliceMeta = null; // { width, height, offsetLo, offsetHi }
+    let lastSliceMeta = null; // last sliceBegin payload
+    let sliceJobId = 0;       // bands from a superseded render are ignored
+    // Zoom is a fraction of the fitted window; center is in plane cm. null
+    // center means "let the host frame the model".
+    let sliceZoom = 1;
+    let sliceCenterU = null;
+    let sliceCenterV = null;
+    let sliceSamples = 2;
+    let sliceEdges = true;
 
     function setActive(groupId, matchAttr, value) {
       for (const b of document.getElementById(groupId).querySelectorAll('button')) {
@@ -1234,13 +1519,23 @@ function buildHtml(webview: vscode.Webview): string {
       if (slice) requestSlice();
     }
 
+    function sliceViewMsg(extra) {
+      const m = {
+        axis: sliceAxis, offset: sliceOffset, res: sliceRes, colorBy: sliceColorBy,
+        zoom: sliceZoom, samples: sliceSamples, edges: sliceEdges,
+      };
+      if (sliceCenterU !== null) m.centerU = sliceCenterU;
+      if (sliceCenterV !== null) m.centerV = sliceCenterV;
+      return Object.assign(m, extra || {});
+    }
+
     function requestSlice() {
       if (!sliceMode) return;
       sliceBusy = true;
       const st = document.getElementById('sliceStatus');
       st.textContent = 'classifying…';
       st.style.display = 'block';
-      vscode.postMessage({ type: 'sliceRequest', axis: sliceAxis, offset: sliceOffset, res: sliceRes, colorBy: sliceColorBy });
+      vscode.postMessage(sliceViewMsg({ type: 'sliceRequest' }));
     }
 
     function scheduleSlice() {
@@ -1248,16 +1543,19 @@ function buildHtml(webview: vscode.Webview): string {
       sliceTimer = setTimeout(requestSlice, 200);
     }
 
-    function drawSlice(data) {
-      sliceBusy = false;
+    /** Size the canvas for a new render and adopt the host's framing. */
+    function beginSliceImage(data) {
+      sliceJobId = data.id;
+      sliceBusy = true;
       const canvas = document.getElementById('sliceCanvas');
-      canvas.width = data.width;
-      canvas.height = data.height;
-      const ctx = canvas.getContext('2d');
-      const bin = atob(data.rgbaB64);
-      const rgba = new Uint8ClampedArray(bin.length);
-      for (let i = 0; i < bin.length; i++) rgba[i] = bin.charCodeAt(i);
-      ctx.putImageData(new ImageData(rgba, data.width, data.height), 0, 0);
+      if (canvas.width !== data.width || canvas.height !== data.height) {
+        canvas.width = data.width;
+        canvas.height = data.height;
+      } else {
+        // Same size: keep the previous image visible underneath so panning
+        // does not flash an empty frame while the new bands arrive.
+        canvas.getContext('2d').globalAlpha = 1;
+      }
       lastSliceMeta = data;
 
       // Offset slider range follows the model bounds along the cut axis.
@@ -1268,18 +1566,58 @@ function buildHtml(webview: vscode.Webview): string {
         off.step = Math.max((data.offsetHi - data.offsetLo) / 200, 0.01);
       }
 
+      // Adopt the host's framing so the first wheel/drag has a real center.
+      if (isFinite(data.centerU)) sliceCenterU = data.centerU;
+      if (isFinite(data.centerV)) sliceCenterV = data.centerV;
+
+      const cmPx = (data.cmPerPixel && data.cmPerPixel[0]) || 0;
+      document.getElementById('sliceZoomVal').textContent =
+        (sliceZoom >= 0.999 ? 'fit' : (1 / sliceZoom).toFixed(1) + '×') +
+        (cmPx > 0 ? ' · ' + cmPx.toFixed(3) + ' cm/px' : '');
+      document.getElementById('sliceSamplesNote').textContent =
+        data.samples > 1 ? data.samples + '×' + data.samples + ' subpixels' : '1 point/px';
+      setSliceStatus(data, 0);
+    }
+
+    /** Blit one classified band of rows as it arrives. */
+    function drawSliceBand(data) {
+      if (data.id !== sliceJobId || !lastSliceMeta) return;
+      const canvas = document.getElementById('sliceCanvas');
+      const bin = atob(data.rgbaB64);
+      const rgba = new Uint8ClampedArray(bin.length);
+      for (let i = 0; i < bin.length; i++) rgba[i] = bin.charCodeAt(i);
+      const rows = data.y1 - data.y0;
+      canvas.getContext('2d').putImageData(new ImageData(rgba, lastSliceMeta.width, rows), 0, data.y0);
+      setSliceStatus(lastSliceMeta, data.progress);
+    }
+
+    function setSliceStatus(meta, progress) {
       const st = document.getElementById('sliceStatus');
+      const pct = progress > 0 && progress < 1 ? ' — ' + Math.round(progress * 100) + '%' : '';
+      st.textContent = String(meta.axis).toUpperCase() + ' @ ' + Number(meta.offset).toFixed(2) + ' cm — ' +
+        meta.width + '×' + meta.height + pct;
+      st.style.display = 'block';
+    }
+
+    /** Final legend, counts and problem report once every row is classified. */
+    function finishSliceImage(data) {
+      if (data.id !== sliceJobId) return;
+      sliceBusy = false;
       const problems = (data.overlapCount || 0) + (data.lostCount || 0);
-      st.textContent = data.axis.toUpperCase() + ' @ ' + Number(data.offset).toFixed(2) + ' cm — ' +
-        data.width + '×' + data.height + (problems > 0 ? ' — ' + problems + ' problem px (magenta)' : '');
+      const st = document.getElementById('sliceStatus');
+      st.textContent = String(lastSliceMeta.axis).toUpperCase() + ' @ ' + Number(lastSliceMeta.offset).toFixed(2) + ' cm — ' +
+        lastSliceMeta.width + '×' + lastSliceMeta.height +
+        (problems > 0 ? ' — ' + problems + ' problem px (magenta)' : '');
       st.style.display = 'block';
 
       const legend = document.getElementById('sliceLegend');
-      const entries = (data.legend || []).slice().sort((a, b) => b.count - a.count).slice(0, 30);
-      legend.innerHTML = entries.map((l) => {
-        const rgb = sliceHashColor(l.key);
+      const entries = (data.legend || []).map((l, i) => ({ l: l, i: i }))
+        .sort((a, b) => b.l.count - a.l.count).slice(0, 30);
+      legend.innerHTML = entries.map((e) => {
+        const hostRgb = data.colors && data.colors[e.i];
+        const rgb = hostRgb || sliceHashColor(e.l.key);
         return '<div class="sl"><span class="sw" style="background: rgb(' + rgb.join(',') + ')"></span>' +
-          '<span>' + escHtml(l.label) + '</span><span style="margin-left:auto; opacity:0.5">' + l.count.toLocaleString() + '</span></div>';
+          '<span>' + escHtml(e.l.label) + '</span><span style="margin-left:auto; opacity:0.5">' + e.l.count.toLocaleString() + '</span></div>';
       }).join('');
       const prob = document.getElementById('sliceProblem');
       prob.textContent = problems > 0
@@ -1303,7 +1641,12 @@ function buildHtml(webview: vscode.Webview): string {
       if (data.cell === null || data.cell === undefined) {
         el.innerHTML = '<span style="color:#f5c2e7">No cell claims this point (lost region).</span>';
       } else {
-        let html = 'Cell <b>' + data.cell + '</b> · ' + (data.material === 0 ? 'void' : 'm' + data.material);
+        const mat = data.material === 0 ? 'void'
+          : (data.materialName ? escHtml(data.materialName) + ' (m' + data.material + ')' : 'm' + data.material);
+        let html = 'Cell <b>' + data.cell + '</b> · ' + mat;
+        if (data.point) {
+          html += '<br><span style="opacity:0.65">(' + data.point.map((c) => Number(c).toFixed(2)).join(', ') + ') cm</span>';
+        }
         if (data.density !== null && data.density !== undefined) {
           html += '<br>ρ = ' + data.density + (data.density < 0 ? ' g/cm³' : ' atoms/b·cm');
         }
@@ -1331,6 +1674,89 @@ function buildHtml(webview: vscode.Webview): string {
       setActive('sliceResBtns', 'data-res', res);
       requestSlice();
     });
+    document.getElementById('sliceSampleBtns').addEventListener('click', (e) => {
+      const s = e.target && e.target.getAttribute && e.target.getAttribute('data-samples');
+      if (!s) return;
+      sliceSamples = parseInt(s, 10);
+      setActive('sliceSampleBtns', 'data-samples', s);
+      requestSlice();
+    });
+    document.getElementById('sliceEdges').addEventListener('change', (e) => {
+      sliceEdges = !!e.target.checked;
+      requestSlice();
+    });
+    document.getElementById('sliceZoomBtns').addEventListener('click', (e) => {
+      const z = e.target && e.target.getAttribute && e.target.getAttribute('data-zoom');
+      if (!z) return;
+      if (z === 'fit') {
+        sliceZoom = 1;
+        sliceCenterU = null;
+        sliceCenterV = null;
+      } else {
+        setSliceZoom(sliceZoom * (z === 'in' ? 1 / 1.6 : 1.6));
+      }
+      requestSlice();
+    });
+
+    function setSliceZoom(next) {
+      // 500× in is enough to inspect a clad gap; 1 is the fitted view.
+      sliceZoom = Math.max(0.002, Math.min(1, next));
+    }
+
+    /** Plane-space cm under a canvas pixel, using the window the host reported. */
+    function slicePlaneAt(clientX, clientY) {
+      if (!lastSliceMeta || !lastSliceMeta.window) return null;
+      const canvas = document.getElementById('sliceCanvas');
+      const rect = canvas.getBoundingClientRect();
+      const fx = (clientX - rect.left) / rect.width;
+      const fy = (clientY - rect.top) / rect.height;
+      const w = lastSliceMeta.window; // [uMin, uMax, vMin, vMax]
+      return { u: w[0] + fx * (w[1] - w[0]), v: w[3] - fy * (w[3] - w[2]) };
+    }
+
+    document.getElementById('sliceCanvas').addEventListener('wheel', (e) => {
+      if (!lastSliceMeta) return;
+      e.preventDefault();
+      const at = slicePlaneAt(e.clientX, e.clientY);
+      const before = sliceZoom;
+      setSliceZoom(sliceZoom * (e.deltaY > 0 ? 1.25 : 0.8));
+      // Keep the point under the cursor fixed: shift the center by the part of
+      // the offset the shrinking window no longer covers.
+      if (at && sliceCenterU !== null && sliceCenterV !== null && before > 0) {
+        const k = sliceZoom / before;
+        sliceCenterU = at.u + (sliceCenterU - at.u) * k;
+        sliceCenterV = at.v + (sliceCenterV - at.v) * k;
+      }
+      scheduleSlice();
+    }, { passive: false });
+
+    let slicePan = null;
+    document.getElementById('sliceCanvas').addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !lastSliceMeta) return;
+      const at = slicePlaneAt(e.clientX, e.clientY);
+      if (!at) return;
+      slicePan = { startU: at.u, startV: at.v, cu: sliceCenterU, cv: sliceCenterV, moved: false };
+      e.target.setPointerCapture(e.pointerId);
+    });
+    document.getElementById('sliceCanvas').addEventListener('pointermove', (e) => {
+      if (!slicePan || slicePan.cu === null || slicePan.cv === null) return;
+      const at = slicePlaneAt(e.clientX, e.clientY);
+      if (!at) return;
+      const du = at.u - slicePan.startU;
+      const dv = at.v - slicePan.startV;
+      if (!slicePan.moved && Math.abs(du) + Math.abs(dv) < (lastSliceMeta.cmPerPixel ? lastSliceMeta.cmPerPixel[0] * 3 : 0.01)) return;
+      slicePan.moved = true;
+      document.getElementById('sliceCanvas').classList.add('panning');
+      sliceCenterU = slicePan.cu - du;
+      sliceCenterV = slicePan.cv - dv;
+      scheduleSlice();
+    });
+    document.getElementById('sliceCanvas').addEventListener('pointerup', (e) => {
+      const wasDrag = slicePan && slicePan.moved;
+      slicePan = null;
+      document.getElementById('sliceCanvas').classList.remove('panning');
+      if (wasDrag) requestSlice();
+    });
     document.getElementById('sliceColorBtns').addEventListener('click', (e) => {
       const c = e.target && e.target.getAttribute && e.target.getAttribute('data-color');
       if (!c) return;
@@ -1349,7 +1775,7 @@ function buildHtml(webview: vscode.Webview): string {
       const rect = canvas.getBoundingClientRect();
       const px = Math.floor(((e.clientX - rect.left) / rect.width) * lastSliceMeta.width);
       const py = Math.floor(((e.clientY - rect.top) / rect.height) * lastSliceMeta.height);
-      vscode.postMessage({ type: 'sliceIdentify', axis: sliceAxis, offset: sliceOffset, res: sliceRes, colorBy: sliceColorBy, px, py });
+      vscode.postMessage(sliceViewMsg({ type: 'sliceIdentify', px: px, py: py }));
     });
     document.getElementById('sliceExport').addEventListener('click', () => {
       const canvas = document.getElementById('sliceCanvas');

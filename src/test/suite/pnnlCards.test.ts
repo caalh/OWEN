@@ -91,9 +91,14 @@ suite('PNNL Compendium', () => {
         assert.ok(Math.abs(Number(m![1]) - 0.066647) / 0.066647 < 1e-4);
     });
 
-    test('S(α,β) allow-list is exactly the hydrogenous moderators', () => {
+    test('S(α,β) is attached exactly where ENDF/B-VII.1 has a bound evaluation', () => {
+        // Not hydrogen-only: graphite, beryllium metal, BeO and zirconium
+        // hydride all have thermal scattering laws, and a fuel or a plain metal
+        // has none.
         const allowed = new Set([
             'water-liquid', 'water-heavy', 'polyethylene-non-borated', 'polyethylene-borated',
+            'carbon-graphite-reactor-grade', 'beryllium', 'beryllium-oxide',
+            'zirconium-hydride-zrh2', 'zirconium-hydride-zr5h8',
         ]);
         for (const m of dataset!.materials) {
             if (pnnlSab(m)) {

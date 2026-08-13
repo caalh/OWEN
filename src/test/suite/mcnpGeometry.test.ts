@@ -15,7 +15,10 @@ import {
     surfaceValue,
     worldBounds,
 } from '../../preview/mcnpEvaluate';
-import { axisPlane, defaultWindow, identifyAt, sliceModel, SLICE_LOST, SLICE_OVERLAP } from '../../preview/slice';
+import {
+    axisPlane, beginSlice, defaultWindow, identifyAt, sliceModel, sliceRowsToRgba, sliceToRgba,
+    SLICE_LOST, SLICE_OVERLAP,
+} from '../../preview/slice';
 import { buildCsgScene } from '../../preview/csgScene';
 import { Component } from '../../preview/types';
 
@@ -632,6 +635,181 @@ suite('MCNP geometry engine — 2D slices (Stage 3)', () => {
         const b = worldBounds(model);
         assert.ok(b.max[2] >= 10 && b.min[2] <= -10);
     });
+
+    test('defaultWindow centers on an off-origin model', () => {
+        // A pin built at x = 40 cm must be framed, not pushed off the image.
+        const model = parseMcnpGeometry(deck([
+            'off-origin pin',
+            '1 1 -10 -1 6 -5 imp:n=1',
+            '9 0 1:(-6):5 imp:n=0',
+            '',
+            '1 c/z 40 0 0.41',
+            '5 pz 10',
+            '6 pz -10',
+            '',
+            'm1 92235.80c 1',
+        ]));
+        const w = defaultWindow(model, axisPlane('xy', 0));
+        assert.ok(Math.abs(w.centerU - 40) < 1.0, `centerU ${w.centerU} should sit on the pin`);
+        assert.ok(Math.abs(w.centerV) < 1.0, `centerV ${w.centerV}`);
+        const res = sliceModel(model, {
+            plane: axisPlane('xy', 0),
+            halfU: w.halfU, halfV: w.halfV, centerU: w.centerU, centerV: w.centerV,
+            width: 64, height: 64, colorBy: 'cell',
+        });
+        assert.ok(res.legend.some((l) => l.key === 1), 'the fuel cell is inside the framed window');
+    });
+
+    test('pan + zoom window: a zoomed view resolves what a fitted view aliases away', () => {
+        // 1.26 cm pitch sampled by a 64 px image over ±20 cm is 0.63 cm/px:
+        // exactly the regime that turned the BEAVRS screenshot to speckle.
+        const model = parseMcnpGeometry(PIN);
+        const wide = sliceModel(model, {
+            plane: axisPlane('xy', 0), halfU: 20, halfV: 20,
+            width: 64, height: 64, colorBy: 'cell',
+        });
+        const zoomed = sliceModel(model, {
+            plane: axisPlane('xy', 0), halfU: 0.63, halfV: 0.63,
+            width: 64, height: 64, colorBy: 'cell',
+        });
+        const fuelFrac = (r: typeof wide) => {
+            const e = r.legend.find((l) => l.key === 1);
+            return e ? e.count / (r.width * r.height) : 0;
+        };
+        assert.ok(fuelFrac(zoomed) > 0.3, `zoomed fuel fraction ${fuelFrac(zoomed)}`);
+        assert.ok(fuelFrac(zoomed) > fuelFrac(wide) * 5, 'zoom resolves the pin');
+        assert.ok(Math.abs(zoomed.cmPerPixel[0] - (2 * 0.63) / 64) < 1e-12);
+    });
+
+    test('window reports absolute plane coordinates when panned', () => {
+        const model = parseMcnpGeometry(PIN);
+        const res = sliceModel(model, {
+            plane: axisPlane('xy', 0), halfU: 1, halfV: 2,
+            centerU: 5, centerV: -3,
+            width: 8, height: 8, colorBy: 'cell',
+        });
+        assert.deepStrictEqual(res.window, [4, 6, -5, -1]);
+    });
+
+    test('supersampling keeps the majority region and still flags overlaps', () => {
+        const model = parseMcnpGeometry(PIN);
+        const res = sliceModel(model, {
+            plane: axisPlane('xy', 0), halfU: 0.63, halfV: 0.63,
+            width: 48, height: 48, colorBy: 'cell', samples: 3,
+        });
+        assert.strictEqual(res.samples, 3);
+        assert.strictEqual(res.overlapCount, 0);
+        const total = res.width * res.height;
+        const fuel = res.legend.find((l) => l.key === 1);
+        const exact = (Math.PI * 0.41 * 0.41) / (4 * 0.63 * 0.63);
+        assert.ok(fuel && Math.abs(fuel.count / total - exact) < 0.02, `fuel fraction ${(fuel?.count ?? 0) / total}`);
+
+        // One overlapping subsample must claim the whole pixel: a double-claimed
+        // sliver is a modeling error, not a shading detail to average away. The
+        // lens below is 0.1 cm wide — narrower than the 0.1875 cm pixel, wider
+        // than the 0.0625 cm subsample step, so 3× sampling is what finds it.
+        const broken = parseMcnpGeometry(deck([
+            'overlap sliver',
+            '1 1 -1 -1 imp:n=1',
+            '2 1 -1 -2 imp:n=1',
+            '',
+            '1 so 2',
+            '2 s 3.9 0 0 2',
+            '',
+            'm1 1001.80c 1',
+        ]));
+        const req = {
+            plane: axisPlane('xy', 0), halfU: 6, halfV: 6,
+            width: 64, height: 64, colorBy: 'cell' as const,
+        };
+        const ov = sliceModel(broken, { ...req, samples: 3 });
+        assert.ok(ov.overlapCount > 0, 'a sub-pixel lens of overlap is still flagged');
+        // Every flagged pixel must really be an overlap, not a smear.
+        const idx = ov.ids.findIndex((v) => v === SLICE_OVERLAP);
+        assert.ok(idx >= 0);
+        const who = identifyAt(broken, { ...req, samples: 3 }, idx % req.width, Math.floor(idx / req.width));
+        assert.ok(who.overlaps.length >= 1, 'the flagged pixel sits at the overlapping lens');
+    });
+
+    test('identifyAt and the raster agree pixel-for-pixel under pan/zoom', () => {
+        const model = parseMcnpGeometry(PIN);
+        const req = {
+            plane: axisPlane('xy', 0),
+            halfU: 0.3, halfV: 0.3, centerU: 0.35, centerV: 0.1,
+            width: 32, height: 32, colorBy: 'cell' as const,
+        };
+        const res = sliceModel(model, req);
+        for (let py = 0; py < req.height; py += 5) {
+            for (let px = 0; px < req.width; px += 5) {
+                const who = identifyAt(model, req, px, py);
+                const id = res.ids[py * req.width + px];
+                if (id >= 0) assert.strictEqual(who.cell, res.legend[id].key, `pixel (${px},${py})`);
+            }
+        }
+    });
+
+    test('a resumable job produces exactly what the blocking call does', () => {
+        // The extension host has no worker: it must classify in bands and hand
+        // control back to the editor. Streaming must not change the answer.
+        const model = parseMcnpGeometry(PIN);
+        const req = {
+            plane: axisPlane('xy', 0), halfU: 0.63, halfV: 0.63,
+            width: 40, height: 40, colorBy: 'cell' as const, samples: 2,
+        };
+        const whole = sliceModel(model, req);
+        const job = beginSlice(model, req);
+        let bands = 0;
+        while (!job.done) { job.step(3); bands++; }
+        assert.ok(bands > 5, `expected several bands, got ${bands}`);
+        assert.strictEqual(job.rowsDone, req.height);
+        assert.deepStrictEqual(Array.from(job.result.ids), Array.from(whole.ids));
+        assert.deepStrictEqual(job.result.legend, whole.legend);
+        assert.strictEqual(job.result.lostCount, whole.lostCount);
+        assert.strictEqual(job.result.overlapCount, whole.overlapCount);
+    });
+
+    test('a rasterized band matches those rows of the full image, outlines included', () => {
+        const model = parseMcnpGeometry(PIN);
+        const res = sliceModel(model, {
+            plane: axisPlane('xy', 0), halfU: 0.63, halfV: 0.63,
+            width: 24, height: 24, colorBy: 'cell',
+        });
+        const full = sliceToRgba(res, { edges: true });
+        const y0 = 7;
+        const y1 = 13;
+        const band = sliceRowsToRgba(res, y0, y1, { edges: true });
+        assert.strictEqual(band.length, res.width * (y1 - y0) * 4);
+        for (let i = 0; i < band.length; i++) {
+            assert.strictEqual(band[i], full[y0 * res.width * 4 + i], `byte ${i} of the band`);
+        }
+    });
+
+    test('labelFor names legend entries; edge outlining darkens only boundaries', () => {
+        const model = parseMcnpGeometry(PIN);
+        const req = {
+            plane: axisPlane('xy', 0), halfU: 0.63, halfV: 0.63,
+            width: 32, height: 32, colorBy: 'material' as const,
+            labelFor: (key: number) => (key === 1 ? 'UO2 100%' : key === 0 ? 'void' : `m${key}`),
+        };
+        const res = sliceModel(model, req);
+        assert.ok(res.legend.some((l) => l.label === 'UO2 100%'), 'host-supplied material name is used');
+
+        const flat = sliceToRgba(res, { colors: res.legend.map(() => [200, 200, 200] as [number, number, number]) });
+        const outlined = sliceToRgba(res, {
+            colors: res.legend.map(() => [200, 200, 200] as [number, number, number]),
+            edges: true,
+        });
+        let darkened = 0;
+        for (let i = 0; i < res.ids.length; i++) {
+            if (outlined[i * 4] < flat[i * 4]) darkened++;
+        }
+        assert.ok(darkened > 0, 'some boundary pixels are outlined');
+        assert.ok(darkened < res.ids.length * 0.5, `outline should be thin, darkened ${darkened}`);
+
+        // Interior pixels (same region all around) must be untouched.
+        const mid = Math.floor(res.height / 2) * res.width + Math.floor(res.width / 2);
+        assert.strictEqual(outlined[mid * 4], flat[mid * 4]);
+    });
 });
 
 suite('MCNP geometry engine — CSG scene builder (Stages 2 & 4)', () => {
@@ -814,5 +992,83 @@ suite('MCNP geometry engine — CSG scene builder (Stages 2 & 4)', () => {
         const scene = buildCsgScene(model, MATS);
         assert.strictEqual(scene.cylinders.filter((c) => c.shape === 'sphere').length, 2);
         assert.strictEqual(scene.census.exact, 1);
+    });
+
+    test('#cell complements are substituted, not dropped to a bounding box', () => {
+        // Cell 2 is the shell between the two spheres, written the way people
+        // actually write it: everything in sphere 2 that is not cell 1.
+        const model = parseMcnpGeometry(deck([
+            'complement shell',
+            '1 1 -8 -1 imp:n=1',
+            '2 2 -1 -2 #1 imp:n=1',
+            '9 0 2 imp:n=0',
+            '',
+            '1 so 2',
+            '2 so 4',
+            '',
+            'm1 26056.80c 1',
+            'm2 1001.80c 2 8016.80c 1',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        assert.strictEqual(scene.census.failed, 0, JSON.stringify(scene.census));
+        assert.strictEqual(scene.census.exact, 2, JSON.stringify(scene.census));
+        assert.ok(!scene.warnings.some((w) => /bounding box/i.test(w)),
+            `unexpected fallback: ${scene.warnings.join(' | ')}`);
+        // The shell is the annulus between r=2 and r=4, so it must carry an
+        // inner radius rather than being a solid ball.
+        const shell = scene.cylinders.filter((c) => c.shape === 'sphere' && (c.innerRadius ?? 0) > 0);
+        assert.strictEqual(shell.length, 1, 'shell should be drawn as an annular sphere');
+        assert.ok(Math.abs((shell[0].innerRadius ?? 0) - 2) < 1e-9);
+    });
+
+    test('a nested chain of complements still resolves', () => {
+        const model = parseMcnpGeometry(deck([
+            'chained complements',
+            '1 1 -8 -1 imp:n=1',
+            '2 2 -1 -2 #1 imp:n=1',
+            '3 1 -8 -3 #2 #1 imp:n=1',
+            '9 0 3 imp:n=0',
+            '',
+            '1 so 1', '2 so 2', '3 so 3',
+            '',
+            'm1 26056.80c 1',
+            'm2 1001.80c 2 8016.80c 1',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        assert.strictEqual(scene.census.failed, 0, JSON.stringify(scene.census));
+    });
+
+    test('a complement cycle names the reason instead of looping', () => {
+        const model = parseMcnpGeometry(deck([
+            'circular complements',
+            '1 1 -8 -1 #2 imp:n=1',
+            '2 1 -8 -2 #1 imp:n=1',
+            '9 0 1 2 imp:n=0',
+            '',
+            '1 so 2', '2 so 3',
+            '',
+            'm1 26056.80c 1',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        assert.ok(scene.census.failed >= 1, JSON.stringify(scene.census));
+        assert.ok(scene.warnings.some((w) => /already being expanded/.test(w)),
+            `warning should explain the cycle: ${scene.warnings.join(' | ')}`);
+    });
+
+    test('a complement of a trcl-placed cell says so rather than guessing', () => {
+        const model = parseMcnpGeometry(deck([
+            'complement of a transformed cell',
+            '1 1 -8 -1 trcl=(5 0 0) imp:n=1',
+            '2 2 -1 -2 #1 imp:n=1',
+            '9 0 2 imp:n=0',
+            '',
+            '1 so 1', '2 so 6',
+            '',
+            'm1 26056.80c 1',
+            'm2 1001.80c 2 8016.80c 1',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        assert.ok(scene.warnings.some((w) => /trcl/.test(w)),
+            `warning should name the trcl: ${scene.warnings.join(' | ')}`);
     });
 });
