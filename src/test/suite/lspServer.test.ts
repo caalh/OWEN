@@ -155,6 +155,37 @@ suite('LSP server — in-process', () => {
         assert.strictEqual(params.diagnostics.length, 0);
     });
 
+    test('mcnp6.2+ dialect over didChangeConfiguration relaxes the line limit', async () => {
+        const long = 'c ' + 'x'.repeat(100); // 102 columns: over 80, under 128
+        const uri = 'file:///dialect.i';
+        await openDoc(h, uri, 'mcnp', long);
+        const before = await h.waitForDiagnostics(uri);
+        assert.ok(before.diagnostics.some((d) => d.code === 'mcnp.line-length'),
+            'expected an 80-column warning before the dialect switch');
+
+        h.diagnostics.delete(uri);
+        await h.client.sendNotification('workspace/didChangeConfiguration', {
+            settings: { owen: { mcnp: { dialect: 'mcnp6.2+' } } },
+        });
+        const after = await h.waitForDiagnostics(uri);
+        assert.ok(!after.diagnostics.some((d) => d.code === 'mcnp.line-length'),
+            'no line-length warning expected in the 6.2+ dialect');
+    });
+
+    test('a file directive wins over the configured dialect', async () => {
+        const text = ['c owen: line-limit=90', 'c ' + 'x'.repeat(100)].join('\n');
+        const uri = 'file:///directive.i';
+        await h.client.sendNotification('workspace/didChangeConfiguration', {
+            settings: { owen: { mcnp: { dialect: 'mcnp6.2+' } } },
+        });
+        await openDoc(h, uri, 'mcnp', text);
+        const params = await h.waitForDiagnostics(uri);
+        const d = params.diagnostics.find((x) => x.code === 'mcnp.line-length');
+        assert.ok(d, 'expected the 90-column directive to flag the 102-column line');
+        const msg = typeof d!.message === 'string' ? d!.message : d!.message.value;
+        assert.match(msg, /line-limit=90/);
+    });
+
     test('hover on a surface reference describes the surface', async () => {
         const uri = 'file:///hover.i';
         await openDoc(h, uri, 'mcnp', PIN_DECK);

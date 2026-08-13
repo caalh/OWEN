@@ -279,6 +279,49 @@ geometry {
             'expected the bare cz 0.41 cylinder to still render');
     });
 
+    // Honesty baseline (geometry-preview plan, Stage 0.2): a deck made only of
+    // unsupported surfaces must warn, naming every skipped surface type — never
+    // silently render nothing.
+    test('MCNP deck of only unsupported surfaces warns and names each skipped type', () => {
+        const deck = [
+            'Unsupported surfaces only',
+            '1 0 -1 2 -3 imp:n=1',
+            '',
+            '1 so 5.0',
+            '2 kz 0.0 0.25',
+            '3 tx 0 0 0 5 1 1',
+            '4 gq 1 1 1 0 0 0 0 0 0 -25',
+            '',
+            'mode n',
+        ].join('\n');
+        const scene = buildScene(deck, 'mcnp');
+        assert.strictEqual(scene.cylinders.length, 0, 'nothing renderable in this deck');
+        const all = scene.warnings.join(' | ');
+        for (const mnemonic of ['so', 'kz', 'tx', 'gq']) {
+            assert.ok(new RegExp(`\\b${mnemonic}\\b`).test(all),
+                `warning must name skipped surface '${mnemonic}' — got: ${all}`);
+        }
+    });
+
+    test('partial MCNP coverage is reported through the CSG census, never silently', () => {
+        // The cell is "inside cz, outside so" — the exact engine draws the
+        // cylinder and reports the ignored spherical hole as approximated.
+        const deck = [
+            'Mixed deck',
+            '1 1 -10.4 -1 4 imp:n=1',
+            '',
+            '1 cz 0.41',
+            '4 so 9.0',
+            '',
+            'm1 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0',
+        ].join('\n');
+        const scene = buildScene(deck, 'mcnp');
+        assert.ok(scene.cylinders.length > 0, 'the cell should render via the exact engine');
+        const text = [...scene.warnings, ...scene.notes].join(' | ');
+        assert.ok(/approximated|census|rendered exactly/i.test(text),
+            `partial coverage must be reported (census) — got: ${text}`);
+    });
+
     // --- Serpent lattice / nested-core expansion (the v0.1.8 work) ---
 
     test('expands a Serpent 3x3 square lattice of pin + guide-tube universes', () => {
@@ -1093,6 +1136,43 @@ geometry { universes {
         assert.ok(struct.length > 0, `expected radial/baffle structure, got ${struct.length}`);
         const pins = scene.cylinders.filter((c) => c.component === 'fuel' || c.component === 'guide_tube');
         assert.ok(pins.length > 50000, `expected full pin count, got ${pins.length}`);
+    });
+
+    // --- Stage 6 (geometry-preview plan): vessels without BEAVRS surface ids ---
+
+    test('MCNP radial shells are detected from materials, not surface-id conventions', () => {
+        // Arbitrary surface ids (501–504) and no id-80–86 convention: the
+        // steel barrel and water downcomer are root annular cells and must
+        // still render as shells. This pins the de-BEAVRSed general pass.
+        const deck = [
+            'generic vessel deck',
+            '1 1 -10.4 -1 u=1 imp:n=1',
+            '2 3 -1.0 1 u=1 imp:n=1',
+            '10 0 -11 12 -13 14 lat=1 u=5 fill=-1:1 -1:1 0:0 1 1 1 1 1 1 1 1 1 imp:n=1',
+            '20 0 -501 fill=5 imp:n=1',
+            '30 2 -8.0 501 -502 imp:n=1',
+            '31 3 -1.0 502 -503 imp:n=1',
+            '99 0 503 imp:n=0',
+            '',
+            '1 cz 0.41',
+            '11 px 0.63',
+            '12 px -0.63',
+            '13 py 0.63',
+            '14 py -0.63',
+            '501 cz 40',
+            '502 cz 45',
+            '503 cz 55',
+            '',
+            'm1 92235.80c 1',
+            'm2 26056.80c 0.7 24052.80c 0.2 28058.80c 0.1',
+            'm3 1001.80c 2 8016.80c 1',
+        ].join('\n');
+        const scene = buildScene(deck, 'mcnp');
+        const shells = scene.cylinders.filter((c) => (c.innerRadius ?? 0) >= 40);
+        assert.ok(shells.some((c) => (c.innerRadius ?? 0) === 40 && c.radius === 45),
+            `steel shell 40→45 expected; got ${JSON.stringify(shells.map((s) => [s.innerRadius, s.radius]))}`);
+        assert.ok(shells.some((c) => (c.innerRadius ?? 0) === 45 && c.radius === 55 && c.component === 'moderator'),
+            'water annulus 45→55 classified as moderator');
     });
 
     // --- BEAVRS baffle plates + arc shield pads (all four languages) ---

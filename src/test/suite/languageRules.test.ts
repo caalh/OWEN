@@ -97,6 +97,40 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
             .some((d) => d.code === 'mcnp.line-length'));
     });
 
+    test('MCNP: dialect option picks the 80/128 limit and the message names it', () => {
+        const line = 'c ' + 'x'.repeat(100); // 102 columns
+        const legacy = runLanguageRules('mcnp', line, { mcnpDialect: 'mcnp6.1-and-earlier' })
+            .find((d) => d.code === 'mcnp.line-length');
+        assert.ok(legacy, 'expected a warning in the 80-column dialect');
+        assert.match(legacy!.message, /6\.2\+ allows 128/);
+        assert.ok(!runLanguageRules('mcnp', line, { mcnpDialect: 'mcnp6.2+' })
+            .some((d) => d.code === 'mcnp.line-length'));
+        const over128 = 'c ' + 'x'.repeat(130);
+        const modern = runLanguageRules('mcnp', over128, { mcnpDialect: 'mcnp6.2+' })
+            .find((d) => d.code === 'mcnp.line-length');
+        assert.ok(modern, 'expected a warning past 128 in the 6.2+ dialect');
+        assert.match(modern!.message, /MCNP 6\.2\+ limit/);
+    });
+
+    test('MCNP: dialect beats the raw number; file directive beats both', () => {
+        const long = 'c ' + 'x'.repeat(100);
+        // dialect 6.2+ wins over a conflicting custom 80
+        assert.ok(!runLanguageRules('mcnp', long, { mcnpDialect: 'mcnp6.2+', mcnpLineLimit: 80 })
+            .some((d) => d.code === 'mcnp.line-length'));
+        // directive wins over dialect
+        const withDirective = ['c owen: line-limit=128', long].join('\n');
+        const diags = runLanguageRules('mcnp', withDirective, {
+            mcnpDialect: 'mcnp6.1-and-earlier',
+        });
+        assert.ok(!diags.some((d) => d.code === 'mcnp.line-length'));
+        // and the directive is named when it does flag
+        const still = ['c owen: line-limit=90', 'c ' + 'x'.repeat(100)].join('\n');
+        const flagged = runLanguageRules('mcnp', still, { mcnpDialect: 'mcnp6.2+' })
+            .find((d) => d.code === 'mcnp.line-length');
+        assert.ok(flagged);
+        assert.match(flagged!.message, /line-limit=90' on line 1/);
+    });
+
     test('OpenMC: flags deprecated openmc.Source(', () => {
         const text = [
             'import openmc',

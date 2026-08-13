@@ -381,39 +381,75 @@ function buildHtml(webview: vscode.Webview): string {
       const dummy = new THREE.Object3D();
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
 
+      let polySeq = 0;
       for (const c of cyls) {
         const r = Math.max(0.01, c.radius);
         const h = Math.max(0.01, c.height || 1);
         const inner = c.innerRadius || 0;
         const op = (typeof c.opacity === 'number') ? c.opacity : 1;
-        const shape = c.shape === 'arc' ? 'arc' : (c.shape === 'box' ? 'box' : 'cyl');
+        const known = ['box', 'arc', 'sphere', 'cone', 'torus', 'ellipsoid', 'ellcyl', 'polyhedron'];
+        const shape = known.indexOf(c.shape) >= 0 ? c.shape : 'cyl';
         const solid = shape !== 'cyl' ? op >= 0.9 : (inner <= 0.0001 && op >= 0.9);
         const segs = r > 8 ? 64 : 18;
+        const axis = c.axis === 'x' || c.axis === 'y' ? c.axis : 'z';
         // Rectangular boxes (baffle plates) carry their own half-sizes; square
         // boxes keep radius as the half-width. Arcs carry ring + span params.
-        const hx = shape === 'box' ? Math.max(0.01, (typeof c.halfX === 'number' ? c.halfX : r)) : 0;
-        const hy = shape === 'box' ? Math.max(0.01, (typeof c.halfY === 'number' ? c.halfY : r)) : 0;
+        const hx = Math.max(0.01, (typeof c.halfX === 'number' ? c.halfX : r));
+        const hy = Math.max(0.01, (typeof c.halfY === 'number' ? c.halfY : r));
+        const hz = Math.max(0.01, (typeof c.halfZ === 'number' ? c.halfZ : h / 2));
+        const topR = Math.max(0, (typeof c.topRadius === 'number' ? c.topRadius : r));
+        const tube = Math.max(0.01, (typeof c.tube === 'number' ? c.tube : r * 0.25));
         const arcLen = shape === 'arc' ? Math.max(1, Math.min(360, c.thetaLength || 45)) : 0;
         let key;
         if (shape === 'box') {
           key = 'box|' + (solid ? 'S' : 'T') + '|' + hx.toFixed(4) + '|' + hy.toFixed(4) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op));
         } else if (shape === 'arc') {
           key = 'arc|' + (solid ? 'S' : 'T') + '|' + inner.toFixed(3) + '|' + r.toFixed(3) + '|' + arcLen.toFixed(2) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op));
+        } else if (shape === 'sphere') {
+          key = 'sph|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + (solid ? '1' : bucket(op));
+        } else if (shape === 'cone') {
+          key = 'cone|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + topR.toFixed(4) + '|' + h.toFixed(3) + '|' + axis + '|' + (solid ? '1' : bucket(op));
+        } else if (shape === 'torus') {
+          key = 'torus|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + tube.toFixed(4) + '|' + axis + '|' + (solid ? '1' : bucket(op));
+        } else if (shape === 'ellipsoid') {
+          key = 'ellipsoid|' + (solid ? 'S' : 'T') + '|' + (solid ? '1' : bucket(op));
+        } else if (shape === 'ellcyl') {
+          key = 'ellcyl|' + (solid ? 'S' : 'T') + '|' + h.toFixed(3) + '|' + axis + '|' + (solid ? '1' : bucket(op));
+        } else if (shape === 'polyhedron') {
+          key = 'poly|' + (polySeq++); // unique: arbitrary vertex data can't instance
         } else {
           key = 'cyl|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op)) + '|' + segs;
         }
-        if (!byKey.has(key)) byKey.set(key, { solid, r, h, shape, segs, op, hx, hy, inner, arcLen, items: [] });
+        if (!byKey.has(key)) byKey.set(key, { solid, r, h, shape, segs, op, hx, hy, hz, inner, arcLen, topR, tube, axis, items: [] });
         byKey.get(key).items.push(c);
 
         // bounds (world mapping: X=c.x, Y=c.z, Z=c.y)
-        minX = Math.min(minX, c.x - r); maxX = Math.max(maxX, c.x + r);
-        minZ = Math.min(minZ, c.y - r); maxZ = Math.max(maxZ, c.y + r);
-        minY = Math.min(minY, (c.z || 0) - h / 2); maxY = Math.max(maxY, (c.z || 0) + h / 2);
+        if (shape === 'polyhedron' && Array.isArray(c.verts)) {
+          for (let vi = 0; vi + 2 < c.verts.length; vi += 3) {
+            minX = Math.min(minX, c.verts[vi]); maxX = Math.max(maxX, c.verts[vi]);
+            minZ = Math.min(minZ, c.verts[vi + 1]); maxZ = Math.max(maxZ, c.verts[vi + 1]);
+            minY = Math.min(minY, c.verts[vi + 2]); maxY = Math.max(maxY, c.verts[vi + 2]);
+          }
+        } else {
+          const rx = shape === 'ellipsoid' ? hx : r;
+          const ry = shape === 'ellipsoid' ? hy : r;
+          minX = Math.min(minX, c.x - rx); maxX = Math.max(maxX, c.x + rx);
+          minZ = Math.min(minZ, c.y - ry); maxZ = Math.max(maxZ, c.y + ry);
+          minY = Math.min(minY, (c.z || 0) - h / 2); maxY = Math.max(maxY, (c.z || 0) + h / 2);
+        }
       }
       sceneBounds = cyls.length ? { minX, maxX, minY, maxY, minZ, maxZ } : null;
 
       for (const grp of byKey.values()) {
         let geo;
+        // Local-axis bake: cylinder-like primitives extrude along local +Y
+        // (deck z). axis 'x' → three X (rotateZ −90°); 'y' → three Z
+        // (rotateX +90°). Torus holes start on local +Z instead.
+        const bakeAxialRot = (g) => {
+          if (grp.axis === 'x') g.rotateZ(-Math.PI / 2);
+          else if (grp.axis === 'y') g.rotateX(Math.PI / 2);
+          return g;
+        };
         if (grp.shape === 'box') {
           geo = new THREE.BoxGeometry(grp.hx * 2, grp.h, grp.hy * 2);
         } else if (grp.shape === 'arc') {
@@ -428,6 +464,43 @@ function buildHtml(webview: vscode.Webview): string {
           // recenter the height range on the instance origin.
           geo.rotateX(Math.PI / 2);
           geo.translate(0, grp.h / 2, 0);
+        } else if (grp.shape === 'sphere') {
+          geo = new THREE.SphereGeometry(grp.r, grp.r > 8 ? 48 : 28, grp.r > 8 ? 32 : 18);
+        } else if (grp.shape === 'cone') {
+          // three.js CylinderGeometry(top, bottom, h): top at +Y. Our deck
+          // convention: base radius at the low end of the axis.
+          geo = bakeAxialRot(new THREE.CylinderGeometry(Math.max(0.001, grp.topR), grp.r, grp.h, grp.segs > 18 ? grp.segs : 36, 1, !grp.solid));
+        } else if (grp.shape === 'torus') {
+          geo = new THREE.TorusGeometry(grp.r, grp.tube, 14, 48);
+          // Torus hole axis is local +Z; map to the deck axis.
+          if (grp.axis === 'x') geo.rotateY(Math.PI / 2);
+          else if (grp.axis === 'y') { /* hole axis already three Z = deck y */ }
+          else geo.rotateX(-Math.PI / 2);
+        } else if (grp.shape === 'ellipsoid') {
+          geo = new THREE.SphereGeometry(1, 28, 18); // per-instance scale
+        } else if (grp.shape === 'ellcyl') {
+          geo = bakeAxialRot(new THREE.CylinderGeometry(1, 1, grp.h, 36, 1, !grp.solid)); // per-instance scale
+        } else if (grp.shape === 'polyhedron') {
+          // Arbitrary convex solid: fan-triangulate each face loop. Vertices
+          // arrive in deck coords, absolute; recenter on the item's centroid
+          // so the shared instance-positioning path applies.
+          const item = grp.items[0] || {};
+          const verts = Array.isArray(item.verts) ? item.verts : [];
+          const faces = Array.isArray(item.faces) ? item.faces : [];
+          const cx = item.x || 0, cy = item.y || 0, cz = item.z || 0;
+          const pos = [];
+          for (const face of faces) {
+            for (let t = 1; t + 1 < face.length; t++) {
+              for (const vi of [face[0], face[t], face[t + 1]]) {
+                const off = vi * 3;
+                // deck (x,y,z) → three (X,Y,Z) = (x, z, y)
+                pos.push((verts[off] || 0) - cx, (verts[off + 2] || 0) - cz, (verts[off + 1] || 0) - cy);
+              }
+            }
+          }
+          geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+          geo.computeVertexNormals();
         } else {
           geo = new THREE.CylinderGeometry(grp.r, grp.r, grp.h, grp.segs, 1, !grp.solid);
         }
@@ -435,7 +508,9 @@ function buildHtml(webview: vscode.Webview): string {
           color: 0xffffff, roughness: 0.55, metalness: 0.05,
           transparent: !grp.solid,
           opacity: grp.solid ? 1 : Math.min(grp.op, shellOpacity),
-          side: grp.solid ? THREE.FrontSide : THREE.DoubleSide,
+          // Polyhedron winding is not guaranteed by the CSG clipper — render
+          // both sides so no face can vanish.
+          side: (grp.solid && grp.shape !== 'polyhedron') ? THREE.FrontSide : THREE.DoubleSide,
           depthWrite: grp.solid,
           clippingPlanes: [],
         });
@@ -454,6 +529,17 @@ function buildHtml(webview: vscode.Webview): string {
             dummy.rotation.y = -centerDeg * Math.PI / 180;
           }
           dummy.scale.set(1, 1, 1);
+          if (grp.shape === 'ellipsoid') {
+            // Unit sphere → semi-axes; deck (x,y,z) → three (X,Z,Y).
+            dummy.scale.set(Math.max(0.01, c.halfX || c.radius), Math.max(0.01, c.halfZ || c.radius), Math.max(0.01, c.halfY || c.radius));
+          } else if (grp.shape === 'ellcyl') {
+            // Unit-radius cylinder → in-plane semi-axes r1 (halfX), r2 (halfY).
+            const r1 = Math.max(0.01, c.halfX || c.radius);
+            const r2 = Math.max(0.01, c.halfY || c.radius);
+            if (grp.axis === 'x') dummy.scale.set(1, r2, r1);
+            else if (grp.axis === 'y') dummy.scale.set(r1, r2, 1);
+            else dummy.scale.set(r1, 1, r2);
+          }
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
           color.set(c.color || '#cccccc');
@@ -774,6 +860,17 @@ function buildHtml(webview: vscode.Webview): string {
         }
       } else if (inst.shape === 'arc') {
         rows.push(line('Ring', fmtLen(inst.ri) + ' → ' + fmtLen(inst.r) + ' cm'));
+      } else if (inst.shape === 'sphere') {
+        rows.push(line('Radius', fmtLen(inst.r) + ' cm'));
+        rows.push(line('Diameter', fmtLen(diameter(inst.r)) + ' cm'));
+      } else if (inst.shape === 'cone') {
+        rows.push(line('Base radius', fmtLen(inst.r) + ' cm'));
+      } else if (inst.shape === 'torus') {
+        rows.push(line('Major radius', fmtLen(inst.r) + ' cm'));
+      } else if (inst.shape === 'ellipsoid' || inst.shape === 'ellcyl') {
+        rows.push(line('Semi-axes', fmtLen(inst.hx) + ' × ' + fmtLen(inst.hy) + ' cm'));
+      } else if (inst.shape === 'polyhedron') {
+        rows.push(line('Shape', 'planar solid (CSG)'));
       } else {
         rows.push(line('Radius', fmtLen(inst.r) + ' cm'));
         rows.push(line('Diameter', fmtLen(diameter(inst.r)) + ' cm'));
@@ -842,6 +939,10 @@ function buildHtml(webview: vscode.Webview): string {
       const inst = pick.inst;
       if (inst.shape === 'box') { setMeasHint('That part is a box — radius applies to cylindrical shells.'); return; }
       if (inst.shape === 'arc') { setMeasHint('That part is an arc segment — its ring spans ' + fmtLen(inst.ri) + ' → ' + fmtLen(inst.r) + ' cm.'); return; }
+      if (inst.shape === 'polyhedron') { setMeasHint('That part is a planar CSG solid — use the distance tool on its edges.'); return; }
+      if (inst.shape === 'ellipsoid' || inst.shape === 'ellcyl') { setMeasHint('That part is elliptical — semi-axes ' + fmtLen(inst.hx) + ' × ' + fmtLen(inst.hy) + ' cm.'); return; }
+      if (inst.shape === 'cone') { setMeasHint('Cone: base radius ' + fmtLen(inst.r) + ' cm.'); return; }
+      if (inst.shape === 'torus') { setMeasHint('Torus: major radius ' + fmtLen(inst.r) + ' cm.'); return; }
       const m = new THREE.Matrix4(); groups[pick.gi].mesh.getMatrixAt(pick.id, m);
       const center = new THREE.Vector3().setFromMatrixPosition(m);
       center.y = pick.point.y;                          // draw the radial line at the clicked elevation

@@ -9,28 +9,40 @@
       "title": "Input File Overview"
     },
     {
-      "path": "/mcnp/cell-cards",
-      "title": "Cell Cards"
-    },
-    {
       "path": "/mcnp/surface-cards",
       "title": "Surface Cards"
     },
     {
-      "path": "/mcnp/data-cards",
-      "title": "Data Cards"
+      "path": "/mcnp/cell-cards",
+      "title": "Cell Cards"
     },
     {
       "path": "/mcnp/materials",
       "title": "Material Cards"
     },
     {
-      "path": "/mcnp/basic-shapes",
-      "title": "Basic Shapes & Surfaces"
+      "path": "/mcnp/data-cards",
+      "title": "Data Cards"
+    },
+    {
+      "path": "/mcnp/tallies",
+      "title": "Setting Up Tallies"
+    },
+    {
+      "path": "/mcnp/running",
+      "title": "Running MCNP"
+    },
+    {
+      "path": "/mcnp/running-output",
+      "title": "Understanding Output Files"
     },
     {
       "path": "/mcnp/example-pin",
       "title": "Tutorial: Simple Pin Cell"
+    },
+    {
+      "path": "/mcnp/basic-shapes",
+      "title": "Basic Shapes & Surfaces"
     },
     {
       "path": "/mcnp/complex-geometries",
@@ -57,18 +69,6 @@
       "title": "Source Definition"
     },
     {
-      "path": "/mcnp/running",
-      "title": "Running MCNP"
-    },
-    {
-      "path": "/mcnp/running-output",
-      "title": "Understanding Output Files"
-    },
-    {
-      "path": "/mcnp/tallies",
-      "title": "Setting Up Tallies"
-    },
-    {
       "path": "/mcnp/analysis",
       "title": "Result Analysis"
     },
@@ -90,7 +90,7 @@
     },
     {
       "path": "/mcnp/advanced",
-      "title": "Advanced Features"
+      "title": "Basic Optimization"
     },
     {
       "path": "/mcnp/troubleshooting",
@@ -111,36 +111,20 @@
       "title": "Python API Basics"
     },
     {
-      "path": "/openmc/geometry-basics",
-      "title": "Geometry Basics"
-    },
-    {
       "path": "/openmc/materials",
       "title": "Materials"
     },
     {
-      "path": "/openmc/cross-sections",
-      "title": "Cross Sections"
+      "path": "/openmc/geometry-basics",
+      "title": "Geometry Basics"
     },
     {
       "path": "/openmc/cell-creation",
       "title": "Cell Creation"
     },
     {
-      "path": "/openmc/surfaces",
-      "title": "Surface Types"
-    },
-    {
-      "path": "/openmc/lattices",
-      "title": "Lattices & Universes"
-    },
-    {
       "path": "/openmc/settings",
       "title": "Settings"
-    },
-    {
-      "path": "/openmc/sources",
-      "title": "Source Definition"
     },
     {
       "path": "/openmc/tallies",
@@ -153,6 +137,22 @@
     {
       "path": "/openmc/statepoint",
       "title": "StatePoint Files"
+    },
+    {
+      "path": "/openmc/example-pin",
+      "title": "Example: Pin Cell"
+    },
+    {
+      "path": "/openmc/lattices",
+      "title": "Lattices & Universes"
+    },
+    {
+      "path": "/openmc/example-assembly",
+      "title": "Example: Assembly"
+    },
+    {
+      "path": "/openmc/cross-sections",
+      "title": "Cross Sections"
     },
     {
       "path": "/openmc/plotting",
@@ -175,16 +175,16 @@
       "title": "Parallel Computing"
     },
     {
-      "path": "/openmc/example-pin",
-      "title": "Example: Pin Cell"
-    },
-    {
-      "path": "/openmc/example-assembly",
-      "title": "Example: Assembly"
-    },
-    {
       "path": "/openmc/example-reactor",
       "title": "Example: Full Reactor"
+    },
+    {
+      "path": "/openmc/surfaces",
+      "title": "Surface Types"
+    },
+    {
+      "path": "/openmc/sources",
+      "title": "Source Definition"
     }
   ],
   "serpent": [

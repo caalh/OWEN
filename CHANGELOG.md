@@ -5,7 +5,56 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.6] — 2026-08-06
+## [1.2.0] — 2026-08-12
+
+### Added
+
+- **MCNP line-limit dialect toggle.** New `owen.mcnp.dialect` setting picks the
+  card-image column limit by MCNP version: `mcnp6.1-and-earlier` (80 columns,
+  the portable default), `mcnp6.2+` (128 columns — LA-UR-24-24602 Rev. 1
+  §3.2.2 and Table 4.1), or `custom` (the raw `owen.mcnp.lineLengthLimit`).
+  A status-bar item shows the effective limit for the active deck and toggles
+  80↔128 on click (`OWEN: Toggle MCNP Line Limit (80/128)`, persisted
+  per-workspace). Mixed-version workspaces can pin a single file with a
+  `c owen: line-limit=128` comment near the top — the directive beats every
+  setting, and the line-length warning now names whichever dialect produced
+  it. Legacy configs that only set `owen.mcnp.lineLengthLimit` keep working.
+- **Exact MCNP geometry engine (first stage of the industry-viewer roadmap).**
+  A full-fidelity parser (`parseMcnpGeometry`) covers every surface mnemonic
+  (planes, spheres, cylinders, one/two-sheet cones, `sq`/`gq` quadrics, tori,
+  point-defined `x`/`y`/`z`), every macrobody with Table 5.2 facet numbering
+  and the documented short forms (`BOX` 9/12, `RHP`/`HEX` 9/15, `REC` 10/12),
+  full boolean cell expressions (unions, parentheses, `#cell` and `#(expr)`
+  complements, facet references, `like n but`), `TR`/`*TR` cards with
+  partial-matrix completion, surface transforms, `trcl` (including generated
+  1000×cell+surface numbers), and `lat=1`/`lat=2` fills with index ranges and
+  per-entry transforms. A point-membership evaluator (`cellContains` /
+  `findCell`) resolves the universe/fill/lattice hierarchy exactly — validated
+  by Monte Carlo volume checks against closed forms and the manual's own
+  §5.3.4.11.1 worked example.
+- **Analytic primitives for non-lattice decks.** When a deck has no pin
+  lattice to expand, the preview now renders cells through the exact engine:
+  spheres, truncated cones, tori, ellipsoids, elliptic cylinders, off-axis
+  (`cx`/`cy`) cylinders, annuli, and arbitrary planar solids (wedges, `arb`
+  polyhedra, boxes) — with a per-deck census in the notes: *N rendered
+  exactly, K approximated, F drawn as translucent bounds*. Unresolvable cells
+  degrade to a translucent bounding box and a warning naming the cell — never
+  a silent omission.
+- **Exact 2D slice classification** (`sliceModel` / `identifyAt`): pixel-exact
+  plane slices evaluated directly on the parsed CSG with magenta lost/overlap
+  reporting, OpenMC-plotter style. Shipped in the shared engine and on the
+  reactormc.net visualizer; an in-editor slice panel follows in a later minor.
+
+### Changed
+
+- **Vessel/baffle detection is no longer BEAVRS-specific.** Radial shells are
+  now found from any root-level annular cell pair at vessel scale, classified
+  by material (steel → vessel, water → downcomer) regardless of surface
+  numbering; the BEAVRS surface-id convention (80–86) remains only as a
+  gap-filler for the octant shield pads and never duplicates a detected shell.
+- **Unsupported geometry is always reported.** A deck consisting only of
+  surfaces the fallback path cannot draw now warns naming every skipped
+  surface type and count — nothing is silently dropped.
 
 ### Fixed
 

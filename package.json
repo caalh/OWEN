@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.1.6",
+  "version": "1.2.0",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -75,6 +75,7 @@
     "onCommand:owen.toggleInvisibleCharacters",
     "onCommand:owen.showMcnpReferences",
     "onCommand:owen.setMcnpProjectRoot",
+    "onCommand:owen.toggleMcnpLineLimit",
     "onView:owenMcnpReferences",
     "onStartupFinished"
   ],
@@ -284,6 +285,11 @@
       {
         "command": "owen.setMcnpProjectRoot",
         "title": "OWEN: Set MCNP Project Root",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.toggleMcnpLineLimit",
+        "title": "OWEN: Toggle MCNP Line Limit (80/128)",
         "category": "OWEN"
       }
     ],
@@ -576,11 +582,26 @@
           "default": "mcnp6",
           "description": "Path to the MCNP executable."
         },
+        "owen.mcnp.dialect": {
+          "type": "string",
+          "enum": [
+            "mcnp6.1-and-earlier",
+            "mcnp6.2+",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "80-column card images (MCNP5 / MCNP6.1 and earlier)",
+            "128-column card images (MCNP6.2+; LA-UR-24-24602 Rev. 1 §3.2.2, Table 4.1)",
+            "Use the raw owen.mcnp.lineLengthLimit column count"
+          ],
+          "default": "mcnp6.1-and-earlier",
+          "description": "Which MCNP version's card-image column limit to enforce. Default is the 80-column dialect because it flags anything that would truncate on the broadest set of MCNP versions; pick mcnp6.2+ if all your decks target 6.2 or newer. Toggle quickly via the status-bar item or 'OWEN: Toggle MCNP Line Limit (80/128)'. A per-file 'c owen: line-limit=128' comment on one of the first 10 lines overrides this setting for that file."
+        },
         "owen.mcnp.lineLengthLimit": {
           "type": "integer",
           "default": 80,
           "minimum": 1,
-          "description": "MCNP card-image column limit. Lines longer than this are flagged (Problems + an in-editor decoration) because characters past the limit are silently ignored by MCNP. The classic limit is 80 columns (MCNP5 / MCNP6.1 and earlier); set to 128 for MCNP6.2+. Also drives the language-scoped ruler shown in MCNP files."
+          "description": "MCNP card-image column limit used when owen.mcnp.dialect is 'custom' (also honored, for backward compatibility, when the dialect setting has never been touched). Lines longer than the effective limit are flagged (Problems + an in-editor decoration) because characters past the limit are silently ignored by MCNP. Prefer owen.mcnp.dialect for the standard 80 vs 128 choice. Also drives the language-scoped ruler shown in MCNP files."
         },
         "owen.mcnp.projectRoot": {
           "type": "string",

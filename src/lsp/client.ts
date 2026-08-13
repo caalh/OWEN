@@ -15,12 +15,18 @@ import {
     workspaceValidationEnabled,
     workspaceWarnUnused,
 } from '../commands/setMcnpProjectRoot';
+import { lineLimitSettings } from '../decorations/mcnpLineGuard';
 
 let client: LanguageClient | undefined;
 
 function mcnpLineLimit(): number | undefined {
-    const n = vscode.workspace.getConfiguration('owen').get<number>('mcnp.lineLengthLimit');
-    return typeof n === 'number' && n > 0 ? Math.floor(n) : undefined;
+    return lineLimitSettings().customLimit;
+}
+
+/** owen.mcnp.dialect, only when the user explicitly set it (undefined keeps
+ *  the server on legacy resolution for pre-dialect configs). */
+function mcnpDialect(): string | undefined {
+    return lineLimitSettings().dialect;
 }
 
 function workspaceRoot(): string | undefined {
@@ -32,6 +38,9 @@ function buildWorkspaceSettings() {
         owen: {
             mcnp: {
                 lineLengthLimit: mcnpLineLimit(),
+                // null (not undefined) so JSON keeps the key and the server can
+                // tell "cleared" apart from "not mentioned".
+                dialect: mcnpDialect() ?? null,
                 projectRoot: mcnpProjectRoot(),
                 workspaceValidation: {
                     enabled: workspaceValidationEnabled(),
@@ -69,6 +78,7 @@ export function startLanguageClient(context: vscode.ExtensionContext): void {
         ],
         initializationOptions: {
             mcnpLineLimit: mcnpLineLimit(),
+            mcnpDialect: mcnpDialect(),
             workspaceRoot: workspaceRoot(),
             workspaceValidation: {
                 enabled: workspaceValidationEnabled(),
@@ -85,6 +95,7 @@ export function startLanguageClient(context: vscode.ExtensionContext): void {
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (
                 e.affectsConfiguration('owen.mcnp.lineLengthLimit')
+                || e.affectsConfiguration('owen.mcnp.dialect')
                 || e.affectsConfiguration('owen.mcnp.projectRoot')
                 || e.affectsConfiguration('owen.mcnp.workspaceValidation')
             ) {

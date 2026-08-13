@@ -12,7 +12,7 @@
  * No `vscode` / `vscode-languageserver` imports — headless-testable.
  */
 
-import { findOverlengthLines, MCNP_DEFAULT_LINE_LIMIT } from '../decorations/lineLength';
+import { describeLineLimit, findOverlengthLines, resolveLineLimit } from '../decorations/lineLength';
 import { PlainDiagnostic, PlainSeverity, RulesLanguage, RulesOptions } from './types';
 
 export function runLanguageRules(
@@ -331,15 +331,21 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
         }
     }
 
-    // Line-length rule (same math as the editor decoration in
-    // decorations/lineLength.ts so the two can never disagree).
-    const limit = options.mcnpLineLimit && options.mcnpLineLimit > 0
-        ? Math.floor(options.mcnpLineLimit)
-        : MCNP_DEFAULT_LINE_LIMIT;
-    for (const o of findOverlengthLines(text, limit)) {
+    // Line-length rule (same resolution + math as the editor decoration in
+    // decorations/lineLength.ts so the two can never disagree). Precedence:
+    // file directive (c owen: line-limit=N) > owen.mcnp.dialect > custom
+    // number > 80. The message names the dialect that produced the warning so
+    // users discover the toggle. 128-column source: LA-UR-24-24602 Rev. 1
+    // §3.2.2 + Table 4.1 (verified 2026-08-12).
+    const resolved = resolveLineLimit(text, {
+        dialect: options.mcnpDialect,
+        customLimit: options.mcnpLineLimit,
+    });
+    for (const o of findOverlengthLines(text, resolved.limit)) {
         push(diags, o.line, o.startCol, o.rawLength,
-            `MCNP card image exceeds ${limit} columns (line is ${o.expandedLength} columns after tab expansion). ` +
-            `Characters past column ${limit} are silently ignored by MCNP — split onto a continuation line.`,
+            `MCNP card image exceeds ${resolved.limit} columns (${describeLineLimit(resolved)}; ` +
+            `line is ${o.expandedLength} columns after tab expansion). ` +
+            `Characters past column ${resolved.limit} are silently ignored by MCNP — split onto a continuation line.`,
             'warning',
             'mcnp.line-length');
     }

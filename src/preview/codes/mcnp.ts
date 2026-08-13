@@ -29,6 +29,8 @@ import {
     BaffleNeighborhood, bafflePlates, emitMcnpRadialStructure,
     mcnpBaffleBand, mcnpBaffleUniverses,
 } from '../radialStructure';
+import { parseMcnpGeometry } from '../mcnpGeometry';
+import { buildCsgScene } from '../csgScene';
 
 type SurfaceType =
     | 'cz' | 'cx' | 'cy' | 'c/z' | 'c/x' | 'c/y'
@@ -39,6 +41,9 @@ type SurfaceType =
 interface MCNPSurface {
     id: number;
     type: SurfaceType;
+    /** Raw mnemonic as written (kept for honest skip reporting: a `so` and a
+     *  `gq` both map to type 'other' but must be named individually). */
+    mnemonic: string;
     params: number[];
 }
 
@@ -206,8 +211,13 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         topUid = [...axialStacks.keys()][0];
     }
 
-    // No hierarchy at all → fall back to drawing standalone z-axis cylinders.
+    // No hierarchy at all → run the exact CSG engine (Stage 2/4 of the
+    // geometry-preview plan): spheres, cones, tori, off-axis cylinders,
+    // wedges and planar solids render analytically with a per-cell census.
+    // Falls back to bare z-axis cylinders only if the engine draws nothing.
     if (topUid === null && latUniverses.size === 0) {
+        const csg = tryCsgScene(text, materials, warnings, notes);
+        if (csg) return csg;
         return renderBareSurfaces(surfaces, zBounds, warnings, notes, text);
     }
 
@@ -382,7 +392,9 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
 
     if (cylinders.length === 0) {
         warnings.push('Found `lat`/`fill`/`u` cards but could not expand the universe hierarchy (missing pin universes, fill array, or pitch surfaces). Check that pin universes reference cz/c/z cylinders and the lattice cell is bounded by px/py planes or an rpp.');
-        // Last resort: try drawing whatever bare cylinders exist.
+        // Try the exact CSG engine before the bare-cylinder last resort.
+        const csg = tryCsgScene(text, materials, warnings, notes);
+        if (csg) return csg;
         const bare = renderBareSurfaces(surfaces, zBounds, [], [], text);
         return { cylinders: bare.cylinders, warnings, notes: bare.notes };
     }
@@ -542,7 +554,7 @@ function parseSurface(card: string): MCNPSurface | null {
     const params = tokens.slice(idx + 1).map(Number).filter((n) => !Number.isNaN(n));
     const knownTypes: SurfaceType[] = ['cz', 'cx', 'cy', 'c/z', 'c/x', 'c/y', 'pz', 'px', 'py', 'rpp', 'rcc', 'rhp', 'hex'];
     const t = (knownTypes as string[]).includes(type) ? (type as SurfaceType) : 'other';
-    return { id, type: t, params };
+    return { id, type: t, mnemonic: type, params };
 }
 
 function cylinderRadius(s: MCNPSurface): number {
@@ -939,6 +951,40 @@ function countPins(
 }
 
 // ---------------------------------------------------------------------------
+// Exact CSG engine hook (geometry-preview plan Stages 1–4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the Stage-1 exact parser + Stage-2/4 primitive builder. Returns null
+ * when the engine produced nothing drawable (caller then falls back to bare
+ * surfaces). Never throws: a parser bug must degrade to the old behavior,
+ * not take down the preview.
+ */
+function tryCsgScene(
+    text: string,
+    materials: Map<number, MaterialInfo>,
+    warnings: string[],
+    notes: string[],
+): ParseResult | null {
+    try {
+        const model = parseMcnpGeometry(text);
+        if (model.cells.size === 0) return null;
+        const scene = buildCsgScene(model, materials);
+        if (scene.cylinders.length === 0) return null;
+        // Surface the model's parse warnings only when the engine actually
+        // renders (otherwise the fallback path reports its own story).
+        for (const w of model.warnings) warnings.push(w);
+        for (const w of scene.warnings) warnings.push(w);
+        for (const n of scene.notes) notes.push(n);
+        notes.push(`Exact-geometry engine: ${scene.cylinders.length} primitive(s) from ${model.cells.size} cell(s) (no lattice hierarchy in this deck).`);
+        return { cylinders: scene.cylinders, warnings, notes };
+    } catch (err) {
+        warnings.push(`Exact-geometry engine failed (${err instanceof Error ? err.message : String(err)}); fell back to bare surfaces.`);
+        return null;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Bare-surface fallback (no universes / lattices)
 // ---------------------------------------------------------------------------
 
@@ -957,26 +1003,47 @@ function renderBareSurfaces(
     }
 
     const cylinders: CylinderSpec[] = [];
-    let offAxis = 0;
+    // Honesty pass: every surface that exists but is not rendered is counted
+    // by its written mnemonic so the report can name each skipped type —
+    // unsupported geometry must never be silently dropped.
+    const skipped = new Map<string, number>();
+    const skip = (surf: MCNPSurface) => {
+        const key = surf.mnemonic || surf.type;
+        skipped.set(key, (skipped.get(key) ?? 0) + 1);
+    };
     for (const surf of surfaces.values()) {
         if (surf.type === 'cz') {
             const r = surf.params[0];
             if (r > 0) cylinders.push(makeBareCyl(0, 0, zmid, r, height, surf.id));
+            else skip(surf);
         } else if (surf.type === 'c/z') {
             const [x, y, r] = surf.params;
             if (r > 0) cylinders.push(makeBareCyl(x ?? 0, y ?? 0, zmid, r, height, surf.id));
+            else skip(surf);
         } else if (surf.type === 'rcc' && surf.params.length >= 7) {
             const r = surf.params[6];
             if (r > 0) cylinders.push(makeBareCyl(surf.params[0], surf.params[1], zmid, r, height, surf.id));
-        } else if (surf.type === 'cx' || surf.type === 'cy' || surf.type === 'c/x' || surf.type === 'c/y') {
-            offAxis++;
+            else skip(surf);
+        } else if (surf.type === 'pz' || surf.type === 'px' || surf.type === 'py') {
+            // Planes bound the render height/extent; not skipped geometry.
+        } else {
+            skip(surf);
         }
     }
 
     assignComponents(cylinders);
 
-    if (offAxis > 0) {
-        notes.push(`${offAxis} non-z-axis cylinder(s) (cx/cy/c/x/c/y) were skipped — the preview renders z-axis cylinders only.`);
+    if (skipped.size > 0) {
+        const list = [...skipped.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([mnemonic, n]) => `${mnemonic} ×${n}`)
+            .join(', ');
+        const detail = `Unsupported surface type(s) skipped: ${list}. ` +
+            'The bare-surface fallback renders z-axis cylinders (cz / c/z / z-aligned rcc) only.';
+        // Nothing rendered at all → this is the whole story; make it a warning.
+        // Partial render → a note so the user knows the picture is incomplete.
+        if (cylinders.length === 0) warnings.push(detail);
+        else notes.push(detail);
     }
     if (cylinders.length === 0) {
         warnings.push('No z-axis cylinders (cz / c/z / z-aligned rcc) found, and no `lat`/`fill`/`u` universe hierarchy to expand. Nothing to render.');

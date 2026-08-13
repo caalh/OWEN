@@ -23,6 +23,17 @@ export interface PlainDiagnostic {
 export type RulesLanguage = 'mcnp' | 'openmc' | 'serpent' | 'scone';
 
 export interface RulesOptions {
-    /** MCNP card-image column limit (owen.mcnp.lineLengthLimit). Default 80. */
+    /**
+     * MCNP card-image column limit (owen.mcnp.lineLengthLimit). Used when
+     * mcnpDialect is 'custom', or as the legacy pre-dialect setting when
+     * mcnpDialect is undefined. Default 80.
+     */
     mcnpLineLimit?: number;
+    /**
+     * owen.mcnp.dialect when the user has explicitly set it: 80 columns for
+     * 'mcnp6.1-and-earlier', 128 for 'mcnp6.2+', or the raw mcnpLineLimit for
+     * 'custom'. A `c owen: line-limit=N` directive in the file always wins.
+     * Resolution lives in decorations/lineLength.ts (resolveLineLimit).
+     */
+    mcnpDialect?: 'mcnp6.1-and-earlier' | 'mcnp6.2+' | 'custom';
 }

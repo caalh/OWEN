@@ -34,7 +34,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { mcnpCrossReferenceDiagnostics } from '../language/crossReference';
 import { runLanguageRules } from '../language/rules';
-import { PlainDiagnostic, RulesLanguage } from '../language/types';
+import { PlainDiagnostic, RulesLanguage, RulesOptions } from '../language/types';
 import {
     buildMcnpReferenceIndex,
     describeEntity,
@@ -104,6 +104,7 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
     const debounceMs = options.validationDebounceMs ?? VALIDATION_DEBOUNCE_MS;
 
     let mcnpLineLimit: number | undefined;
+    let mcnpDialect: RulesOptions['mcnpDialect'];
     let workspaceConfig: WorkspaceValidationConfig = {
         enabled: options.workspaceValidation?.enabled ?? true,
         projectRoot: options.workspaceValidation?.projectRoot ?? '',
@@ -150,11 +151,15 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
     connection.onInitialize((params: InitializeParams): InitializeResult => {
         const init = params.initializationOptions as {
             mcnpLineLimit?: number;
+            mcnpDialect?: RulesOptions['mcnpDialect'];
             workspaceValidation?: Partial<WorkspaceValidationConfig>;
             workspaceRoot?: string;
         } | undefined;
         if (init && typeof init.mcnpLineLimit === 'number') {
             mcnpLineLimit = init.mcnpLineLimit;
+        }
+        if (init && typeof init.mcnpDialect === 'string') {
+            mcnpDialect = init.mcnpDialect;
         }
         if (init?.workspaceValidation) {
             workspaceConfig = { ...workspaceConfig, ...init.workspaceValidation };
@@ -178,6 +183,7 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
             owen?: {
                 mcnp?: {
                     lineLengthLimit?: number;
+                    dialect?: RulesOptions['mcnpDialect'] | null;
                     projectRoot?: string;
                     workspaceValidation?: { enabled?: boolean; warnUnused?: boolean };
                 };
@@ -186,6 +192,9 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
         const mcnp = settings?.owen?.mcnp;
         const limit = mcnp?.lineLengthLimit;
         if (typeof limit === 'number' && limit > 0) mcnpLineLimit = limit;
+        // The client sends dialect: null when the user cleared the setting
+        // (undefined would be dropped by JSON), so assign whenever present.
+        if (mcnp && 'dialect' in mcnp) mcnpDialect = mcnp.dialect ?? undefined;
         if (mcnp) {
             if (typeof mcnp.projectRoot === 'string') workspaceConfig.projectRoot = mcnp.projectRoot;
             if (typeof mcnp.workspaceValidation?.enabled === 'boolean') {
@@ -203,7 +212,7 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
         const lang = rulesLanguage(doc.languageId);
         if (!lang) return [];
         const text = doc.getText();
-        const plain = runLanguageRules(lang, text, { mcnpLineLimit });
+        const plain = runLanguageRules(lang, text, { mcnpLineLimit, mcnpDialect });
         if (lang === 'mcnp') {
             if (projectRootDeck) {
                 const fp = decodeURIComponent(doc.uri.replace(/^file:\/\//, ''));
@@ -237,7 +246,7 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
             if (doc.languageId !== 'mcnp' || !doc.uri.startsWith('file:')) continue;
             const fp = path.normalize(decodeURIComponent(doc.uri.replace(/^file:\/\//, '')));
             if (!isInProject(fp, projectFilePaths)) continue;
-            const plain = runLanguageRules('mcnp', doc.getText(), { mcnpLineLimit });
+            const plain = runLanguageRules('mcnp', doc.getText(), { mcnpLineLimit, mcnpDialect });
             plain.push(...(ws.get(fp) ?? []));
             void connection.sendDiagnostics({
                 uri: doc.uri,

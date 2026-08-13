@@ -40,16 +40,44 @@ export interface CylinderSpec {
      *   `radius`, spanning `thetaLength` degrees starting at `thetaStart`
      *   (degrees, CCW from +x in plan view). Used for curved structures that a
      *   box misrepresents: neutron-shield pads, partial formers.
+     * - 'sphere' is centered at (x,y,z) with `radius`.
+     * - 'cone' is a truncated cone along `axis`: base `radius` → `topRadius`
+     *   over `height`, centered at (x,y,z).
+     * - 'torus' has major `radius` and minor `tube`, hole axis along `axis`.
+     * - 'ellipsoid' has semi-axes `halfX`/`halfY`/`halfZ`.
+     * - 'ellcyl' is an elliptic cylinder along `axis` with in-plane semi-axes
+     *   `halfX`/`halfY` and `height`.
+     * - 'polyhedron' is an arbitrary convex solid: `verts` (flat xyz list, cm)
+     *   + `faces` (vertex index loops). Emitted by the CSG engine for planar
+     *   cells (wedges, ducts, channel boxes).
+     * The non-cylinder shapes come from the Stage-2/4 CSG path (csgScene.ts);
+     * the instanced pin/lattice fast path still emits cylinders and boxes.
      */
-    shape?: 'cylinder' | 'box' | 'arc';
+    shape?: 'cylinder' | 'box' | 'arc' | 'sphere' | 'cone' | 'torus' | 'ellipsoid' | 'ellcyl' | 'polyhedron';
     /** Rectangular box half-size along x (cm). Falls back to `radius`. */
     halfX?: number;
     /** Rectangular box half-size along y (cm). Falls back to `radius`. */
     halfY?: number;
+    /** Ellipsoid semi-axis along z (cm). */
+    halfZ?: number;
     /** Arc start angle in degrees (plan view, CCW from +x). */
     thetaStart?: number;
     /** Arc angular span in degrees. */
     thetaLength?: number;
+    /** Cone top radius (base radius is `radius`); 0 = full cone tip. */
+    topRadius?: number;
+    /** Torus minor (tube) radius (cm). */
+    tube?: number;
+    /**
+     * Axis of symmetry for cylinder / cone / torus / ellcyl primitives.
+     * Default 'z' (the deck vertical). 'x'/'y' unlock horizontal channels
+     * (CANDU cx/cy) without a general rotation field.
+     */
+    axis?: 'x' | 'y' | 'z';
+    /** Polyhedron vertices, flat [x0,y0,z0, x1,y1,z1, …] in cm. */
+    verts?: number[];
+    /** Polyhedron faces: loops of vertex indices (convex, outward order). */
+    faces?: number[][];
     /**
      * Axial layer (z-band) this cylinder belongs to when the scene is expanded
      * with axial detail. Drives the per-axial-layer show/hide toggle and the

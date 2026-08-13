@@ -270,8 +270,16 @@ export function mcnpCzRadius(s: McnpSurfaceLike): number {
 }
 
 /**
- * Root-level (universe 0) annular cells bounded by cz pairs, plus neutron-shield
- * pads and downcomer from the BEAVRS surface id convention (80–86).
+ * Radial containment shells for MCNP decks (geometry-preview plan Stage 6:
+ * de-BEAVRSed). The general pass runs first and is material-driven: any
+ * root-level (universe 0) annular cell bounded by a cz pair, at a radius
+ * large relative to the deck's own biggest cylinder, becomes a shell — this
+ * covers VVER, compact vessels, and anything else with concentric
+ * containment, regardless of surface numbering or comments. The BEAVRS
+ * surface-id convention (80–86) remains as a fast special case that fills in
+ * pieces the general pass cannot see (the octant neutron-shield pads and a
+ * downcomer that isn't modeled as a single annular cell), but it is no longer
+ * load-bearing: it never duplicates a shell the general pass already drew.
  */
 export function emitMcnpRadialStructure(
     surfaces: Map<number, McnpSurfaceLike>,
@@ -282,18 +290,53 @@ export function emitMcnpRadialStructure(
 ): number {
     let n = 0;
     const czR = new Map<number, number>();
+    let maxCz = 0;
     for (const s of surfaces.values()) {
         if (s.type === 'cz' || s.type === 'c/z') {
             const r = mcnpCzRadius(s);
-            if (r > 0) czR.set(s.id, r);
+            if (r > 0) {
+                czR.set(s.id, r);
+                if (r > maxCz) maxCz = r;
+            }
         }
     }
 
     const getR = (id: number): number | undefined => czR.get(Math.abs(id));
 
-    // Named BEAVRS surfaces when present. Only trust the 80–86 id convention
-    // when the radii are plausibly vessel-scale (decks with auto-numbered
-    // surfaces can have small pin cylinders at these ids).
+    // Emitted [inner, outer] pairs, so the two passes never double-draw.
+    const emitted: [number, number][] = [];
+    const alreadyEmitted = (ri: number, ro: number): boolean =>
+        emitted.some(([a, b]) => Math.abs(a - ri) < 0.5 && Math.abs(b - ro) < 0.5);
+
+    // --- General pass: material-classified root annular cells. -------------
+    // Scale gate: a containment shell is large relative to the deck's own
+    // largest cylinder (30%), with an absolute floor so pin-scale annuli in
+    // small decks never read as vessels.
+    const minShellRadius = Math.max(20, 0.3 * maxCz);
+    for (const cell of cells) {
+        if (cell.u !== null && cell.u !== 0) continue;
+        const czIds = cell.surfaces.filter((s) => czR.has(Math.abs(s)));
+        if (czIds.length < 2) continue;
+        const pos = czIds.filter((s) => s > 0).map((s) => getR(s)!);
+        const neg = czIds.filter((s) => s < 0).map((s) => getR(Math.abs(s))!);
+        if (pos.length !== 1 || neg.length !== 1) continue;
+        const innerR = Math.min(pos[0], neg[0]);
+        const outerR = Math.max(pos[0], neg[0]);
+        if (!(outerR > innerR && outerR > minShellRadius)) continue;
+        if (alreadyEmitted(innerR, outerR)) continue;
+        const mat = materials?.get(cell.material);
+        const comp = mat?.component === Component.Moderator ? Component.Moderator
+            : mat?.component === Component.Structure ? Component.Vessel
+            : mat?.component ?? Component.Vessel;
+        const opacity = comp === Component.Moderator ? 0.12 : 0.4;
+        cylinders.push(annularShell(`cell_${cell.id}`, innerR, outerR, comp, mat?.name ?? 'Structure', ctx, opacity));
+        emitted.push([innerR, outerR]);
+        n++;
+    }
+
+    // --- BEAVRS id fast path (80–86): fills gaps only. ---------------------
+    // Only trusted when the radii are plausibly vessel-scale (decks with
+    // auto-numbered surfaces can have small pin cylinders at these ids).
     const vesselScale = (r: number | undefined): number | undefined =>
         r !== undefined && r > 50 ? r : undefined;
     const barrelIn = vesselScale(getR(80));
@@ -304,45 +347,22 @@ export function emitMcnpRadialStructure(
     const nsIn = vesselScale(getR(85));
     const nsOut = vesselScale(getR(86));
 
-    if (barrelIn !== undefined && barrelOut !== undefined && barrelOut > barrelIn) {
-        cylinders.push(annularShell('barrel', barrelIn, barrelOut, Component.Vessel, 'SS304', ctx, 0.45));
+    const pair = (label: string, ri: number | undefined, ro: number | undefined, comp: ComponentId, mat: string, op: number) => {
+        if (ri === undefined || ro === undefined || !(ro > ri)) return;
+        if (alreadyEmitted(ri, ro)) return;
+        cylinders.push(annularShell(label, ri, ro, comp, mat, ctx, op));
+        emitted.push([ri, ro]);
         n++;
-    }
+    };
+    pair('barrel', barrelIn, barrelOut, Component.Vessel, 'SS304', 0.45);
     if (nsIn !== undefined && nsOut !== undefined && nsOut > nsIn) {
         cylinders.push(...neutronShieldPads(nsIn, nsOut, ctx, 'mcnp_ns'));
         n += 4;
     }
-    if (nsOut !== undefined && linerIn !== undefined && linerIn > nsOut) {
-        cylinders.push(annularShell('downcomer', nsOut, linerIn, Component.Moderator, 'Water', ctx, 0.12));
-        n++;
-    }
-    if (linerIn !== undefined && rpvIn !== undefined && rpvIn > linerIn) {
-        cylinders.push(annularShell('rpv_liner', linerIn, rpvIn, Component.Vessel, 'SS304', ctx, 0.4));
-        n++;
-    }
-    if (rpvIn !== undefined && rpvOut !== undefined && rpvOut > rpvIn) {
-        cylinders.push(annularShell('rpv', rpvIn, rpvOut, Component.Vessel, 'CarbonSteel', ctx, 0.5));
-        n++;
-    }
+    pair('downcomer', nsOut, linerIn, Component.Moderator, 'Water', 0.12);
+    pair('rpv_liner', linerIn, rpvIn, Component.Vessel, 'SS304', 0.4);
+    pair('rpv', rpvIn, rpvOut, Component.Vessel, 'CarbonSteel', 0.5);
 
-    // Generic root annular cells (material steel/water + two cz surfaces).
-    if (n === 0) {
-        for (const cell of cells) {
-            if (cell.u !== null && cell.u !== 0) continue;
-            const czIds = cell.surfaces.filter((s) => czR.has(Math.abs(s)));
-            if (czIds.length < 2) continue;
-            const pos = czIds.filter((s) => s > 0).map((s) => getR(s)!);
-            const neg = czIds.filter((s) => s < 0).map((s) => getR(Math.abs(s))!);
-            if (pos.length !== 1 || neg.length !== 1) continue;
-            const innerR = Math.min(pos[0], neg[0]);
-            const outerR = Math.max(pos[0], neg[0]);
-            if (!(outerR > innerR && outerR > 50)) continue;
-            const mat = materials?.get(cell.material);
-            const comp = mat?.component ?? Component.Vessel;
-            cylinders.push(annularShell(`cell_${cell.id}`, innerR, outerR, comp, mat?.name ?? 'Structure', ctx, 0.3));
-            n++;
-        }
-    }
     return n;
 }
 
