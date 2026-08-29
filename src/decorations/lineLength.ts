@@ -207,11 +207,13 @@ export function classifyMcnpRuler(
 }
 
 /**
- * Find every line whose tab-expanded width exceeds `limit`. Used by both the
- * diagnostic provider and the editor decoration so the two never disagree.
+ * Find every line whose *card image* exceeds `limit`.
  *
- * @param text  full document text (any newline style)
- * @param limit max columns allowed (default {@link MCNP_DEFAULT_LINE_LIMIT})
+ * MCNP truncates every input line at the column limit (§3.2.2), including
+ * comments. Truncating a comment does not change the problem, so a `c` comment
+ * card (C in columns 1–5, §4.4.3) is not flagged, and neither is anything
+ * after a `$` that itself sits at or before the limit. A `$` past the limit is
+ * still flagged: MCNP never sees it, so the overflow is live card image.
  */
 export function findOverlengthLines(
     text: string,
@@ -221,15 +223,37 @@ export function findOverlengthLines(
     const lines = text.split(/\r\n|\r|\n/);
     for (let i = 0; i < lines.length; i++) {
         const raw = lines[i];
-        const expanded = expandedWidth(raw);
-        if (expanded > limit) {
+        if (isMcnpCommentCard(raw)) continue;
+        const width = cardImageWidth(raw);
+        if (width > limit) {
             out.push({
                 line: i,
                 startCol: limit,
-                expandedLength: expanded,
+                expandedLength: width,
                 rawLength: raw.length,
             });
         }
     }
     return out;
+}
+
+/**
+ * A comment card: `c` or `C` in columns 1–5 of the raw line (§4.4.3). The
+ * rest of the line is invisible to MCNP regardless of length.
+ */
+export function isMcnpCommentCard(line: string): boolean {
+    return /^\s{0,4}[cC](?:\s|$)/.test(line);
+}
+
+/**
+ * Expanded width of the part of the line MCNP would treat as a card image:
+ * everything before `$`, or the whole line when there is no `$`.
+ */
+export function cardImageWidth(line: string, tabWidth: number = TAB_WIDTH): number {
+    let col = 0;
+    for (const ch of line) {
+        if (ch === '$') return col;
+        col += ch === '\t' ? tabWidth - (col % tabWidth) : 1;
+    }
+    return col;
 }

@@ -74,15 +74,15 @@ export class InputBuilderPanel {
                 case 'insert':
                     await this._insertCode(this._autoNumberMcnpMaterial(String(msg.text ?? '')));
                     break;
-                case 'insertWithErrors': {
+                case 'exportWithErrors': {
                     const count = Number(msg.errors ?? 0);
                     const pick = await vscode.window.showWarningMessage(
                         `The deck has ${count} problem${count === 1 ? '' : 's'} that will stop the run.`,
                         { modal: true },
-                        'Insert anyway',
+                        'Continue anyway',
                     );
-                    if (pick === 'Insert anyway') {
-                        await this._insertCode(this._autoNumberMcnpMaterial(String(msg.text ?? '')));
+                    if (pick === 'Continue anyway') {
+                        await this._exportDeck(String(msg.then ?? 'insert'), msg);
                     }
                     break;
                 }
@@ -169,6 +169,16 @@ export class InputBuilderPanel {
         if (!isSingleMcnpMaterialBlock(code)) return code;
         const nextNum = nextMcnpMaterialNumber(this._editorTextForMaterialNumbering());
         return remapMcnpMaterialCard(code, nextNum);
+    }
+
+    private async _exportDeck(then: string, msg: { text?: string; codeLang?: string }) {
+        const text = String(msg.text ?? '');
+        if (then === 'insert') await this._insertCode(this._autoNumberMcnpMaterial(text));
+        else if (then === 'newFile') await this._newFile(text, String(msg.codeLang ?? 'mcnp'));
+        else if (then === 'copy') {
+            await vscode.env.clipboard.writeText(text);
+            vscode.window.setStatusBarMessage('OWEN: deck copied to the clipboard', 2500);
+        }
     }
 
     private async _insertCode(code: string) {

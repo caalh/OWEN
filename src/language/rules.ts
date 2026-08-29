@@ -349,6 +349,32 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
             'warning',
             'mcnp.line-length');
     }
+
+    // fill=0:N 0:M 0:0 is the OpenMC-style 0-based map. In MCNP the (0,0,0)
+    // element is the lattice cell as written (§5.5.5), so this range only
+    // tiles one direction from the origin — a centered assembly window then
+    // shows about a quarter of the pins on an exact 2D slice.
+    for (let i = 0; i < lines.length; i++) {
+        if (isCommentLine(lines[i], 'mcnp')) continue;
+        const m = lines[i].match(/\bfill\s*=\s*0:(\d+)\s+0:(\d+)\s+0:0\b/i);
+        if (!m) continue;
+        const i2 = parseInt(m[1], 10);
+        const j2 = parseInt(m[2], 10);
+        if (i2 < 4 || j2 < 4) continue;
+        const nx = i2 + 1;
+        const ny = j2 + 1;
+        const hi = Math.floor(i2 / 2);
+        const hj = Math.floor(j2 / 2);
+        const start = lines[i].search(/\bfill\s*=/i);
+        push(
+            diags, i, Math.max(0, start), lines[i].length,
+            `MCNP lattice fill=0:${i2} 0:${j2} 0:0 starts at the origin element (§5.5.5) and only indexes +i/+j, ` +
+            `so a centered assembly window shows about a quarter of the pins on an exact 2D slice. ` +
+            `For a centered ${nx}×${ny} use fill=-${hi}:${i2 - hi} -${hj}:${j2 - hj} 0:0.`,
+            'warning',
+            'mcnp.lattice-fill-origin',
+        );
+    }
 }
 
 function cellContinuesToImp(lines: string[], start: number): boolean {

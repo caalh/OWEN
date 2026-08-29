@@ -1,0 +1,76 @@
+ ====================>     TALLY 1: FUEL SPECTRUM     <=====================
+
+ Cell 1
+   Incoming Energy [1e-05, 0.625)
+     Total Material
+       Flux                                 1.87804 +/- 0.0206368
+   Incoming Energy [0.625, 5500)
+     Total Material
+       Flux                                 3.52148 +/- 0.0319899
+   Incoming Energy [5500, 820000)
+     Total Material
+       Flux                                 4.38857 +/- 0.0361567
+   Incoming Energy [820000, 20000000)
+     Total Material
+       Flux                                 3.36572 +/- 0.0266661
+ ======================>     TALLY 2: FUEL RATES     <======================
+
+ Cell 1
+   U235
+     Fission Rate                         0.527951 +/- 0.00614264
+     Absorption Rate                      0.64049 +/- 0.00726311
+     Nu-Fission Rate                      1.28333 +/- 0.0149252
+   U238
+     Fission Rate                         0.02907 +/- 0.000278776
+     Absorption Rate                      0.299597 +/- 0.00450658
+     Nu-Fission Rate                      0.0806731 +/- 0.000775536
+ =====================>     TALLY 3: FISSION MESH     <=====================
+
+ Mesh Index (1, 1, 1)
+   Total Material
+     Fission Rate                         0 +/- 0
+ Mesh Index (2, 1, 1)
+   Total Material
+     Fission Rate                         0.0148516 +/- 0.000276701
+ Mesh Index (3, 1, 1)
+   Total Material
+     Fission Rate                         0.0150783 +/- 0.000229237
+ Mesh Index (4, 1, 1)
+   Total Material
+     Fission Rate                         0 +/- 0
+ Mesh Index (1, 2, 1)
+   Total Material
+     Fission Rate                         0.0145365 +/- 0.000343508
+ Mesh Index (2, 2, 1)
+   Total Material
+     Fission Rate                         0.110357 +/- 0.00160548
+ Mesh Index (3, 2, 1)
+   Total Material
+     Fission Rate                         0.109567 +/- 0.00137172
+ Mesh Index (4, 2, 1)
+   Total Material
+     Fission Rate                         0.0143506 +/- 0.000296711
+ Mesh Index (1, 3, 1)
+   Total Material
+     Fission Rate                         0.01498 +/- 0.000313441
+ Mesh Index (2, 3, 1)
+   Total Material
+     Fission Rate                         0.109797 +/- 0.00134952
+ Mesh Index (3, 3, 1)
+   Total Material
+     Fission Rate                         0.109609 +/- 0.00180017
+ Mesh Index (4, 3, 1)
+   Total Material
+     Fission Rate                         0.0144178 +/- 0.000280196
+ Mesh Index (1, 4, 1)
+   Total Material
+     Fission Rate                         0 +/- 0
+ Mesh Index (2, 4, 1)
+   Total Material
+     Fission Rate                         0.0146029 +/- 0.000178591
+ Mesh Index (3, 4, 1)
+   Total Material
+     Fission Rate                         0.0148731 +/- 0.000302621
+ Mesh Index (4, 4, 1)
+   Total Material
+     Fission Rate                         0 +/- 0

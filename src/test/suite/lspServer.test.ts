@@ -10,6 +10,7 @@ import {
     createProtocolConnection,
     DefinitionRequest,
     DidOpenTextDocumentNotification,
+    DocumentHighlightRequest,
     DocumentSymbolRequest,
     HoverRequest,
     InitializedNotification,
@@ -156,7 +157,7 @@ suite('LSP server — in-process', () => {
     });
 
     test('mcnp6.2+ dialect over didChangeConfiguration relaxes the line limit', async () => {
-        const long = 'c ' + 'x'.repeat(100); // 102 columns: over 80, under 128
+        const long = '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(80); // ~101 columns: over 80, under 128
         const uri = 'file:///dialect.i';
         await openDoc(h, uri, 'mcnp', long);
         const before = await h.waitForDiagnostics(uri);
@@ -173,7 +174,7 @@ suite('LSP server — in-process', () => {
     });
 
     test('a file directive wins over the configured dialect', async () => {
-        const text = ['c owen: line-limit=90', 'c ' + 'x'.repeat(100)].join('\n');
+        const text = ['c owen: line-limit=90', '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(80)].join('\n');
         const uri = 'file:///directive.i';
         await h.client.sendNotification('workspace/didChangeConfiguration', {
             settings: { owen: { mcnp: { dialect: 'mcnp6.2+' } } },
@@ -181,7 +182,7 @@ suite('LSP server — in-process', () => {
         await openDoc(h, uri, 'mcnp', text);
         const params = await h.waitForDiagnostics(uri);
         const d = params.diagnostics.find((x) => x.code === 'mcnp.line-length');
-        assert.ok(d, 'expected the 90-column directive to flag the 102-column line');
+        assert.ok(d, 'expected the 90-column directive to flag the over-long card');
         const msg = typeof d!.message === 'string' ? d!.message : d!.message.value;
         assert.match(msg, /line-limit=90/);
     });
@@ -224,6 +225,38 @@ suite('LSP server — in-process', () => {
         })) as Location[];
         // surface 1: definition + refs in cells 1 and 2.
         assert.ok(refs.length >= 3, `expected >=3 references, got ${refs.length}`);
+    });
+
+    test('document highlight on a fill-array universe paints every sibling in the map', async () => {
+        const uri = 'file:///lat.i';
+        const text = [
+            '1 1 -10.4 -1 u=1 imp:n=1',
+            '4 3 -0.7 -3 u=2 imp:n=1',
+            '10 0 50 -51 52 -53 lat=1 u=10 imp:n=1',
+            '     fill=0:2 0:2 0:0',
+            '     1 2 1',
+            '     2 1 2',
+            '     1 2 1',
+            '',
+            '1 cz 0.40',
+            '3 cz 0.56',
+            '50 px -0.63',
+            '51 px 0.63',
+            '52 py -0.63',
+            '53 py 0.63',
+            'm1 92235.80c 1',
+            'm3 1001.80c 2 8016.80c 1',
+        ].join('\n');
+        await openDoc(h, uri, 'mcnp', text);
+        await h.waitForDiagnostics(uri);
+        const line = text.split('\n').indexOf('     1 2 1');
+        const hits = await h.client.sendRequest(DocumentHighlightRequest.type, {
+            textDocument: { uri },
+            position: { line, character: 7 },
+        });
+        assert.ok(Array.isArray(hits) && hits.length >= 4, `expected fill-array highlights, got ${hits && hits.length}`);
+        const onMap = hits.filter((x) => x.range.start.line >= line && x.range.start.line <= line + 2);
+        assert.ok(onMap.length >= 4, `expected ≥4 highlighted 2s in the map, got ${onMap.length}`);
     });
 
     test('document symbols outline cells/surfaces/materials', async () => {

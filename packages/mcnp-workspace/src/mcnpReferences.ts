@@ -633,7 +633,11 @@ export function resolveAt(index: McnpReferenceIndex, line: number, character: nu
 /** Alias used by providers/tests — entity (kind + id) at a source position. */
 export const entityAtPosition = resolveAt;
 
-/** Role-aware highlight/reference set for the entity under the cursor. */
+/** Role-aware highlight/reference set for the entity under the cursor.
+ *
+ *  A fill-array `2` is a universe reference, not material 2 or cell 2. Every
+ *  other placement of that universe in the same lattice (and `u=2` on its
+ *  pin cells) is included so a lattice map lights up as a pattern. */
 export function getHighlightOccurrences(
     index: McnpReferenceIndex,
     line: number,

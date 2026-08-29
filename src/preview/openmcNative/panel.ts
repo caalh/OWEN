@@ -14,15 +14,23 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { detectMonteCarloLanguage } from '../../util/detectLanguage';
+import { requireTrustedWorkspace } from '../../util/workspaceTrust';
 import {
     buildHelperScript,
     buildRenderRequest,
+    parseDeckArgs,
     parseRenderResult,
     PlotSpec,
     RenderResult,
     SliceBasis,
+    ViewFit,
 } from './core';
-import { resolveOpenmcInterpreter, ResolvedInterpreter, translatePathForCandidate } from './detect';
+import {
+    readDeckOptions,
+    resolveOpenmcInterpreter,
+    ResolvedInterpreter,
+    translatePathForCandidate,
+} from './detect';
 
 const RENDER_TIMEOUT_MS = 180000;
 
@@ -39,6 +47,10 @@ interface RenderView {
     pixels: [number, number];
     colorBy: 'material' | 'cell';
     rayTrace: boolean;
+    /** What an automatic view frames: the filled cells, or everything. */
+    fit: ViewFit;
+    /** Arguments the deck is run with, as typed (shell-like quoting). */
+    deckArgs: string;
 }
 
 const DEFAULT_VIEW: RenderView = {
@@ -48,6 +60,8 @@ const DEFAULT_VIEW: RenderView = {
     pixels: [800, 800],
     colorBy: 'material',
     rayTrace: false,
+    fit: 'materials',
+    deckArgs: '',
 };
 
 class OpenmcRenderPanel {
@@ -62,7 +76,11 @@ class OpenmcRenderPanel {
     private pendingView: RenderView | null = null;
     private disposables: vscode.Disposable[] = [];
 
-    static async createOrShow(deckPath: string, interpreter: ResolvedInterpreter): Promise<void> {
+    static async createOrShow(
+        deckPath: string,
+        interpreter: ResolvedInterpreter,
+        initialView: RenderView = DEFAULT_VIEW,
+    ): Promise<void> {
         if (OpenmcRenderPanel.current) {
             OpenmcRenderPanel.current.dispose();
         }
@@ -77,8 +95,8 @@ class OpenmcRenderPanel {
                 localResourceRoots: [vscode.Uri.file(sessionDir)],
             },
         );
-        OpenmcRenderPanel.current = new OpenmcRenderPanel(panel, sessionDir, deckPath, interpreter);
-        await OpenmcRenderPanel.current.render(DEFAULT_VIEW);
+        OpenmcRenderPanel.current = new OpenmcRenderPanel(panel, sessionDir, deckPath, interpreter, initialView);
+        await OpenmcRenderPanel.current.render(initialView);
     }
 
     private constructor(
@@ -86,6 +104,7 @@ class OpenmcRenderPanel {
         sessionDir: string,
         deckPath: string,
         interpreter: ResolvedInterpreter,
+        initialView: RenderView,
     ) {
         this.panel = panel;
         this.sessionDir = sessionDir;
@@ -95,6 +114,8 @@ class OpenmcRenderPanel {
             deckName: path.basename(deckPath),
             version: interpreter.openmcVersion,
             interpreterLabel: interpreter.candidate.label,
+            deckArgs: initialView.deckArgs,
+            fit: initialView.fit,
         });
         this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
         this.panel.webview.onDidReceiveMessage(
@@ -198,6 +219,8 @@ function sanitizeView(raw: unknown): RenderView {
         pixels,
         colorBy: v.colorBy === 'cell' ? 'cell' : 'material',
         rayTrace: !!v.rayTrace,
+        fit: v.fit === 'geometry' ? 'geometry' : 'materials',
+        deckArgs: typeof v.deckArgs === 'string' ? v.deckArgs.slice(0, 500) : '',
     };
 }
 
@@ -226,6 +249,11 @@ async function runOpenmcRender(
         await translatePathForCandidate(candidate, deckPath),
         await translatePathForCandidate(candidate, outDir),
         plots,
+        {
+            crossSections: readDeckOptions(vscode.Uri.file(deckPath)).crossSections,
+            deckArgs: parseDeckArgs(view.deckArgs),
+            fit: view.fit,
+        },
     );
     const requestPath = path.join(outDir, 'owen_request.json');
     fs.writeFileSync(requestPath, JSON.stringify(request, null, 1), 'utf8');
@@ -265,6 +293,7 @@ async function runOpenmcRender(
 
 export function registerOpenmcNativeRender(_context: vscode.ExtensionContext): vscode.Disposable {
     return vscode.commands.registerCommand('owen.renderWithOpenmc', async () => {
+        if (!(await requireTrustedWorkspace('run OpenMC and render its native plots'))) return;
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showWarningMessage('OWEN: open an OpenMC Python model first.');
@@ -301,13 +330,23 @@ export function registerOpenmcNativeRender(_context: vscode.ExtensionContext): v
         }
 
         log(`Using ${interpreter.candidate.label} (OpenMC ${interpreter.openmcVersion})`);
-        await OpenmcRenderPanel.createOrShow(deckPath, interpreter);
+        const settings = readDeckOptions(editor.document.uri);
+        await OpenmcRenderPanel.createOrShow(deckPath, interpreter, {
+            ...DEFAULT_VIEW,
+            deckArgs: settings.deckArgs?.join(' ') ?? '',
+        });
     });
 }
 
 function buildHtml(
     webview: vscode.Webview,
-    info: { deckName: string; version: string; interpreterLabel: string },
+    info: {
+        deckName: string;
+        version: string;
+        interpreterLabel: string;
+        deckArgs: string;
+        fit: ViewFit;
+    },
 ): string {
     const cspSource = webview.cspSource;
     const nonce = makeNonce();
@@ -326,6 +365,7 @@ function buildHtml(
   .ctl label { opacity: 0.65; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
   .ctl input, .ctl select { background: #16203a; color: #cdd6f4; border: 1px solid #2b3a5c; border-radius: 4px; padding: 3px 6px; font-size: 12px; width: 72px; }
   .ctl select { width: auto; }
+  .ctl input.wide { width: 190px; }
   .grp { display: flex; gap: 4px; }
   button { background: #1c2740; color: #cdd6f4; border: 1px solid #2b3a5c; border-radius: 5px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
   button:hover { background: #24345a; }
@@ -368,6 +408,15 @@ function buildHtml(
     <div class="ctl"><label>Color by</label>
       <select id="colorBy"><option value="material">material</option><option value="cell">cell</option></select>
     </div>
+    <div class="ctl"><label>Auto fit</label>
+      <select id="fit">
+        <option value="materials"${info.fit === 'materials' ? ' selected' : ''}>filled cells</option>
+        <option value="geometry"${info.fit === 'geometry' ? ' selected' : ''}>whole geometry</option>
+      </select>
+    </div>
+    <div class="ctl"><label>Deck arguments</label>
+      <input id="deckArgs" class="wide" placeholder="--preset base" value="${esc(info.deckArgs)}" />
+    </div>
     <label class="rt" id="rtRow"><input type="checkbox" id="rayTrace" /> 3D ray trace</label>
     <button class="primary" id="renderBtn">Render</button>
     <div id="meta">${esc(info.deckName)} • OpenMC ${esc(info.version)}<br/>${esc(info.interpreterLabel)}</div>
@@ -395,6 +444,8 @@ function buildHtml(
       pixels: [800, 800],
       colorBy: document.getElementById('colorBy').value,
       rayTrace: document.getElementById('rayTrace').checked,
+      fit: document.getElementById('fit').value,
+      deckArgs: document.getElementById('deckArgs').value,
     };
   }
   function requestRender() {
@@ -409,7 +460,8 @@ function buildHtml(
   }));
   document.getElementById('colorBy').addEventListener('change', requestRender);
   document.getElementById('rayTrace').addEventListener('change', requestRender);
-  for (const id of ['ox', 'oy', 'oz', 'w1', 'w2']) {
+  document.getElementById('fit').addEventListener('change', requestRender);
+  for (const id of ['ox', 'oy', 'oz', 'w1', 'w2', 'deckArgs']) {
     document.getElementById(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') requestRender(); });
   }
 

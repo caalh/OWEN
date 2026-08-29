@@ -341,6 +341,40 @@ suite('ADV MCNP extractor', () => {
         assert.ok(mats.has('B4C'), `B4C not classified: ${[...mats]}`);
     });
 
+    test('whole-space universe (-3:3) draws nothing and costs no pin budget', () => {
+        // `-3:3` is the union of both senses of surface 3, i.e. all space: the
+        // idiom for a homogeneous universe, used to fill the water gap between
+        // assemblies and the unloaded ring of a core lattice. Reading its `-3`
+        // as a bounding cylinder invented a coolant rod at every such position
+        // and spent enough instance budget to silence axial expansion.
+        const deck = [
+            ...pinDeck(1),
+            '61 3 -1.0 -1:1 u=30 imp:n=1',
+            '500 0 -10 11 -12 13 lat=1 u=5 fill=0:1 0:1 0:0 1 30 30 30 imp:n=1',
+            '900 0 -10 11 -12 13 fill=5 imp:n=1',
+            ...COMMON_TAIL,
+        ].join('\n');
+        const res = parseMcnp(deck);
+        assert.strictEqual(res.fidelity?.totalPins, 1,
+            `the three water elements were counted as pins: ${res.fidelity?.totalPins}`);
+        assert.ok(res.cylinders.every((c) => c.component !== Component.Moderator),
+            `a water rod was drawn: ${JSON.stringify(res.cylinders.map((c) => [c.component, c.radius]))}`);
+    });
+
+    test('an annulus keeps its bound when two different surfaces appear', () => {
+        // The guard above must not fire on `1 -2`, where the senses belong to
+        // different surfaces and the cell really is bounded.
+        const deck = [
+            ...pinDeck(1),
+            '500 0 -10 11 -12 13 lat=1 u=5 fill=0:0 0:0 0:0 1 imp:n=1',
+            '900 0 -10 11 -12 13 fill=5 imp:n=1',
+            ...COMMON_TAIL,
+        ].join('\n');
+        const res = parseMcnp(deck);
+        const radii = res.cylinders.map((c) => c.radius).sort((a, b) => a - b);
+        assert.ok(radii.includes(0.475), `the 1 -2 clad annulus lost its radius: ${JSON.stringify(radii)}`);
+    });
+
     test('enrichment naming distinguishes fuel zones', () => {
         const deck = [
             '101 1 -10.4 -1 u=1 imp:n=1',
@@ -362,5 +396,25 @@ suite('ADV MCNP extractor', () => {
         const res = parseMcnp(deck);
         const mats = new Set(res.cylinders.filter((c) => c.component === Component.Fuel).map((c) => c.material));
         assert.ok(mats.size >= 2, `enrichment zones collapsed: ${[...mats]}`);
+    });
+
+    test('fill=0:N 0:N on a large lattice notes that 3D centers the map', () => {
+        const deck = [
+            ...pinDeck(1),
+            '500 0 -10 11 -12 13 lat=1 u=5 fill=0:16 0:16 0:0 1 288r imp:n=1',
+            '900 0 -10 11 -12 13 fill=5 imp:n=1',
+            ...COMMON_TAIL,
+        ].join('\n');
+        const res = parseMcnp(deck);
+        const notes = res.notes ?? [];
+        assert.ok(notes.some((n) => /one quadrant/.test(n)),
+            `expected a 3D-vs-2D fill-origin note, got: ${notes.join(' | ')}`);
+        const centered = parseMcnp([
+            ...pinDeck(1),
+            '500 0 -10 11 -12 13 lat=1 u=5 fill=-8:8 -8:8 0:0 1 288r imp:n=1',
+            '900 0 -10 11 -12 13 fill=5 imp:n=1',
+            ...COMMON_TAIL,
+        ].join('\n'));
+        assert.ok(!(centered.notes ?? []).some((n) => /one quadrant/.test(n)));
     });
 });

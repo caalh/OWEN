@@ -91,6 +91,29 @@ export interface FillGrid {
     entries: FillEntry[];
 }
 
+/**
+ * `fill=0:N 0:M 0:0` is the OpenMC-style 0-based map. In MCNP the (0,0,0)
+ * element is the lattice cell as written — usually the origin window — and
+ * the first listed surface pair runs +i (§5.5.5). That range therefore tiles
+ * only one direction from the origin, so a centered assembly `rpp` shows
+ * about a quarter of the pins on an exact slice. Returns a warning, or null
+ * when the range already straddles zero (e.g. `-8:8`).
+ */
+export function oneSidedLatticeFillWarning(cellId: number, g: FillGrid): string | null {
+    if (g.i1 !== 0 || g.j1 !== 0) return null;
+    if (g.i2 < 4 || g.j2 < 4) return null;
+    const nx = g.i2 + 1;
+    const ny = g.j2 + 1;
+    const hi = Math.floor(g.i2 / 2);
+    const hj = Math.floor(g.j2 / 2);
+    return (
+        `Cell ${cellId}: fill=0:${g.i2} 0:${g.j2} ${g.k1}:${g.k2} starts at the origin ` +
+        `lattice element (§5.5.5) and only indexes +i/+j, so a centered assembly ` +
+        `window shows about a quarter of the pins on an exact 2D slice. For a ` +
+        `centered ${nx}×${ny} use fill=-${hi}:${g.i2 - hi} -${hj}:${g.j2 - hj} ${g.k1}:${g.k2}.`
+    );
+}
+
 export interface FillEntry {
     universe: number;
     tr: Transform | null;
@@ -1480,6 +1503,12 @@ export function parseMcnpGeometry(text: string, opts: McnpParseOptions = {}): Mc
         const u = cell.universe;
         if (!universes.has(u)) universes.set(u, []);
         universes.get(u)!.push(cell.id);
+    }
+
+    for (const cell of cells.values()) {
+        if (cell.lat === 0 || !cell.fill?.grid) continue;
+        const w = oneSidedLatticeFillWarning(cell.id, cell.fill.grid);
+        if (w) warnings.push(w);
     }
 
     return {

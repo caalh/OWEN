@@ -113,6 +113,15 @@ suite('Input Builder — live webview', () => {
         const focused = last!.model as DeckModel;
         assert.ok(focused.sections.some((s) => s.kind === 'lattice'),
             'focusing the lattice tab should leave a lattice section in the model');
+        const lat = focused.sections.find((s) => s.kind === 'lattice');
+        const bound = focused.sections.find((s) => s.kind === 'boundary');
+        if (!lat || lat.kind !== 'lattice' || !bound || bound.kind !== 'boundary') {
+            assert.fail('focusSection should leave both a lattice and a boundary');
+            return;
+        }
+        assert.strictEqual(bound.fillLatticeId, lat.id,
+            'adding a lattice must fill it into the boundary, not leave fill=1 on the pin');
+        assert.ok(bound.size >= 10.71 - 1e-6, `boundary half-size ${bound.size} is smaller than a 17×17 of pitch 1.26`);
         assert.strictEqual(seen.filter((m) => m.command === 'clientError').length, 0);
     });
 

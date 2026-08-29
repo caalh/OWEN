@@ -10,7 +10,33 @@ import {
     parseWslDiscovery,
     toWslPath,
     PlotSpec,
+    parseDeckArgs,
 } from '../../preview/openmcNative/core';
+import { normalizeDeckOptions } from '../../preview/openmcNative/deckLoader';
+
+suite('OpenMC native render — deck arguments', () => {
+    test('splits on whitespace and respects quotes', () => {
+        assert.deepStrictEqual(parseDeckArgs('--preset seventy_thirty_base'), ['--preset', 'seventy_thirty_base']);
+        assert.deepStrictEqual(parseDeckArgs('--cwd "run dir" -n 5'), ['--cwd', 'run dir', '-n', '5']);
+        assert.deepStrictEqual(parseDeckArgs("--name 'a b'"), ['--name', 'a b']);
+        assert.deepStrictEqual(parseDeckArgs('   '), []);
+        assert.deepStrictEqual(parseDeckArgs(undefined), []);
+    });
+
+    test('an empty quoted argument survives (it is a real argv entry)', () => {
+        assert.deepStrictEqual(parseDeckArgs('--tag ""'), ['--tag', '']);
+    });
+
+    test('options default to framing the filled cells', () => {
+        assert.deepStrictEqual(normalizeDeckOptions(undefined), {
+            crossSections: '',
+            deckArgs: [],
+            fit: 'materials',
+        });
+        assert.strictEqual(normalizeDeckOptions({ fit: 'geometry' }).fit, 'geometry');
+        assert.strictEqual(normalizeDeckOptions({ crossSections: '  /opt/xs.xml ' }).crossSections, '/opt/xs.xml');
+    });
+});
 
 suite('OpenMC native render — interpreter candidate ordering', () => {
     test('explicit setting outranks everything', () => {
@@ -119,13 +145,32 @@ suite('OpenMC native render — helper script generation', () => {
 
     test('monkey-patches openmc.run and Model.run so decks cannot start transport', () => {
         assert.ok(script.includes('openmc.run = _skip_run'));
-        assert.ok(script.includes('model_cls.run = _capture_run'));
+        assert.ok(script.includes('model_cls.run = _model_run'));
         assert.ok(script.includes("run_name='__main__'"), 'deck executed as __main__ via runpy');
+    });
+
+    test('captures models built inside a function, not just module globals', () => {
+        // A deck whose model is a local in main() used to be invisible.
+        assert.ok(script.includes('model_cls.__init__ = _model_init'));
+        assert.ok(script.includes('geometry_cls.__init__ = _geometry_init'));
+        assert.ok(script.includes('owen_call_builders'), 'zero-argument builders are a fallback');
+    });
+
+    test('lends the deck a cross-section path and withdraws a stand-in before plotting', () => {
+        assert.ok(script.includes('owen_prepare_cross_sections'));
+        assert.ok(script.includes('owen_release_cross_sections'));
+        assert.ok(script.includes("os.environ['OPENMC_CROSS_SECTIONS'] = found"));
+    });
+
+    test('automatic framing prefers the material-filled cells', () => {
+        assert.ok(script.includes('owen_geometry_bounds'));
+        assert.ok(script.includes("if fit == 'materials'"));
+        assert.ok(script.includes("getattr(cell, 'fill', None) is None"));
     });
 
     test('uses the stable plots.xml + plot_geometry path, ray trace only if available', () => {
         assert.ok(script.includes('openmc.Plots(plots).export_to_xml()'));
-        assert.ok(script.includes('real_plot_geometry'));
+        assert.ok(script.includes("ctx['realPlotGeometry']"));
         assert.ok(script.includes("[exe, '--plot']"), 'subprocess fallback for old APIs');
         assert.ok(script.includes("os.path.dirname(sys.executable), 'openmc'"), 'finds openmc binary next to interpreter');
         assert.ok(script.includes("getattr(openmc, 'SolidRayTracePlot', None)"));

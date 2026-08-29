@@ -24,6 +24,7 @@ import {
     parseWslDiscovery,
     toWslPath,
 } from './core';
+import { buildCrossSectionProbe, DeckLoadOptions, parseDeckArgs } from './deckLoader';
 
 const PROBE_TIMEOUT_MS = 15000;
 
@@ -47,6 +48,20 @@ function execFileAsync(
             },
         );
     });
+}
+
+/**
+ * Deck-execution settings shared by "Render with OpenMC" and "Verify
+ * Geometry": which cross-section library to lend the deck, and the arguments
+ * to run it with. Both are per-workspace so a project with presets can pin
+ * the one OWEN should render.
+ */
+export function readDeckOptions(resource?: vscode.Uri): DeckLoadOptions {
+    const cfg = vscode.workspace.getConfiguration('owen', resource);
+    return {
+        crossSections: (cfg.get<string>('openmc.crossSections') ?? '').trim(),
+        deckArgs: parseDeckArgs(cfg.get<string>('openmc.deckArgs') ?? ''),
+    };
 }
 
 /** The `owen.openmc.pythonExecutable` value, but only if the user set it. */
@@ -143,6 +158,24 @@ export async function resolveOpenmcInterpreter(
         if (version) return { candidate, openmcVersion: version };
     }
     return null;
+}
+
+/**
+ * The cross-section library the given interpreter can see, or undefined.
+ *
+ * Asked of the interpreter rather than of OWEN because the search includes
+ * OpenMC's own config file and paths inside WSL, neither of which the extension
+ * host can read. A transport run needs the real library — unlike plotting,
+ * there is no useful stand-in.
+ */
+export async function resolveCrossSections(
+    candidate: InterpreterCandidate,
+    hint?: string,
+): Promise<string | undefined> {
+    const args = [...candidate.argsPrefix, '-c', buildCrossSectionProbe(hint)];
+    const res = await execFileAsync(candidate.command, args, PROBE_TIMEOUT_MS);
+    const found = res.stdout.trim().split(/\r?\n/).pop()?.trim();
+    return res.ok && found ? found : undefined;
 }
 
 /** Translates a Windows path for a WSL-hosted interpreter via `wslpath`. */

@@ -1,0 +1,144 @@
+          Code Name & Version = MCNP_6.20, 6.2.0
+  
+1mcnp     version 6     ld=02/20/18                     08/29/26 09:15:22 
+ *************************************************************************                 probid =  08/29/26 09:15:22 
+ i=pin.i o=outp
+ 
+      1-       Pin cell, synthetic fixture in real outp layout
+      2-       c cell cards
+ 
+   warning.  material        3 is not used in the problem.
+   warning.    1 cell densities are greater than 40 gram/cc.
+1cells                                                                                                  print table 60
+ 
+                                    atom        gram                                            photon     electron
+              cell  mat   density     density      volume       mass            pieces importance importance
+ 
+        1        1        1  6.85280E-02 1.04000E+01 5.26814E-01 5.47886E+00           1 1.0000E+00 1.0000E+00
+ 
+          2 warning messages so far.
+1cross-section tables                                                                                   print table 100
+ 
+     table    length
+ 
+      92235.80c    5688  U235 ENDF71x
+      92238.80c    9012  U238 ENDF71x
+ 
+1problem summary                                                                                                           
+ 
+      run terminated when     2000000  particle histories were done.
++                                                                                                    08/29/26 09:47:03 
+ 
+ =====>      3.82 M histories/hr    (based on wall-clock time in mcrun)
+ 
+1tally        4        nps =     2000000
+           tally type 4    track length estimate of particle flux.                             
+           particle(s): neutrons 
+ 
+           volumes 
+                   cell:       1                                                                                   
+                         5.26814E-01
+ 
+ cell  1                                                                                                                               
+         energy   
+    1.0000E-03   4.32106E-03 0.0021
+    1.0000E-02   1.89234E-02 0.0018
+    1.0000E-01   5.67891E-02 0.0015
+    1.0000E+00   3.45678E-02 0.0019
+    1.0000E+01   1.23456E-02 0.0023
+      total      1.26947E-01 0.0012
+ 
+ ===================================================================================================================================
+ 
+           results of 10 statistical checks for the estimated answer for the tally fluctuation chart (tfc) bin of tally        4
+ 
+ tfc bin     --mean--      ---------relative error---------      ----variance of the variance----      --figure of merit--     -pdf-
+ behavior    behavior      value   decrease   decrease rate      value   decrease   decrease rate       value     behavior     slope
+ 
+ desired      random       <0.10      yes      1/sqrt(nps)       <0.10      yes        1/nps           constant    random      >3.00
+ observed     random        0.00      yes          yes            0.00      yes         yes            constant    random      10.00
+ passed?        yes          yes      yes          yes             yes      yes         yes               yes        yes         yes
+ 
+ ===================================================================================================================================
+ 
+ this tally meets the statistical criteria used to form confidence intervals: check the tally fluctuation chart to verify.
+ 
+ ----- estimated confidence intervals:  -----
+ 
+ estimated asymmetric confidence interval(1,2,3 sigma): 1.2679E-01 to 1.2710E-01; 1.2664E-01 to 1.2725E-01; 1.2648E-01 to 1.2741E-01
+ 
+1analysis of the results in the tally fluctuation chart bin (tfc) for tally 4 with nps = 2000000           print table 160
+ 
+ normed average tally per history  = 1.26947E-01          unnormed average tally per history  = 6.68668E-02
+ estimated tally relative error    = 0.0012               estimated variance of the variance  = 0.0000
+ 
+ fom = (histories/minute)*(f(x) signal-to-noise ratio)**2 = (6.367E+04)*( 1.021E+00)**2 = (6.367E+04)*(1.042E+00) = 6.634E+04
+ 
+1tally        7        nps =     2000000
+           tally type 7    fission energy deposition.                                          
+           particle(s): neutrons 
+ 
+           volumes 
+                   cell:       1                                                                                   
+                         5.26814E-01
+ 
+ cell  1                                                                                                                               
+                 2.84512E-01 0.0009
+ 
+ ===================================================================================================================================
+ 
+1tally       14        nps =     2000000
+           tally type 4    track length estimate of particle flux.                             
+           particle(s): neutrons 
+ 
+           volumes 
+                   cell:       9                                                                                   
+                         1.00000E+00
+ 
+ cell  9                                                                                                                               
+                 0.00000E+00 0.0000
+ 
+ ===================================================================================================================================
+ 
+ the estimated average keffs, one standard deviations, and 68, 95, and 99 percent confidence intervals are:
+ 
+  keff estimator     keff      standard deviation     68% confidence          95% confidence           99% confidence
+  collision        1.31245        0.00062        1.31183 to 1.31307     1.31123 to 1.31367     1.31084 to 1.31406
+  absorption       1.31198        0.00058        1.31140 to 1.31256     1.31084 to 1.31312     1.31047 to 1.31349
+  track-length     1.31267        0.00071        1.31196 to 1.31338     1.31128 to 1.31406     1.31084 to 1.31450
+ 
+ the final estimated combined collision/absorption/track-length keff = 1.31231 with an estimated standard deviation of 0.00054
+ 
+1status of the statistical checks used to form confidence intervals for the mean for each tally bin
+ 
+ tally   result of statistical checks for the tfc bin (the first check not passed is listed) and error magnitude check for all bins
+ 
+        4   passed the 10 statistical checks for the tally fluctuation chart bin result               
+          passed all bin error check:     6 tally bins all have relative errors less than 0.10 with no zero bins
+ 
+        7   missed  1 of 10 tfc bin checks: the relative error does not decrease monotonically for the last half of the problem
+          passed all bin error check:     1 tally bins all have relative errors less than 0.10 with no zero bins
+ 
+       14   no nonzero tallies were made in the tally fluctuation chart bin                           
+          no nonzero tallies were made in any one of the      1 tally bins
+ 
+ the 10 statistical checks are only for the tally fluctuation chart bin and do not apply to other tally bins.
+ 
+ warning.       1 of the     3 tally fluctuation chart bins did not pass all 10 statistical checks.
+ warning.       1 of the     3 tallies were all zeros.
+1tally fluctuation charts                              
+ 
+                            tally        4                          tally        7                          tally       14
+          nps      mean     error   vov  slope    fom      mean     error   vov  slope    fom      mean     error   vov  slope    fom
+       500000   1.2691E-01 0.0024 0.0000 10.0   66102   2.8443E-01 0.0018 0.0000 10.0  118344   0.0000E+00 0.0000 0.0000  0.0 0.0E+00
+      1000000   1.2693E-01 0.0017 0.0000 10.0   66285   2.8449E-01 0.0013 0.0000 10.0  118980   0.0000E+00 0.0000 0.0000  0.0 0.0E+00
+      1500000   1.2695E-01 0.0014 0.0000 10.0   66341   2.8450E-01 0.0011 0.0000 10.0  119104   0.0000E+00 0.0000 0.0000  0.0 0.0E+00
+      2000000   1.2695E-01 0.0012 0.0000 10.0   66340   2.8451E-01 0.0009 0.0000 10.0  119210   0.0000E+00 0.0000 0.0000  0.0 0.0E+00
+ 
+ ***********************************************************************************************************************
+ 
+ run terminated when     2000000  particle histories were done.
+ 
+ computer time =   31.42 minutes
+ 
+ mcnp     version 6     02/20/18                     08/29/26 09:47:03                     probid =  08/29/26 09:15:22 

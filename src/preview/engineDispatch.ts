@@ -9,6 +9,7 @@
 import { McnpGeometryModel, parseMcnpGeometry } from './mcnpGeometry';
 import { parseSerpentGeometry } from './serpentGeometry';
 import { parseSconeGeometry } from './sconeGeometry';
+import { looksLikeOpenmcXml, parseOpenmcGeometryXml } from './openmcGeometry';
 
 /** Parse a deck into the shared exact-geometry model, or null when the
  *  language has no engine parser yet. */
@@ -20,6 +21,8 @@ export function parseDeckToModel(text: string, language: string): McnpGeometryMo
             return parseSerpentGeometry(text);
         case 'scone':
             return parseSconeGeometry(text);
+        case 'openmc':
+            return looksLikeOpenmcXml(text) ? parseOpenmcGeometryXml(text) : null;
         default:
             return null;
     }
@@ -28,8 +31,7 @@ export function parseDeckToModel(text: string, language: string): McnpGeometryMo
 /** Human note shown when the slice view cannot run for this deck. */
 export function sliceSupportNote(language: string): string {
     if (language === 'openmc') {
-        return 'Exact 2D slices classify MCNP, Serpent and SCONE decks. For OpenMC use ' +
-            '"OWEN: Render with OpenMC (authoritative)" — the native plotter is the ground truth there.';
+        return 'Exact 2D slices need an OpenMC model. OWEN loads it from geometry.xml / model.xml, or by running the Python deck the same way "Render with OpenMC" does. If OpenMC is not installed, use that command instead.';
     }
     return 'No cells could be parsed from this deck, so there is nothing to classify. ' +
         'Check the Problems panel for parse warnings.';

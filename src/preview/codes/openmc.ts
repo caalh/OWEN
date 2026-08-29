@@ -19,6 +19,9 @@ import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, Fid
 import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import { BaffleNeighborhood, baffleBox, bafflePlates, emitOpenmcRadialStructure } from '../radialStructure';
+import { buildOpenmcShellScene } from './openmcShells';
+import { looksLikeOpenmcXml, openmcMaterialLookup, parseOpenmcGeometryXml } from '../openmcGeometry';
+import { buildCsgScene } from '../csgScene';
 
 interface NamedValue {
     name: string;
@@ -62,6 +65,19 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     const height = findHeight(lines);
     const fuelName = findFuelName(text);
 
+    if (looksLikeOpenmcXml(text)) {
+        const model = parseOpenmcGeometryXml(text);
+        const mats = openmcMaterialLookup(text);
+        const scene = buildCsgScene(model, mats);
+        const notes = [...scene.notes, `Exact OpenMC XML: ${scene.cylinders.length} primitive(s) from ${model.cells.size} cell(s).`];
+        return {
+            cylinders: scene.cylinders,
+            warnings: [...model.warnings, ...scene.warnings],
+            notes,
+            fidelity: { detail: 'layers', axial: false, autoDetail: 'layers', totalPins: Math.max(1, scene.cylinders.length), hasAxial: false },
+        };
+    }
+
     const fuelTemplate = buildTemplate(radiiPool, 'fuel', fuelName);
     const guideTemplate = buildTemplate(radiiPool, 'guide');
     const instrTemplate = buildTemplate(radiiPool, 'instrument');
@@ -87,14 +103,38 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
     const coreTree = (!grid || grid.length === 0) ? resolveCoreTree(text) : null;
 
     if ((!grid || grid.length === 0) && !coreTree) {
+        const fidelity: FidelityState = { detail: 'layers', axial: false, autoDetail: 'layers', totalPins: 1, hasAxial: false };
+
+        // Not every OpenMC deck is a pin lattice. Before falling back on a
+        // representative pin, try to rebuild the shells the deck states
+        // outright (vessels, chambers, sphere benchmarks) — drawing a 0.41 cm
+        // fuel pin for a 218 cm chamber is worse than drawing less.
+        if (!hasLattice) {
+            const shells = buildOpenmcShellScene(text);
+            if (shells) {
+                notes.push(`No lattice in this deck — rebuilt ${shells.rendered} shell(s) from its surfaces and cell regions.`);
+                if (shells.unresolved.length > 0) {
+                    warnings.push(
+                        `${shells.unresolved.length} of ${shells.filledCells} material cells could not be sized `
+                        + `(${shells.unresolved.slice(0, 4).join(', ')}${shells.unresolved.length > 4 ? ', …' : ''}): `
+                        + 'their dimensions come from function arguments or dataclass fields, which this text parser does not execute. '
+                        + 'The preview will load the live OpenMC model when an interpreter is available.'
+                    );
+                }
+                if (shells.approximated) {
+                    notes.push('A cell region used a union or complement; it is drawn from its operands, so that shell is approximate.');
+                }
+                return { cylinders: shells.cylinders, warnings, notes, fidelity };
+            }
+        }
+
         const single = fuelTemplate ?? defaultTemplate('fuel');
         const cyls = emitLayers(single.radii, single.components, 0, 0, 0, height, 'pin', undefined, single.materials);
         if (hasLattice) {
             warnings.push('A lattice was declared but its universe map could not be expanded (it is likely built by a function or comprehension OWEN does not execute). Showing a single representative pin.');
         } else {
-            notes.push('No lattice found — rendered a single pin cell.');
+            warnings.push('OWEN could not recognize this deck\'s geometry: no lattice, and no surfaces or cell regions it could resolve without running the Python. The single pin shown is a placeholder, not your model — use "OWEN: Render with OpenMC (authoritative)" for this deck.');
         }
-        const fidelity: FidelityState = { detail: 'layers', axial: false, autoDetail: 'layers', totalPins: 1, hasAxial: false };
         return { cylinders: cyls, warnings, notes, fidelity };
     }
 

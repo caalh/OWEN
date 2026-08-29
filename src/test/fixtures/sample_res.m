@@ -1,13 +1,62 @@
-% --- Serpent results (synthetic fixture)
+% Synthetic Serpent 2 _res.m in the real indexed-assignment layout.
+% Two burnup steps, so every entry appears twice (Serpent appends a block
+% per step and MATLAB accumulates them through the idx counter).
 
-% Cycle 1 keff = 0.98000 +/- 0.00200
-% Cycle 2 keff = 0.99000 +/- 0.00150
-% Cycle 3 keff = 1.00000 +/- 0.00100
+% Increase counter:
 
-KEFF = 1.00000 +/- 0.00100
+if (exist('idx', 'var'));
+  idx = idx + 1;
+else;
+  idx = 1;
+end;
 
-DET1 energy = [1.0E-5 0.625E-6 1.0 1.0E3 1.0E6 2.0E7]
-DET1 value = [1.0E5 9.0E4 5.0E4 1.0E4 1.0E3 1.0E2]
+% Version, title and date:
 
-mesh 10 10 1
-values = [1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100]
+VERSION                   (idx, [1: 14])  = 'Serpent 2.1.32' ;
+COMPILE_DATE              (idx, [1: 20])  = 'Nov 11 2021 09:00:00' ;
+TITLE                     (idx, [1:  8])  = 'Pin cell' ;
+INPUT_FILE_NAME           (idx, [1:  6])  = 'pin.in' ;
+
+% Run statistics:
+
+TOT_CPU_TIME              (idx, 1)        =  1.23456E+01 ;
+RUNNING_TIME              (idx, 1)        =  2.10000E+00 ;
+CYCLE_IDX                 (idx, 1)        = 500 ;
+BURNUP                    (idx, [1:  2])  = [  0.00000E+00  0.00000E+00 ];
+
+% Criticality eigenvalues:
+
+ANA_KEFF                  (idx, [1:   6]) = [  1.34728E+00 0.00091  1.34701E+00 0.00104  1.34755E+00 0.00112 ];
+IMP_KEFF                  (idx, [1:   2]) = [  1.34721E+00 0.00095 ];
+COL_KEFF                  (idx, [1:   2]) = [  1.34718E+00 0.00093 ];
+ABS_KEFF                  (idx, [1:   2]) = [  1.34715E+00 0.00090 ];
+ABS_KINF                  (idx, [1:   2]) = [  1.34715E+00 0.00090 ];
+
+% Neutron balance:
+
+TOT_FISSRATE              (idx, [1:   2]) = [  6.74215E-01 0.00083 ];
+TOT_CAPTRATE              (idx, [1:   2]) = [  3.25933E-01 0.00121 ];
+CONVERSION_RATIO          (idx, [1:   2]) = [  5.12340E-01 0.00214 ];
+
+% Increase counter:
+
+if (exist('idx', 'var'));
+  idx = idx + 1;
+else;
+  idx = 1;
+end;
+
+VERSION                   (idx, [1: 14])  = 'Serpent 2.1.32' ;
+TOT_CPU_TIME              (idx, 1)        =  2.46912E+01 ;
+CYCLE_IDX                 (idx, 1)        = 500 ;
+BURNUP                    (idx, [1:  2])  = [  1.00000E+01  1.02000E+01 ];
+
+ANA_KEFF                  (idx, [1:   6]) = [  1.28450E+00 0.00098  1.28420E+00 0.00110  1.28480E+00 0.00119 ];
+IMP_KEFF                  (idx, [1:   2]) = [  1.28443E+00 0.00101 ];
+COL_KEFF                  (idx, [1:   2]) = [  1.28440E+00 0.00099 ];
+ABS_KEFF                  (idx, [1:   2]) = [  1.28438E+00 0.00097 ];
+ABS_KINF                  (idx, [1:   2]) = [  1.28438E+00 0.00097 ];
+
+TOT_FISSRATE              (idx, [1:   2]) = [  6.70110E-01 0.00089 ];
+TOT_CAPTRATE              (idx, [1:   2]) = [  3.29890E-01 0.00126 ];
+CONVERSION_RATIO          (idx, [1:   2]) = [  5.98120E-01 0.00231 ];

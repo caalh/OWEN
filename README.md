@@ -174,6 +174,8 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.serpent.executable` | `sss2` | Path to the Serpent executable |
 | `owen.openmc.executable` | `openmc` | Non-Python OpenMC entry point only |
 | `owen.openmc.pythonExecutable` | `python` | Interpreter for OpenMC model scripts; when explicitly set it is also the first candidate for `Render with OpenMC` |
+| `owen.openmc.crossSections` | *(blank)* | `cross_sections.xml` as the interpreter sees it (a WSL path when OpenMC lives in WSL). Blank means OWEN searches the environment, the openmc config, and the usual install locations |
+| `owen.openmc.deckArgs` | *(blank)* | Arguments a model script is run with for `Render with OpenMC` / `Verify Geometry`, e.g. `--preset base`. Also editable in the render panel |
 | `owen.scone.executable` | `scone` | On Windows, SCONE typically requires WSL |
 | `owen.highlight.<lang>.palette` | `Classic` | Palette for `mcnp` / `openmc` / `serpent` / `scone`. Also settable from `OWEN: Choose Highlight Palette` |
 | `owen.highlight.customColors` | `{}` | Colors for the `Custom` palette, per token role (`"keyword": "#FF9100"` or `{foreground, fontStyle}` objects). Unset roles fall back to Classic |

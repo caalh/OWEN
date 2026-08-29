@@ -17,10 +17,17 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
-import { resolveOpenmcInterpreter, ResolvedInterpreter, translatePathForCandidate } from '../preview/openmcNative/detect';
+import { requireTrustedWorkspace } from '../util/workspaceTrust';
+import {
+    readDeckOptions,
+    resolveOpenmcInterpreter,
+    ResolvedInterpreter,
+    translatePathForCandidate,
+} from '../preview/openmcNative/detect';
 import {
     buildVerifyHelperScript,
     buildVerifyRequest,
+    defaultPlaneSpecs,
     isClean,
     parseVerifyResult,
     VerifyResult,
@@ -36,6 +43,7 @@ function log(line: string): void {
 
 export function registerVerifyGeometry(_context: vscode.ExtensionContext): vscode.Disposable {
     return vscode.commands.registerCommand('owen.verifyGeometry', async () => {
+        if (!(await requireTrustedWorkspace('run OpenMC geometry verification'))) return;
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showWarningMessage('OWEN: open an OpenMC Python model first.');
@@ -105,6 +113,9 @@ async function runVerify(
     const request = buildVerifyRequest(
         await translatePathForCandidate(candidate, deckPath),
         await translatePathForCandidate(candidate, outDir),
+        defaultPlaneSpecs(),
+        true,
+        readDeckOptions(vscode.Uri.file(deckPath)),
     );
     const requestPath = path.join(outDir, 'owen_verify_request.json');
     fs.writeFileSync(requestPath, JSON.stringify(request, null, 1), 'utf8');

@@ -27,6 +27,10 @@ export interface RunRecord {
     inputFile: string;
     outputDir: string;
     keff?: number | null;
+    /** Standard deviation on k-eff, when the output file reports one. */
+    keffStd?: number | null;
+    /** Which file k-eff came from, so a suspicious row can be traced. */
+    keffSource?: string;
     exitCode: number | null;
     stdoutPath: string;
 }
@@ -96,6 +100,51 @@ export function applyParameters(
     return out;
 }
 
+/**
+ * Check every parameter's pattern against the base deck before any run starts.
+ *
+ * A pattern that matches nothing is the worst failure this feature has: every
+ * run then gets the unmodified deck, all of them produce the same answer, and
+ * the summary table looks like a sweep where the parameter simply has no effect.
+ * A pattern with no capture group is equally wrong — `applyParameters` would
+ * replace the whole match, so `add_nuclide\('U235', 0\.04` would be replaced by
+ * the bare value and the deck would stop being valid Python.
+ */
+export function validateParameters(text: string, parameters: SweepParameter[]): string[] {
+    const problems: string[] = [];
+    for (const p of parameters) {
+        if (!p.name) {
+            problems.push('A parameter has no name.');
+            continue;
+        }
+        if (!p.values || p.values.length === 0) {
+            problems.push(`Parameter "${p.name}" has no values.`);
+        }
+        let re: RegExp;
+        try {
+            re = new RegExp(p.pattern);
+        } catch (err) {
+            problems.push(`Parameter "${p.name}" has an invalid pattern: ${(err as Error).message}`);
+            continue;
+        }
+        const m = text.match(re);
+        if (!m) {
+            problems.push(
+                `Parameter "${p.name}" pattern /${p.pattern}/ matches nothing in the base file, ` +
+                    'so every run would use the same deck.',
+            );
+            continue;
+        }
+        if (m.length < 2 || m[1] === undefined) {
+            problems.push(
+                `Parameter "${p.name}" pattern /${p.pattern}/ has no capture group around the value to replace, ` +
+                    'so the whole match would be overwritten.',
+            );
+        }
+    }
+    return problems;
+}
+
 /** Zero-padded run directory name for a given run index, e.g. 3 → "run_003". */
 export function runDirName(index: number): string {
     return `run_${String(index).padStart(3, '0')}`;
@@ -113,18 +162,20 @@ export function buildManifest(
 
 /**
  * Build the tab-separated summary table (header + one row per run): index, each
- * parameter, exit code, and k-eff. Missing exit/keff render as "n/a". The
- * returned string has no trailing newline; callers append one.
+ * parameter, exit code, k-eff and its standard deviation. Missing values render
+ * as "n/a". The returned string has no trailing newline; callers append one.
  */
 export function buildSummaryTsv(parameters: SweepParameter[], records: RunRecord[]): string {
     const lines = [
-        ['index', ...parameters.map((p) => p.name), 'exit', 'keff'].join('\t'),
+        ['index', ...parameters.map((p) => p.name), 'exit', 'keff', 'keff_std', 'source'].join('\t'),
         ...records.map((r) =>
             [
                 r.index,
                 ...parameters.map((p) => r.parameters[p.name]),
                 r.exitCode ?? 'n/a',
                 r.keff ?? 'n/a',
+                r.keffStd ?? 'n/a',
+                r.keffSource ?? 'n/a',
             ].join('\t'),
         ),
     ];

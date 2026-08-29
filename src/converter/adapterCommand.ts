@@ -28,6 +28,7 @@ import { execFile } from 'child_process';
 import {
     resolveOpenmcInterpreter, translatePathForCandidate, ResolvedInterpreter,
 } from '../preview/openmcNative/detect';
+import { requireTrustedWorkspace } from '../util/workspaceTrust';
 
 const CONVERT_TIMEOUT_MS = 120000;
 const PROBE_TIMEOUT_MS = 15000;
@@ -107,6 +108,7 @@ export function registerConvertDeckAdapter(context: vscode.ExtensionContext): vs
     context.subscriptions.push(output);
 
     return vscode.commands.registerCommand('owen.convertDeckAdapter', async () => {
+        if (!(await requireTrustedWorkspace('run the OpenMC adapter converter'))) return;
         const editor = vscode.window.activeTextEditor;
         const langId = editor?.document.languageId;
         if (!editor || (langId !== 'mcnp' && langId !== 'serpent')) {

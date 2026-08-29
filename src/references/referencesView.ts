@@ -15,6 +15,7 @@ import {
     getOccurrences,
 } from './mcnpReferences';
 import { getIndexFor } from './providers';
+import { paintMcnpEntity, registerMcnpOccurrenceHighlights } from './occurrenceDecorations';
 
 interface RefNode {
     label: string;
@@ -24,6 +25,7 @@ interface RefNode {
     icon?: string;
     collapsible?: vscode.TreeItemCollapsibleState;
     loc?: { uri: vscode.Uri; line: number; startCol: number; endCol: number };
+    entity?: { kind: McnpEntityKind; id: number };
     children?: () => RefNode[];
 }
 
@@ -124,6 +126,7 @@ function latticeNode(index: McnpReferenceIndex, uri: vscode.Uri, lat: LatticeInf
         icon: 'grid',
         collapsible: vscode.TreeItemCollapsibleState.Expanded,
         loc: def ? { uri, line: def.line, startCol: def.startCol, endCol: def.endCol } : undefined,
+        entity: { kind: 'cell', id: lat.cellId },
         children: () => {
             const kids: RefNode[] = [];
             // Bounding surfaces of the unit cell.
@@ -140,6 +143,7 @@ function latticeNode(index: McnpReferenceIndex, uri: vscode.Uri, lat: LatticeInf
                             description: sd ? sd.summary : '(undefined)',
                             icon: 'symbol-interface',
                             loc: sd ? { uri, line: sd.line, startCol: sd.startCol, endCol: sd.endCol } : undefined,
+                            entity: { kind: 'surface', id: sid },
                         };
                     }),
                 });
@@ -154,6 +158,7 @@ function latticeNode(index: McnpReferenceIndex, uri: vscode.Uri, lat: LatticeInf
                     tooltip: ud ? `${ud.summary} — defined at line ${ud.line + 1}` : undefined,
                     icon: 'symbol-class',
                     loc: ud ? { uri, line: ud.line, startCol: ud.startCol, endCol: ud.endCol } : undefined,
+                    entity: { kind: 'universe', id: uid },
                 });
             }
             return kids;
@@ -171,11 +176,13 @@ function entityNode(index: McnpReferenceIndex, uri: vscode.Uri, kind: McnpEntity
         icon: KIND_ICON[kind],
         collapsible: vscode.TreeItemCollapsibleState.Collapsed,
         loc: def ? { uri, line: def.line, startCol: def.startCol, endCol: def.endCol } : undefined,
+        entity: { kind, id },
         children: () => occ.map((o) => ({
             label: o.isDefinition ? 'definition' : 'reference',
             description: `line ${o.line + 1}${o.cellContext !== undefined ? ` (cell ${o.cellContext})` : ''}`,
             icon: o.isDefinition ? 'symbol-key' : 'references',
             loc: { uri, line: o.line, startCol: o.startCol, endCol: o.endCol },
+            entity: { kind, id },
         })),
     };
 }
@@ -188,6 +195,13 @@ export function registerMcnpReferencesView(context: vscode.ExtensionContext): vo
     const provider = new McnpReferenceTreeProvider();
     const view = vscode.window.createTreeView('owenMcnpReferences', { treeDataProvider: provider });
     context.subscriptions.push(view);
+    registerMcnpOccurrenceHighlights(context);
+    context.subscriptions.push(view.onDidChangeSelection((e) => {
+        const node = e.selection[0];
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.languageId !== 'mcnp' || !node?.entity) return;
+        paintMcnpEntity(editor, node.entity.kind, node.entity.id);
+    }));
 
     const refresh = () => provider.refresh();
     context.subscriptions.push(

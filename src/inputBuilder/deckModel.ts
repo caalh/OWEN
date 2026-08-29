@@ -514,6 +514,67 @@ export function sectionLabel(section: DeckSection): string {
     }
 }
 
+/** Half-width of a square lattice about the origin (cm). */
+export function latticeHalfSpan(lattice: Pick<LatticeSection, 'nx' | 'ny' | 'pitch'>): number {
+    return Math.max(lattice.nx, lattice.ny) * lattice.pitch / 2;
+}
+
+function firstEnabledBoundary(sections: DeckSection[]): BoundarySection | undefined {
+    return sections.find((s): s is BoundarySection => s.kind === 'boundary' && s.enabled !== false);
+}
+
+/**
+ * Point the outer boundary at this lattice and grow the box so the map fits.
+ *
+ * The pin-cell starter deck fills universe 1 inside a 0.63 cm reflecting square.
+ * Adding a 17×17 without this step writes a fill map that MCNP never transports.
+ * Does not steal `fillLatticeId` from a boundary that already names a lattice.
+ */
+export function attachLatticeToBoundary(sections: DeckSection[], latticeId: string): void {
+    const lat = sections.find((s): s is LatticeSection => s.id === latticeId && s.kind === 'lattice');
+    if (!lat) return;
+    const bound = firstEnabledBoundary(sections);
+    if (!bound) return;
+    const alreadyNamed = Boolean(bound.fillLatticeId);
+    if (!alreadyNamed) {
+        bound.fillLatticeId = latticeId;
+        // The pin-cell default is fillUniverse 1. Leaving it set next to a
+        // lattice fill shows "or fill universe 1" and is what used to emit fill=1.
+        if (bound.fillUniverse === 1) bound.fillUniverse = undefined;
+    }
+    if (bound.fillLatticeId === latticeId) {
+        syncBoundarySizeToLattice(bound, lat);
+    }
+}
+
+/** Grow a boundary that is smaller than the lattice it fills. Does not shrink. */
+export function syncBoundarySizeToLattice(boundary: BoundarySection, lattice: LatticeSection): void {
+    if (boundary.shape === 'sphere') return;
+    const span = latticeHalfSpan(lattice);
+    if (boundary.size + 1e-9 < span) {
+        boundary.size = Number(span.toFixed(4));
+    }
+}
+
+/** After nx/ny/pitch change: grow every boundary that fills a lattice. */
+export function syncFilledBoundaries(sections: DeckSection[]): void {
+    for (const s of sections) {
+        if (s.kind !== 'boundary' || s.enabled === false || !s.fillLatticeId) continue;
+        const lat = sections.find((x): x is LatticeSection => x.id === s.fillLatticeId && x.kind === 'lattice');
+        if (lat) syncBoundarySizeToLattice(s, lat);
+    }
+}
+
+/** When the filled lattice is removed or muted, fill the next remaining lattice. */
+export function retargetBoundariesAfterLatticeRemoved(sections: DeckSection[], removedId: string): void {
+    const replacement = sections.find((s): s is LatticeSection => s.kind === 'lattice' && s.enabled !== false);
+    for (const s of sections) {
+        if (s.kind !== 'boundary' || s.fillLatticeId !== removedId) continue;
+        s.fillLatticeId = undefined;
+        if (replacement) attachLatticeToBoundary(sections, replacement.id);
+    }
+}
+
 function emitMaterials(section: MaterialsSection, ctx: EmitCtx): Fragments {
     const lines: string[] = [];
     for (const entry of section.entries) {

@@ -8,7 +8,7 @@
  * complements, all probed against hand-derived point memberships.
  */
 import * as assert from 'assert';
-import { parseMcnpGeometry, Shape } from '../../preview/mcnpGeometry';
+import { oneSidedLatticeFillWarning, parseMcnpGeometry, Shape } from '../../preview/mcnpGeometry';
 import {
     cellContains,
     findCell,
@@ -420,6 +420,59 @@ suite('MCNP geometry engine — lattices and fills (§5.5.5)', () => {
         const neighbor = findCell(model, [1.26 * Math.cos(Math.PI / 6), 1.26 * Math.sin(Math.PI / 6), 0]);
         assert.ok(neighbor.cell, 'neighbor element resolves');
     });
+
+    // fill=0:N 0:M is the OpenMC-style 0-based map. In MCNP the (0,0,0)
+    // element is the lattice cell as written (§5.5.5), and the first listed
+    // surface pair runs +i. With 50 px -0.63 listed first, +i/+j run toward
+    // −x/−y, so a centered assembly window only contains the origin-side
+    // quarter of that map — the 17×17 fixture that showed ~¼ of the pins.
+    function oneSided5(fill: string): string {
+        return deck([
+            'one-sided fill',
+            '1 1 -10 -1 u=1 imp:n=1',
+            '2 0 1 u=1 imp:n=1',
+            '10 0 50 -51 52 -53 lat=1 u=5 imp:n=1',
+            `     ${fill}`,
+            '     1 24r',
+            '20 0 -60 fill=5 imp:n=1',
+            '99 0 60 imp:n=0',
+            '',
+            '1 cz 0.4',
+            '50 px -0.63',
+            '51 px  0.63',
+            '52 py -0.63',
+            '53 py  0.63',
+            '60 rpp -3.15 3.15 -3.15 3.15 -1 1',
+            '',
+            'm1 92235.80c 1',
+        ]);
+    }
+
+    test('fill=0:4 0:4 on an origin-centered window only tiles −x/−y', () => {
+        const model = parseMcnpGeometry(oneSided5('fill=0:4 0:4 0:0'));
+        assert.ok(model.warnings.some((w) => /only indexes \+i\/\+j/.test(w)),
+            `expected a one-sided fill warning, got: ${model.warnings.join(' | ')}`);
+        assert.strictEqual(findCell(model, [0, 0, 0]).cell?.id, 1, 'origin element is a pin');
+        assert.strictEqual(findCell(model, [-1.26, -1.26, 0]).cell?.id, 1,
+            '+i/+j run toward −x/−y, so (−pitch,−pitch) is still a pin');
+        assert.strictEqual(findCell(model, [1.26, 1.26, 0]).cell?.id, 10,
+            'the opposite quadrant has no fill index and falls through to the lattice cell');
+    });
+
+    test('fill=-2:2 -2:2 fills the same centered window on all four sides', () => {
+        const model = parseMcnpGeometry(oneSided5('fill=-2:2 -2:2 0:0'));
+        assert.ok(!model.warnings.some((w) => /only indexes \+i\/\+j/.test(w)),
+            `centered fill should not warn, got: ${model.warnings.join(' | ')}`);
+        for (const [x, y] of [[0, 0], [1.26, 1.26], [-1.26, -1.26], [1.26, -1.26], [-1.26, 1.26]] as [number, number][]) {
+            assert.strictEqual(findCell(model, [x, y, 0]).cell?.id, 1, `pin expected at (${x}, ${y})`);
+        }
+    });
+
+    test('oneSidedLatticeFillWarning stays quiet on ranges that already straddle zero', () => {
+        assert.ok(oneSidedLatticeFillWarning(20, { i1: 0, i2: 16, j1: 0, j2: 16, k1: 0, k2: 0, entries: [] }));
+        assert.strictEqual(oneSidedLatticeFillWarning(20, { i1: -8, i2: 8, j1: -8, j2: 8, k1: 0, k2: 0, entries: [] }), null);
+        assert.strictEqual(oneSidedLatticeFillWarning(20, { i1: 0, i2: 1, j1: 0, j2: 1, k1: 0, k2: 0, entries: [] }), null);
+    });
 });
 
 suite('MCNP geometry engine — line handling (§3.2.2, §4.4)', () => {
@@ -816,6 +869,7 @@ suite('MCNP geometry engine — CSG scene builder (Stages 2 & 4)', () => {
     const MATS = new Map([
         [1, { name: 'Steel', component: Component.Structure }],
         [2, { name: 'Water', component: Component.Moderator }],
+        [3, { name: 'Steel', component: Component.Structure }],
     ]);
 
     test('sphere, cone, torus and wedge decks emit their analytic primitives', () => {
@@ -879,6 +933,31 @@ suite('MCNP geometry engine — CSG scene builder (Stages 2 & 4)', () => {
         assert.strictEqual(scene.cylinders.length, 1);
         assert.ok(Math.abs((scene.cylinders[0].innerRadius ?? 0) - 0.5) < 1e-9);
         assert.strictEqual(scene.census.exact, 1);
+    });
+
+    test('nested RCCs of different height draw an annulus plus end-cap disks', () => {
+        // HYLIFE-style: inner void RCC is 9 m tall, salt RCC is 10 m. The salt
+        // is an annulus where they overlap and a solid disk in each extra 50 cm.
+        // Dropping "outside the inner body" used to fill the 88 cm hole.
+        const model = parseMcnpGeometry(deck([
+            'nested rcc annulus',
+            '4  2 -2.07  3 -4 imp:n=1',
+            '16 3 -8.03  4 -5 imp:n=1',
+            '99 0        5    imp:n=0',
+            '',
+            '3 rcc 0 0 -450  0 0 900  88',
+            '4 rcc 0 0 -500  0 0 1000 213',
+            '5 rcc 0 0 -505  0 0 1010 218',
+            '',
+            'm2 3007.80c 1',
+            'm3 26056.80c 1',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        const drawn = scene.cylinders.filter((c) => (c.opacity ?? 1) > 0.5);
+        const annular = drawn.find((c) => (c.innerRadius ?? 0) > 50 && Math.abs(c.radius - 213) < 1);
+        assert.ok(annular, `inner hole was dropped: ${JSON.stringify(drawn.map((c) => [c.radius, c.innerRadius, c.height]))}`);
+        assert.ok(Math.abs((annular!.innerRadius ?? 0) - 88) < 0.1, `inner radius ${annular!.innerRadius}`);
+        assert.strictEqual(scene.census.failed, 0, JSON.stringify(scene.census));
     });
 
     test('graveyard is never meshed; unresolvable cells degrade with a census entry', () => {

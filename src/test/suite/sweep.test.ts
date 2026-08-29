@@ -6,6 +6,7 @@ import {
     runDirName,
     buildManifest,
     buildSummaryTsv,
+    validateParameters,
     SweepParameter,
     RunRecord,
 } from '../../workflows/sweepCore';
@@ -133,6 +134,8 @@ suite('OWEN sweep — run layout, manifest & summary', () => {
             inputFile: '/out/run_000/pincell.py',
             outputDir: '/out/run_000',
             keff: 0.921,
+            keffStd: 0.0009,
+            keffSource: 'statepoint.20.h5',
             exitCode: 0,
             stdoutPath: '/out/run_000/owen-sweep.log',
         },
@@ -160,9 +163,51 @@ suite('OWEN sweep — run layout, manifest & summary', () => {
         const tsv = buildSummaryTsv(params, records);
         const rows = tsv.split('\n');
         assert.strictEqual(rows.length, 3);
-        assert.strictEqual(rows[0], 'index\tenrichment\texit\tkeff');
-        assert.strictEqual(rows[1], '0\t0.02\t0\t0.921');
+        assert.strictEqual(rows[0], 'index\tenrichment\texit\tkeff\tkeff_std\tsource');
+        assert.strictEqual(rows[1], '0\t0.02\t0\t0.921\t0.0009\tstatepoint.20.h5');
         // Second run failed (exit 1) and had no parseable k-eff → "n/a".
-        assert.strictEqual(rows[2], '1\t0.05\t1\tn/a');
+        assert.strictEqual(rows[2], '1\t0.05\t1\tn/a\tn/a\tn/a');
+    });
+});
+
+suite('OWEN sweep — parameter validation', () => {
+    const deck = "uo2.add_nuclide('U235', 0.040)\nsettings.particles = 5000\n";
+
+    test('a pattern that matches nothing is refused before any run starts', () => {
+        // The silent version of this failure gives every run the same deck, and
+        // a summary table that reads as "this parameter does nothing".
+        const problems = validateParameters(deck, [
+            { name: 'enr', values: [0.03], pattern: "add_nuclide\\('U238', ([0-9.]+)" },
+        ]);
+        assert.strictEqual(problems.length, 1);
+        assert.match(problems[0], /matches nothing/);
+        assert.match(problems[0], /same deck/);
+    });
+
+    test('a pattern without a capture group is refused', () => {
+        const problems = validateParameters(deck, [
+            { name: 'enr', values: [0.03], pattern: "add_nuclide\\('U235', [0-9.]+" },
+        ]);
+        assert.match(problems[0], /no capture group/);
+    });
+
+    test('an invalid regex is reported rather than thrown', () => {
+        const problems = validateParameters(deck, [{ name: 'enr', values: [1], pattern: '([' }]);
+        assert.match(problems[0], /invalid pattern/);
+    });
+
+    test('empty values and missing names are reported', () => {
+        assert.match(validateParameters(deck, [{ name: 'enr', values: [], pattern: 'particles = ([0-9]+)' }])[0], /no values/);
+        assert.match(validateParameters(deck, [{ name: '', values: [1], pattern: 'x' }])[0], /no name/);
+    });
+
+    test('a working schema passes', () => {
+        assert.deepStrictEqual(
+            validateParameters(deck, [
+                { name: 'enr', values: [0.03], pattern: "add_nuclide\\('U235', ([0-9.]+)" },
+                { name: 'n', values: [100], pattern: 'particles = ([0-9]+)' },
+            ]),
+            [],
+        );
     });
 });

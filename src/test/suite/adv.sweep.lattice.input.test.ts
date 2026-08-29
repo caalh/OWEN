@@ -74,7 +74,7 @@ suite('ADV sweep core', () => {
 
     test('summary TSV with zero runs is just the header', () => {
         const tsv = buildSummaryTsv([], []);
-        assert.strictEqual(tsv, 'index\texit\tkeff');
+        assert.strictEqual(tsv, 'index\texit\tkeff\tkeff_std\tsource');
     });
 
     test('summary TSV renders n/a for null keff and exit', () => {

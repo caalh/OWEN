@@ -233,6 +233,29 @@ export function checkDeck(model: DeckModel, doc: DeckDocument): DeckCheck[] {
         }
     }
 
+    // A lattice that is never filled is legal MCNP and a wrong model: the map
+    // is written, the outer cell still fills the pin, and the 17×17 is dead.
+    const filledLatticeIds = new Set(
+        boundaries
+            .filter((b): b is Extract<typeof b, { kind: 'boundary' }> => b.kind === 'boundary' && Boolean(b.fillLatticeId))
+            .map((b) => b.fillLatticeId as string),
+    );
+    if (latticeById.size > 0 && boundaries.length === 0) {
+        add('error', 'A lattice has no outer boundary to fill it, so the map is never placed in the problem. Add a Boundary section.');
+    } else if (latticeById.size > 0 && filledLatticeIds.size === 0 && boundaries.length > 0) {
+        const firstLat = [...latticeById.values()][0];
+        add('error',
+            `${sectionLabel(firstLat)} is in the deck but the boundary still fills the pin cell, so MCNP never transports the map. Set Fill with lattice on the Boundary section.`,
+            { sectionId: firstLat.id });
+    }
+    for (const lat of latticeById.values()) {
+        if (filledLatticeIds.size > 0 && !filledLatticeIds.has(lat.id)) {
+            add('warning',
+                `${sectionLabel(lat)} is never filled into the boundary, so its map is not in the problem.`,
+                { sectionId: lat.id });
+        }
+    }
+
     // --- run / source ----------------------------------------------------
     for (const s of sections) {
         if (s.kind !== 'run') continue;

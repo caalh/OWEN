@@ -650,6 +650,79 @@ function extractWindow(node: RegionNode | null, surfaces: Map<number, McnpSurfac
     return w;
 }
 
+/** One MCNP lattice index direction: which coordinate axis, and which way. */
+interface LatticeAxis {
+    axis: 0 | 1 | 2;
+    sign: 1 | -1;
+}
+
+/**
+ * Which way each MCNP lattice index runs, from the order the bounding surfaces
+ * are listed on the lattice cell card.
+ *
+ * MCNP6.2 §3.3.1.5.2: "For a hexahedral lattice cell, beyond the first surface
+ * listed is the (1,0,0) element, beyond the second surface listed is the
+ * (-1,0,0) element. Similarly, the (0,1,0), (0,-1,0), (0,0,1), and (0,0,-1)
+ * lattice elements are beyond the 3rd, 4th, 5th, and 6th surfaces in that
+ * order."
+ *
+ * So a cell written `50 -51 52 -53` — the common way to bound an element, low
+ * plane first — has its first index running in **-x** and its second in -y,
+ * because "beyond" the low plane means leaving the element downward. Assuming
+ * +x/+y instead mirrors the fill array through the element centre. For a
+ * lattice whose map is symmetric that is invisible; for one whose universes are
+ * direction-dependent (a baffle plate on the +x face of a peripheral assembly)
+ * it silently puts them on the wrong side.
+ *
+ * Returns one entry per index pair, in index order, or null when the region
+ * does not list plane pairs (a macrobody window, where MCNP fixes the
+ * directions by facet order instead — +x/+y/+z for an RPP).
+ */
+function latticeIndexAxes(node: RegionNode | null, surfaces: Map<number, McnpSurface>): LatticeAxis[] | null {
+    if (!node) return null;
+    const listed: Array<{ axis: 0 | 1 | 2; sense: number; value: number }> = [];
+    let sawBody = false;
+    const visit = (n: RegionNode) => {
+        if (n.kind === 'half') {
+            const s = surfaces.get(n.surface);
+            if (!s) return;
+            const axis = s.type === 'px' ? 0 : s.type === 'py' ? 1 : s.type === 'pz' ? 2 : null;
+            if (axis === null) {
+                if (s.type === 'rpp' || s.type === 'box') sawBody = true;
+                return;
+            }
+            const value = parseFloat(s.params[0]);
+            if (!Number.isFinite(value)) return;
+            listed.push({ axis: axis as 0 | 1 | 2, sense: n.sense, value });
+        } else if (n.kind === 'and') {
+            n.children.forEach(visit);
+        }
+    };
+    visit(node);
+    if (sawBody || listed.length < 2) return null;
+
+    const axes: LatticeAxis[] = [];
+    const used = new Array(listed.length).fill(false);
+    for (let i = 0; i < listed.length && axes.length < 3; i++) {
+        if (used[i]) continue;
+        // Its partner is the next unused plane on the same axis.
+        let partner = -1;
+        for (let j = i + 1; j < listed.length; j++) {
+            if (!used[j] && listed[j].axis === listed[i].axis && listed[j].value !== listed[i].value) {
+                partner = j;
+                break;
+            }
+        }
+        if (partner < 0) continue;
+        used[i] = used[partner] = true;
+        if (axes.some((a) => a.axis === listed[i].axis)) continue;
+        // Positive sense means the element lies on the +axis side of this
+        // plane, so "beyond" it — where element +1 sits — is the -axis side.
+        axes.push({ axis: listed[i].axis, sign: listed[i].sense >= 0 ? -1 : 1 });
+    }
+    return axes.length >= 2 ? axes : null;
+}
+
 /** Most common universe id along the boundary ring of a fill array (per z-slab). */
 function edgeMajority(universes: number[], nx: number, ny: number, nz: number): number | null {
     if (!universes.length) return null;
@@ -1287,29 +1360,102 @@ function emitLattice(
         return;
     }
 
-    const llx = cx + arr.imin * pitchX - pitchX / 2;
-    const lly = cy + arr.jmin * pitchY - pitchY / 2;
-    out.push(`${latVar} = openmc.RectLattice(lattice_id=${ids.nextUniv()}, name='mcnp cell ${lc.id} (lat=1, u=${uid})')`);
-    if (is3D && pitchZ !== null && cz !== null) {
-        const llz = cz + arr.kmin * pitchZ - pitchZ / 2;
-        out.push(`${latVar}.lower_left = (${fmt(llx)}, ${fmt(lly)}, ${fmt(llz)})`);
-        out.push(`${latVar}.pitch = (${fmt(pitchX)}, ${fmt(pitchY)}, ${fmt(pitchZ)})`);
-    } else {
-        out.push(`${latVar}.lower_left = (${fmt(llx)}, ${fmt(lly)})`);
-        out.push(`${latVar}.pitch = (${fmt(pitchX)}, ${fmt(pitchY)})`);
+    // Which coordinate axis each MCNP index runs along, and which way (§3.3.1.5.2
+    // — decided by the order the bounding planes are listed, not by x/y/z).
+    const declared = latticeIndexAxes(lc.region, surfById);
+    const axes: LatticeAxis[] = [
+        { axis: 0, sign: 1 },
+        { axis: 1, sign: 1 },
+        { axis: 2, sign: 1 },
+    ];
+    if (declared) {
+        for (let m = 0; m < declared.length && m < 3; m++) axes[m] = declared[m];
+        // Any axis not named by a listed pair keeps its default direction.
+        const namedAxes = new Set(declared.map((a) => a.axis));
+        let next = 0;
+        for (let m = declared.length; m < 3; m++) {
+            while (namedAxes.has(next as 0 | 1 | 2)) next++;
+            axes[m] = { axis: next as 0 | 1 | 2, sign: 1 };
+            namedAxes.add(next as 0 | 1 | 2);
+        }
     }
 
-    // MCNP fill arrays list x fastest, j (y) rows bottom-up, k (z) slabs
-    // bottom-up. OpenMC RectLattice.universes is [z][y][x] for 3D and [y][x]
-    // for 2D, with the FIRST y row at the TOP (max y) and z slabs bottom-up.
+    const counts = [arr.nx, arr.ny, arr.nz];
+    const mins = [arr.imin, arr.jmin, arr.kmin];
+    const pitches = [pitchX, pitchY, is3D && pitchZ !== null ? pitchZ : 0];
+    const centers = [cx, cy, is3D && cz !== null ? cz : 0];
+
+    // For each coordinate axis: the MCNP index that runs along it.
+    const indexForAxis: Array<number | null> = [null, null, null];
+    for (let m = 0; m < 3; m++) {
+        if (indexForAxis[axes[m].axis] === null) indexForAxis[axes[m].axis] = m;
+    }
+    if (indexForAxis.some((v) => v === null)) {
+        // Two indices claimed the same axis: fall back rather than guess.
+        indexForAxis[0] = 0;
+        indexForAxis[1] = 1;
+        indexForAxis[2] = 2;
+        axes[0] = { axis: 0, sign: 1 };
+        axes[1] = { axis: 1, sign: 1 };
+        axes[2] = { axis: 2, sign: 1 };
+        issues.push({
+            sourceLine: lc.line,
+            message: `Lattice cell ${lc.id}: could not read the index directions from the surface order; assumed +x/+y/+z`,
+        });
+    }
+
+    // Elements sit at centre + sign*index*pitch, so the lowest coordinate
+    // belongs to the highest index when the direction is negative.
+    const lowerLeft = [0, 1, 2].map((axis) => {
+        const m = indexForAxis[axis] as number;
+        const { sign } = axes[m];
+        const loIndex = sign > 0 ? mins[m] : mins[m] + counts[m] - 1;
+        return centers[axis] + sign * loIndex * pitches[axis] - pitches[axis] / 2;
+    });
+    const axisCounts = [0, 1, 2].map((axis) => counts[indexForAxis[axis] as number]);
+
+    out.push(`${latVar} = openmc.RectLattice(lattice_id=${ids.nextUniv()}, name='mcnp cell ${lc.id} (lat=1, u=${uid})')`);
+    if (is3D && pitchZ !== null && cz !== null) {
+        out.push(`${latVar}.lower_left = (${fmt(lowerLeft[0])}, ${fmt(lowerLeft[1])}, ${fmt(lowerLeft[2])})`);
+        out.push(`${latVar}.pitch = (${fmt(pitchX)}, ${fmt(pitchY)}, ${fmt(pitchZ)})`);
+    } else {
+        out.push(`${latVar}.lower_left = (${fmt(lowerLeft[0])}, ${fmt(lowerLeft[1])})`);
+        out.push(`${latVar}.pitch = (${fmt(pitchX)}, ${fmt(pitchY)})`);
+    }
+    const flipped = [0, 1, 2]
+        .filter((axis) => axes[indexForAxis[axis] as number].sign < 0 && axisCounts[axis] > 1)
+        .map((axis) => 'xyz'[axis]);
+    const permuted = [0, 1, 2].some((axis) => indexForAxis[axis] !== axis);
+    if (flipped.length > 0 || permuted) {
+        out.push(
+            `# MCNP index directions from the surface order (§3.3.1.5.2): ` +
+            [0, 1, 2]
+                .map((m) => `${'ijk'[m]} -> ${axes[m].sign < 0 ? '-' : '+'}${'xyz'[axes[m].axis]}`)
+                .join(', ') +
+            `; the fill array is reordered to OpenMC's ascending x/y/z.`,
+        );
+    }
+
+    // OpenMC RectLattice.universes is [z][y][x] for 3D and [y][x] for 2D, with
+    // the FIRST y row at the TOP (max y) and z slabs bottom-up.
+    const flatAt = (xPos: number, yPos: number, zPos: number): number => {
+        const positions = [xPos, yPos, zPos];
+        const offsets = [0, 0, 0];
+        for (let axis = 0; axis < 3; axis++) {
+            const m = indexForAxis[axis] as number;
+            const p = positions[axis];
+            offsets[m] = axes[m].sign > 0 ? p : counts[m] - 1 - p;
+        }
+        return offsets[2] * arr.nx * arr.ny + offsets[1] * arr.nx + offsets[0];
+    };
     out.push(`${latVar}.universes = [`);
-    for (let k = 0; k < arr.nz; k++) {
+    for (let zPos = 0; zPos < axisCounts[2]; zPos++) {
         if (is3D) out.push('    [');
         const indent = is3D ? '        ' : '    ';
-        for (let j = arr.ny - 1; j >= 0; j--) {
+        for (let yPos = axisCounts[1] - 1; yPos >= 0; yPos--) {
             const row: string[] = [];
-            for (let i = 0; i < arr.nx; i++) {
-                row.push(uref(arr.universes[k * arr.nx * arr.ny + j * arr.nx + i]));
+            for (let xPos = 0; xPos < axisCounts[0]; xPos++) {
+                row.push(uref(arr.universes[flatAt(xPos, yPos, zPos)]));
             }
             out.push(`${indent}[${row.join(', ')}],`);
         }

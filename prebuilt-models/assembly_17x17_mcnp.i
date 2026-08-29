@@ -24,7 +24,10 @@ c ----- Instrument tube (universe 3) -----
 12 4 -0.74      9       u=3  imp:n=1   $ outer water
 c ----- 17x17 square lattice (universe 10), pitch 1.26 -----
 20 0  50 -51 52 -53  lat=1 u=10 imp:n=1
-     fill=0:16 0:16 0:0
+c Indices run -8:8 so element (0,0,0) — the one the surfaces above bound — is
+c the centre of the assembly. With 0:16 the array would start at the centre and
+c run outwards in +x/+y only, leaving three quadrants of the window undefined.
+     fill=-8:8 -8:8 0:0
       1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
       1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
       1  1  1  1  1  2  1  1  2  1  1  2  1  1  1  1  1

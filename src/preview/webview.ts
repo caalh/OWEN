@@ -6,6 +6,8 @@ import { distance3, deltas, angleDeg, diameter, fmtLen } from './measure';
 import { McnpGeometryModel } from './mcnpGeometry';
 import { parseDeckToModel, sliceSupportNote } from './engineDispatch';
 import { worldBounds } from './mcnpEvaluate';
+import { looksLikeOpenmcXml, openmcMaterialLookup, parseOpenmcGeometryXml } from './openmcGeometry';
+import { exportOpenmcGeometryXml } from './openmcNative/exportGeometry';
 import {
     axisPlane, beginSlice, defaultWindow, hexToRgb, identifyAt, sliceRowsToRgba,
     SliceAxis, SliceJob, SliceRequest,
@@ -36,13 +38,21 @@ let webviewReady = false;
 let lastScene: GeometryScene | undefined;
 let lastText = '';
 let lastLanguage = 'mcnp';
+let lastDeckPath = '';
 let fidelity: FidelityOptions = { detail: 'auto', axial: false };
 
 // Exact-engine model cache for the 2D slice view (plan Stage 3). Parsing a
 // full-core deck costs real time, so one model is kept per deck text.
 let sliceCache: { text: string; language: string; model: McnpGeometryModel | null } | null = null;
+/** Live OpenMC Geometry captured by running the Python deck (or XML on disk). */
+let lastOpenmcModel: McnpGeometryModel | null = null;
+let lastOpenmcXml = '';
+let openmcExportGen = 0;
 
 function sliceModelFor(text: string, language: string): McnpGeometryModel | null {
+    if (language === 'openmc' && lastOpenmcModel && text === lastText) {
+        return lastOpenmcModel;
+    }
     if (sliceCache && sliceCache.text === text && sliceCache.language === language) {
         return sliceCache.model;
     }
@@ -51,6 +61,9 @@ function sliceModelFor(text: string, language: string): McnpGeometryModel | null
         model = parseDeckToModel(text, language);
     } catch {
         model = null;
+    }
+    if (language === 'openmc' && lastOpenmcModel && text === lastText) {
+        model = lastOpenmcModel;
     }
     // A render still streaming rows belongs to the previous model.
     cancelSliceJob();
@@ -95,6 +108,17 @@ function budgetedSamples(res: number, requested: number): number {
 
 /** Material names/colors for the legend; empty for languages without a lookup. */
 function sliceMaterialNames(): Map<number, { name: string; component: string }> {
+    if (lastLanguage === 'openmc' && lastOpenmcXml) {
+        try {
+            const out = new Map<number, { name: string; component: string }>();
+            for (const [id, info] of openmcMaterialLookup(lastOpenmcXml)) {
+                out.set(id, { name: info.name, component: info.component });
+            }
+            return out;
+        } catch {
+            return new Map();
+        }
+    }
     if (lastLanguage !== 'mcnp') return new Map();
     try {
         return mcnpMaterialLookup(lastText);
@@ -199,6 +223,7 @@ function handleSliceRequest(msg: SliceViewMsg): void {
         fitHalfV: fit.halfV,
         fitCenterU: fit.centerU,
         fitCenterV: fit.centerV,
+        warnings: model.warnings,
     });
 
     const pump = (): void => {
@@ -237,6 +262,7 @@ function handleSliceRequest(msg: SliceViewMsg): void {
                 colors,
                 lostCount: job.result.lostCount,
                 overlapCount: job.result.overlapCount,
+                warnings: model.warnings,
             });
             if (sliceJob === entry) sliceJob = null;
             return;
@@ -308,8 +334,74 @@ function withConfig(opts: FidelityOptions): FidelityOptions {
 /** Re-extracts the current source at the requested fidelity and re-posts it. */
 function rebuildScene(): void {
     if (!lastText) return;
+    if (lastLanguage === 'openmc' && lastOpenmcXml && !/RectLattice|HexLattice|\.universes\b/.test(lastText)) {
+        lastScene = buildScene(lastOpenmcXml, 'openmc', withConfig(fidelity));
+        postScene();
+        return;
+    }
     lastScene = buildScene(lastText, lastLanguage, withConfig(fidelity));
     postScene();
+}
+
+/**
+ * For OpenMC Python decks, run the same loader as "Render with OpenMC" and
+ * replace the guessed 3D scene (and the 2D slice model) with the live
+ * geometry. Lattice decks keep the fast-path 3D so a core stays interactive.
+ */
+async function refreshOpenmcExact(): Promise<void> {
+    if (lastLanguage !== 'openmc' || !lastText) return;
+    if (looksLikeOpenmcXml(lastText)) {
+        lastOpenmcXml = lastText;
+        lastOpenmcModel = parseOpenmcGeometryXml(lastText);
+        sliceCache = { text: lastText, language: 'openmc', model: lastOpenmcModel };
+        return;
+    }
+    if (!lastDeckPath) return;
+    if (!vscode.workspace.isTrusted) {
+        if (lastScene) {
+            lastScene.notes = [
+                'Live OpenMC model needs a trusted workspace (Trust this folder). 3D is the text reconstruction; use Render with OpenMC after trusting.',
+                ...lastScene.notes,
+            ];
+            postScene();
+        }
+        return;
+    }
+    const gen = ++openmcExportGen;
+    const text = lastText;
+    try {
+        const exported = await exportOpenmcGeometryXml(lastDeckPath, vscode.Uri.file(lastDeckPath));
+        if (gen !== openmcExportGen || lastText !== text) return;
+        lastOpenmcXml = `${exported.materialsXml ?? ''}\n${exported.geometryXml}`;
+        lastOpenmcModel = parseOpenmcGeometryXml(lastOpenmcXml);
+        sliceCache = { text, language: 'openmc', model: lastOpenmcModel };
+        const hasLattice = /RectLattice|HexLattice|\.universes\b/.test(text);
+        if (!hasLattice) {
+            lastScene = buildScene(lastOpenmcXml, 'openmc', withConfig(fidelity));
+            lastScene.notes = [
+                `Live OpenMC geometry loaded (${exported.source ?? 'captured'}).`,
+                ...lastScene.notes,
+            ];
+            lastScene.warnings = [...exported.warnings, ...lastScene.warnings];
+            postScene();
+        } else if (lastScene) {
+            lastScene.notes = [
+                'Exact 2D slices use the live OpenMC model; 3D keeps the lattice fast path.',
+                ...lastScene.notes,
+            ];
+            postScene();
+        }
+    } catch (err) {
+        if (gen !== openmcExportGen) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (lastScene) {
+            lastScene.notes = [
+                `Live OpenMC model was not loaded (${msg.split('\n')[0]}). 3D is the text reconstruction; use Render with OpenMC for the native plot.`,
+                ...lastScene.notes,
+            ];
+            postScene();
+        }
+    }
 }
 
 export function registerGeometryPreview(context: vscode.ExtensionContext): vscode.Disposable {
@@ -322,6 +414,10 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
         const language = detectMonteCarloLanguage(editor.document) ?? 'mcnp';
         lastText = editor.document.getText();
         lastLanguage = language;
+        lastDeckPath = editor.document.uri.scheme === 'file' ? editor.document.uri.fsPath : '';
+        lastOpenmcModel = null;
+        lastOpenmcXml = '';
+        openmcExportGen++;
         fidelity = { detail: 'auto', axial: false };
         lastScene = buildScene(lastText, language, withConfig(fidelity));
 
@@ -365,6 +461,8 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
         // When the panel already exists the webview listener is live, so send now;
         // on first open the 'ready' handshake above delivers the payload instead.
         postScene();
+
+        void refreshOpenmcExact();
 
         const n = lastScene.primitiveCount;
         if (n === 0) {
@@ -1007,6 +1105,18 @@ function buildHtml(webview: vscode.Webview): string {
         text: 'A cone with no sheet selector is two nappes, so the renderer cannot tell which '
           + 'half you meant. Add ±1 as the last entry on the surface card.',
       },
+      {
+        match: 'only indexes +i/+j',
+        text: 'This is MCNP, not a cut-off render. Element (0,0,0) is the lattice cell as written, '
+          + 'usually the origin window, and fill=0:N only steps one way from there. A centered '
+          + 'assembly rpp then shows about a quarter of the pins. Change the range to straddle '
+          + 'zero (fill=-8:8 -8:8 0:0 for a 17×17).',
+      },
+      {
+        match: 'one quadrant',
+        text: 'The 3D view centers that fill map so the assembly looks complete. The 2D slice '
+          + 'follows MCNP and will not. The same fill= change fixes both pictures.',
+      },
     ];
 
     function buildPanel(sc) {
@@ -1620,9 +1730,15 @@ function buildHtml(webview: vscode.Webview): string {
           '<span>' + escHtml(e.l.label) + '</span><span style="margin-left:auto; opacity:0.5">' + e.l.count.toLocaleString() + '</span></div>';
       }).join('');
       const prob = document.getElementById('sliceProblem');
-      prob.textContent = problems > 0
-        ? ((data.overlapCount || 0) + ' overlap / ' + (data.lostCount || 0) + ' lost pixels render magenta (OpenMC overlap-plot convention).')
-        : '';
+      const extras = (data.warnings || lastSliceMeta.warnings || []).filter((w) =>
+        w.indexOf('only indexes') >= 0 || w.indexOf('one quadrant') >= 0);
+      const bits = [];
+      if (problems > 0) {
+        bits.push(((data.overlapCount || 0) + ' overlap / ' + (data.lostCount || 0) +
+          ' lost pixels render magenta (OpenMC overlap-plot convention).'));
+      }
+      for (const w of extras) bits.push(w);
+      prob.textContent = bits.join(' ');
     }
 
     // Mirror of the host palette (slice.ts hashColor) so legend swatches match.

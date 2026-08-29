@@ -1,0 +1,55 @@
+ /\\\\\\\\\\\    /\\\\\\\\\
+ SCONE
+
+*******************************************************************************
+                  EIGENVALUE CALCULATION WITH POWER ITERATION METHOD
+Inactive Cycles:    3
+Active Cycles:      5
+Neutron Population: 5000
+Initial RNG Seed:   -1157974580
+
+GENERATING INITIAL FISSION SOURCE
+DONE!
+
+Cycle: 1 of 8
+Pop: 5000 -> 5121
+Elapsed time: 0.8 s
+k-eff (analog):  1.29010 +/-  0.00000
+
+Cycle: 2 of 8
+Pop: 5121 -> 5088
+Elapsed time: 1.6 s
+k-eff (analog):  1.29540 +/-  0.00265
+
+Cycle: 3 of 8
+Pop: 5088 -> 5102
+Elapsed time: 2.4 s
+k-eff (analog):  1.29875 +/-  0.00312
+
+Cycle: 4 of 8
+Pop: 5102 -> 5140
+Elapsed time: 3.2 s
+k-eff (analog):  1.30210 +/-  0.00198
+
+Cycle: 5 of 8
+Pop: 5140 -> 5097
+Elapsed time: 4.0 s
+k-eff (analog):  1.30055 +/-  0.00121
+
+Cycle: 6 of 8
+Pop: 5097 -> 5113
+Elapsed time: 4.8 s
+k-eff (analog):  1.30140 +/-  0.00087
+
+Cycle: 7 of 8
+Pop: 5113 -> 5104
+Elapsed time: 5.6 s
+k-eff (analog):  1.30098 +/-  0.00061
+
+Cycle: 8 of 8
+Pop: 5104 -> 5110
+Elapsed time: 6.4 s
+k-eff (analog):  1.30124 +/-  0.00046
+
+                          END OF EIGENVALUE CALCULATION
+*******************************************************************************

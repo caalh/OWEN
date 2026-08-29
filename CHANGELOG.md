@@ -7,6 +7,211 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-08-29
+
+### Added
+
+- **Report a problem** in the OWEN beaker menu (and the editor context menu)
+  opens a note to email [help@reactormc.net](mailto:help@reactormc.net) with the
+  deck, the code, and what you expected to see.
+- **MCNP `fill=0:N 0:M 0:0` on a large lattice.** Element (0,0,0) is the
+  lattice cell as written (§5.5.5), so that range only indexes +i/+j from
+  the origin window. A centered 17×17 `rpp` then shows about a quarter of
+  the pins on an exact 2D slice — 1.4.1 was drawing MCNP, not cutting the
+  lattice off. The Problems panel, 2D slice, and 3D notes now say so and
+  name `fill=-8:8 -8:8 0:0`. The 3D view still centers the map for display;
+  2D still follows MCNP.
+- **MCNP References paints every use of an entity, not just its definition.**
+  Selecting Material 2 (or clicking `m2`) highlights every cell that uses
+  `m2` — not the `2`s in a fill map, which are universe ids. Putting the
+  caret on a fill-array number highlights every other copy of that universe
+  in the lattice (guide tubes light up as a pattern). Bare integers are not
+  editor words in MCNP, so this is a decoration, not VS Code's word highlighter.
+
+### Fixed
+
+- **Workspace trust is not a warning that OWEN is unsafe.** Cursor/VS Code
+  shows "Do you trust the authors of the files in this folder?" when an
+  extension would run code in an untrusted folder. OWEN now declares limited
+  Restricted Mode support so you can install it without that blocking the
+  enable; running a code, Render/Verify with OpenMC, and loading a live OpenMC
+  model still ask you to trust the folder. Click **Trust Workspace & Install**
+  if you see the dialog — that trusts *this folder*, not a Marketplace verdict
+  on the extension.
+- **MCNP 3D no longer fills the hole in nested finite RCCs.** `3 -4` on two
+  RCCs of different height (a salt annulus with end-cap disks, the HYLIFE
+  chamber) used to drop "outside the inner body" and draw a solid cylinder.
+  Whole-body outside is now expanded to a union of outside facets.
+- **OpenMC 3D/2D use the live geometry, not a Python guess.** The in-editor
+  preview runs the deck the same way Render with OpenMC does, reads
+  `geometry.xml`, and builds the exact CSG. Lattice decks keep the 3D fast
+  path and still get exact 2D slices from the live model. `geometry.xml` /
+  `model.xml` on disk parse without running Python.
+- **Input Builder: adding a lattice now fills it.** The pin-cell starter
+  left `fill=1` inside a 0.63 cm reflecting square, so a 17×17 map was
+  written and never transported. Adding a lattice (or opening the Lattice
+  tab) points the boundary at that lattice and grows the box. An unfilled
+  lattice is a blocking check; New File / Copy now use the same error gate
+  as Insert.
+- **MCNP no longer underlines a comment that runs past the column limit.**
+  Truncating a `c` comment card, or text after a `$` that itself sits before
+  the limit, does not change the problem. A `$` past the limit is still
+  flagged: MCNP never sees it.
+
+- **"Render with OpenMC" and "Verify Geometry with OpenMC" could not open a deck
+  that gates on `OPENMC_CROSS_SECTIONS`.** That variable is normally exported
+  from a shell profile or by `conda activate`, and OWEN starts the interpreter
+  without a login shell (`wsl --exec python3`), so the variable was absent and
+  such a deck exited before building anything — reported as the misleading "No
+  OpenMC model found". OWEN now looks for a library (the new
+  `owen.openmc.crossSections` setting, the environment, the `openmc` config
+  file, then the usual install locations) and lends it to the deck. Geometry
+  plotting needs no nuclear data at all, so when there is no library the deck
+  gets an empty stand-in for the length of the run, withdrawn before OpenMC is
+  invoked.
+- **A model built inside a function was invisible.** Both commands only scanned
+  the module globals after running the deck, so the extremely common
+  `def main(): model = build_model(...)` never yielded anything. Models and
+  geometries are now captured as they are constructed, run, or exported; failing
+  that, OWEN retries with the deck's own export-only flag (`--no-run` and
+  friends) and finally calls a zero-argument builder it defines. When all of
+  that fails, the error says what was tried instead of only what was missing.
+- **A deck's `export_to_xml()` can no longer overwrite files next to the deck.**
+  It is intercepted, and OWEN exports the captured model into its own throwaway
+  directory. XML a deck wrote into a subdirectory is still picked up.
+- **Automatic framing no longer renders the model as a dot.** A geometry wrapped
+  in a large vacuum boundary (a 2000 cm sphere around a 218 cm chamber) filled
+  1/9 of the frame. Automatic views now frame the material-filled cells, with
+  "whole geometry" one control away, and say when the two differ by a lot.
+- **The lost-particle probe uses the deck's own source** rather than a default
+  point source at the origin, and is skipped only when no library really exists
+  (it used to test the environment variable, which OWEN itself now sets).
+- **The 3D preview no longer draws a PWR fuel pin for decks that are not pin
+  lattices.** A fusion chamber, a sphere benchmark or a tank produced a
+  fabricated 0.41 cm pin labelled as a representative pin cell. OWEN now rebuilds
+  the shells such a deck states outright — `Sphere`, `{X,Y,Z}Cylinder`,
+  `{X,Y,Z}Plane`, `RightCircularCylinder`, `RectangularParallelepiped` and cells
+  whose region intersects them — and reports the cells it could not size because
+  their dimensions come from a function argument or dataclass field. When nothing
+  is recognizable it says the pin is a placeholder, not your model.
+- **Run results were largely invented.** Every one of the four readers behind
+  "Show Run Results" was a small set of regular expressions written against a
+  guess at the output format, and each was checked only against a fixture written
+  from the same guess. Validating them against real files — an OpenMC statepoint,
+  `tallies.out` and log generated here, MCNP output from a production study, and
+  the formats as the MCNP manual, the Serpent wiki and SCONE's own
+  `asciiMATLAB_class.f90` define them — found that all four reported numbers that
+  were not in the file:
+  - MCNP: the reader only ever looked for `mctal`, and its idea of `mctal` was
+    wrong (it read one number per bin where the file stores mean/error pairs, and
+    it had no notion of the `f`/`d`/`u`/`s`/`m`/`c`/`e`/`t` bin structure, so bins
+    were misaligned). The far more common plain text output was not supported at
+    all: pointed at one, the reader turned any two numbers on a line into a flux
+    spectrum, so a cross-section table listing became a tally result. There is now
+    a reader per format — text output and `mctal` — chosen by inspecting the file.
+    The text reader reports tally results with their energy bins, the verdict of
+    the 10 statistical checks, the tally fluctuation chart, and the warnings and
+    fatal errors MCNP printed.
+  - OpenMC: the statepoint reader could never have worked. It destructured
+    `h5wasm`'s emscripten filesystem off the module namespace instead of the
+    resolved instance, so it threw on every file and fell back to an empty
+    result; and even had that worked, `h5wasm` is ESM-only and the extension is
+    bundled to CommonJS, so the import itself would have failed in the packaged
+    VSIX. Statepoints are now read directly off disk through `h5wasm/node`, means
+    and relative errors are reconstructed from the sums of scores and squares the
+    way OpenMC's own Python API does it (they are not stored), and filters and
+    meshes are read so that bins carry the labels OpenMC gives them. `tallies.out`
+    is supported as well, and the log reader now follows the real batch table
+    instead of one line of it.
+  - Serpent and SCONE: both read a simplified form of the file. The Serpent
+    reader now parses the MATLAB assignments in `_res.m` (including the
+    `(idx, [1: n])` form), takes k-eff from the estimator the file actually
+    reports, treats burnup steps as a series, and reads `_det.m` detectors from
+    the documented 12-column layout with their energy grid. The SCONE reader
+    follows `asciiMATLAB` output, prefers the active-cycle k-eff over the
+    inactive one, and reconstructs bin labels from the map arrays.
+  - Output files are identified by their contents rather than their names, which
+    matters because OpenMC's `tallies.out` was being handed to the SCONE reader on
+    the strength of its extension, and MCNP output can be named anything at all.
+  The results panel shows what the readers now recover — per-bin values and
+  errors, statistical checks, figure of merit, run metadata — and states plainly
+  what it could not read instead of showing an empty table.
+- **The MCNP-to-OpenMC converter mirrored lattices.** MCNP fixes a lattice's
+  index directions from the order its bounding surfaces are listed — §3.3.1.5.2:
+  "beyond the first surface listed is the (1,0,0) element, beyond the second
+  surface listed is the (-1,0,0) element" — so a deck that lists `-51 50` runs
+  its `i` index toward −x. The converter assumed +x/+y/+z always, and OpenMC's
+  `RectLattice` has no way to express anything else, so such a lattice came out
+  reflected. Symmetric fill maps hid it completely; the tell was an asymmetric
+  one, where the converted core put the baffle plates on the wrong side. The
+  converter now derives each index direction from the surface order and reorders
+  the fill array (and `lower_left`) into OpenMC's fixed axes.
+- **Cross-section discovery took the first library it found, not the best.** A
+  machine set up for OpenMC usually has more than one `cross_sections.xml`: a
+  slim test or depletion library beside the full evaluation. Discovery walked a
+  fixed list of paths and stopped at the first hit, which on a normal
+  `openmc-data` layout meant a 26-nuclide library won over ENDF/B-VIII.0 and
+  every transport run died on the first nuclide the slim one lacked. A library
+  the user *names* (the `owen.openmc.crossSections` setting, the environment, the
+  `openmc` config file) is still authoritative; among libraries OWEN merely
+  finds, the one listing the most nuclides now wins. The search also reaches two
+  directories deep, which is where the openmc-data scripts actually put it
+  (`~/openmc-data-endfb80/endfb-viii.0-hdf5/cross_sections.xml`).
+- **The 3D preview drew a rod of coolant wherever a deck used a homogeneous
+  universe.** `-3:3` — the union of both senses of one surface, i.e. all space —
+  is how a deck writes a universe that is nothing but water, for the gap between
+  assemblies or the unloaded ring of a core lattice. The pin extractor reads a
+  flat list of signed surfaces, so it took the `-3` for a bounding cylinder and
+  invented a 0.46 cm water rod at every such position: 14,000 of them in the
+  full-core deck, enough instance budget to silently drop axial expansion and
+  render the core as a flat slab. Both senses of one surface are now understood
+  to mean the surface does not bound the cell.
+- **Two bundled MCNP decks had regions with no universe under them.** A 17×17
+  lattice of 1.26 cm pins spans 21.42 cm, but the assembly window is 21.50364 cm,
+  so a 0.042 cm sliver ran around every assembly with nothing in it; the same
+  thing happened between the 17×17 assembly grid and the barrel it sits in. MCNP
+  loses particles there. Both lattice levels in `beavrs_fullcore_mcnp.i` now
+  carry a ring of water elements, which is the inter-assembly gap BEAVRS actually
+  has, and `assembly_17x17_mcnp.i` has its fill indices centred (`-8:8` rather
+  than `0:16`) so the lattice sits where its bounding surfaces say it does.
+
+### Added
+
+- `owen.openmc.crossSections` — the `cross_sections.xml` to use when rendering or
+  verifying, as the interpreter sees it (a WSL path when OpenMC lives in WSL).
+- `owen.openmc.deckArgs` plus a **Deck arguments** field in the render panel, so a
+  deck with presets can be rendered as `--preset seventy_thirty_base` instead of
+  only in its default configuration.
+- **Auto fit** control in the render panel: filled cells (default) or whole
+  geometry.
+- `npm run verify:openmc-native` — a standing end-to-end check that runs the real
+  helper scripts through a real OpenMC against five fixture decks (model inside
+  `main()`, module-level geometry, builder-only, no model, deliberate overlap),
+  asserting non-blank images, framing, argument pass-through, error text, and
+  that the overlap scan sees a real overlap. `--deck <path>` renders one real
+  deck for debugging.
+- `npm run verify:results` — a standing check of all six result readers against
+  real-format fixtures, asserting the numbers match the values OpenMC's own API
+  reports for the same statepoint, that MCNP tally parts sum to the total in a
+  real production output, and that a mismatch is reported rather than smoothed
+  over. `src/test/fixtures/README.md` records where each fixture came from.
+- `npm run verify:h5-bundle` — bundles the statepoint reader to CommonJS exactly
+  as the extension is bundled and reads a real statepoint through it, so the
+  ESM-only `h5wasm` import cannot break in the packaged VSIX while continuing to
+  pass in tests.
+- `npm run verify:run` — a standing check of "Run Simulation" and the parameter
+  sweep: the command line OWEN types is asserted against the real shells (a
+  PowerShell line is actually executed, so a quoting regression fails here rather
+  than in a user's terminal), and where WSL has OpenMC the exact command line is
+  run on a pin cell and the statepoint read back through OWEN's own readers.
+- `npm run verify:converter` — a standing three-way agreement check on the
+  converters. Each bundled MCNP deck is converted, executed by a real OpenMC, and
+  then sampled: thousands of random points are looked up in both OWEN's exact
+  MCNP engine and the converted OpenMC model, and every material must match.
+  This is what caught the mirrored lattices; it now agrees on 23,326 of 23,326
+  points inside the full BEAVRS core, and where a deck defines a source it also
+  asserts that transport runs without losing a particle.
+
 ## [1.4.1] - 2026-08-13
 
 ### Fixed

@@ -1,26 +1,47 @@
-import type { RunResults } from './types';
-import { parseMctalFile } from './parsers/mcnp';
-import { parseOpenmcFile } from './parsers/openmc';
-import { parseSerpentFile } from './parsers/serpent';
-import { parseSconeFile } from './parsers/scone';
-import type { DetectedOutput } from './types';
+import * as fs from 'fs';
+import type { RunResults, DetectedOutput } from './types';
+import { parseMcnpText } from './parsers/mcnp';
+import { parseOpenmcFile, parseOpenmcStatepoint } from './parsers/openmc';
+import { parseSerpentResults } from './parsers/serpent';
+import { parseSconeOutput } from './parsers/scone';
+import { identifyOutput } from './detectOutputs';
 
 export async function parseOutput(detected: DetectedOutput): Promise<RunResults> {
+    if (detected.kind === 'statepoint') return parseOpenmcStatepoint(detected.path);
     switch (detected.code) {
         case 'openmc':
             return parseOpenmcFile(detected.path);
         case 'mcnp':
-            return parseMctalFile(detected.path);
+            return parseMcnpText(fs.readFileSync(detected.path, 'utf8'), detected.path);
         case 'serpent':
-            return parseSerpentFile(detected.path);
+            return parseSerpentResults(fs.readFileSync(detected.path, 'utf8'), detected.path);
         case 'scone':
-            return parseSconeFile(detected.path);
+            return parseSconeOutput(fs.readFileSync(detected.path, 'utf8'), detected.path);
         default:
             return parseOpenmcFile(detected.path);
     }
 }
 
-export { parseMctalFile } from './parsers/mcnp';
-export { parseOpenmcFile, parseOpenmcStdout } from './parsers/openmc';
-export { parseSerpentFile } from './parsers/serpent';
-export { parseSconeFile } from './parsers/scone';
+/**
+ * Parse a file the user picked by hand. The code is decided by content, so a
+ * mis-guessed extension cannot route an MCNP output into the SCONE reader.
+ */
+export async function parseOutputFile(filePath: string): Promise<RunResults> {
+    const id = identifyOutput(filePath);
+    if (id) {
+        return parseOutput({ path: filePath, code: id.code, kind: id.kind, label: id.label });
+    }
+    if (/\.h5$/i.test(filePath)) return parseOpenmcStatepoint(filePath);
+    const text = fs.readFileSync(filePath, 'utf8');
+    const res = parseMcnpText(text, filePath);
+    res.notes = [
+        'OWEN could not identify this file as MCNP, OpenMC, Serpent or SCONE output.',
+        ...(res.notes ?? []),
+    ];
+    return res;
+}
+
+export { parseMcnpText, parseMctalFile, parseMcnpOutp, parseMctalAscii } from './parsers/mcnp';
+export { parseOpenmcFile, parseOpenmcStdout, parseOpenmcTalliesOut, parseOpenmcStatepoint } from './parsers/openmc';
+export { parseSerpentResults, parseSerpentFile } from './parsers/serpent';
+export { parseSconeOutput, parseSconeFile } from './parsers/scone';

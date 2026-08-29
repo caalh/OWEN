@@ -24,6 +24,7 @@ import { registerConvertDeckAdapter } from './converter/adapterCommand';
 import { openAllenCrossSections } from './allen/panel';
 import { openResultsViewer } from './results/panel';
 import { setMcnpProjectRoot } from './commands/setMcnpProjectRoot';
+import { registerReportProblem } from './commands/reportProblem';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('OWEN extension activated');
@@ -72,12 +73,13 @@ export function activate(context: vscode.ExtensionContext) {
             void setMcnpProjectRoot();
         }),
 
-        vscode.commands.registerCommand('owen.runSimulation', () => {
+        vscode.commands.registerCommand('owen.runSimulation', async () => {
             const editor = vscode.window.activeTextEditor;
             if (editor) {
-                runSimulation(editor.document);
+                await runSimulation(editor.document);
             }
         }),
+        registerReportProblem(context),
 
         registerGeometryPreview(context),
         registerOpenmcNativeRender(context),

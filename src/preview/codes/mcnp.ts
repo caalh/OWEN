@@ -74,6 +74,8 @@ interface FillSpec {
     nx: number;
     ny: number;
     grid: number[][]; // [j][i]
+    i1: number;
+    j1: number;
 }
 
 interface PinLayer {
@@ -426,6 +428,19 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         const assemblies = latUniverses.size;
         notes.push(`Expanded the MCNP universe hierarchy (${pinUniverses.size} pin universe(s), ${assemblies} lattice(s)).`);
     }
+    for (const lat of latUniverses.values()) {
+        if (lat.fill.i1 === 0 && lat.fill.j1 === 0 && lat.fill.nx >= 5 && lat.fill.ny >= 5) {
+            const hi = Math.floor((lat.fill.nx - 1) / 2);
+            const hj = Math.floor((lat.fill.ny - 1) / 2);
+            notes.push(
+                `Lattice fill starts at element (0,0) and is ${lat.fill.nx}×${lat.fill.ny}. ` +
+                `The 3D view centers that map for display; an exact 2D slice follows MCNP ` +
+                `(§5.5.5) and will show pins only in one quadrant of a centered assembly window. ` +
+                `For a centered lattice use fill=-${hi}:${lat.fill.nx - 1 - hi} -${hj}:${lat.fill.ny - 1 - hj} 0:0.`,
+            );
+            break;
+        }
+    }
     if ([...latUniverses.values()].some((l) => l.hex)) {
         notes.push('Hex lattice (lat=2) placed on real hexagonal coordinates.');
     }
@@ -775,11 +790,11 @@ function parseFill(tokens: string[]): FillSpec | null {
             }
             grid.push(row);
         }
-        return { uniform: null, nx, ny, grid };
+        return { uniform: null, nx, ny, grid, i1, j1 };
     }
     // Single-universe fill.
     const single = parseInt(tokens[0], 10);
-    if (!Number.isNaN(single)) return { uniform: single, nx: 1, ny: 1, grid: [[single]] };
+    if (!Number.isNaN(single)) return { uniform: single, nx: 1, ny: 1, grid: [[single]], i1: 0, j1: 0 };
     return null;
 }
 
@@ -856,9 +871,21 @@ function buildPinUniverse(
         // A cell filled with another universe is structural, not a drawable layer.
         if (cell.fill) continue;
         // Outer radius = smallest cylinder this cell is *inside* of (negative sense).
+        //
+        // `cell.surfaces` is a flat signed list, so it cannot distinguish an
+        // intersection term from a branch of a union. Both senses of one surface
+        // therefore mean the surface does not bound the cell: `-3:3` is the
+        // whole-space idiom used to write a homogeneous universe, and reading its
+        // `-3` as a bound invented a pin-sized rod of coolant at every such
+        // position -- 14,000 of them in the full-core deck, which also cost
+        // enough instance budget to silence axial expansion.
+        const bothSenses = new Set(
+            cell.surfaces.filter((s) => cell.surfaces.includes(-s)).map((s) => Math.abs(s)),
+        );
         let outer = Infinity;
         for (const s of cell.surfaces) {
             if (s >= 0) continue;
+            if (bothSenses.has(-s)) continue;
             const surf = surfaces.get(-s);
             if (!surf) continue;
             const r = cylinderRadius(surf);

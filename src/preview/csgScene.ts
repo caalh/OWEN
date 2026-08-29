@@ -88,6 +88,22 @@ function toDnf(node: RegionNode, negate: boolean, ctx?: DnfCtx): Literal[][] | n
     switch (node.op) {
         case 'halfspace': {
             const sense = (negate ? -node.sense : node.sense) as 1 | -1;
+            // Whole-body outside is a union, not an intersection: De Morgan
+            // turns "outside AND(facets)" into "OR(outside each facet)".
+            // Without this, `3 -4` on two RCCs (the HYLIFE salt annulus) had
+            // its inner hole dropped ("outside macrobody — hole ignored") and
+            // drew a solid cylinder. Facet expansion is capped so an ARB with
+            // dozens of faces cannot blow the DNF budget by itself.
+            if (sense === 1 && node.facet === 0 && ctx) {
+                const shape = ctx.model.surfaces.get(node.surface)?.shape;
+                if (shape?.kind === 'body' && shape.facets.length > 0 && shape.facets.length <= 12) {
+                    return shape.facets.map((_, i) => [{
+                        surface: node.surface,
+                        facet: i + 1,
+                        sense: 1 as const,
+                    }]);
+                }
+            }
             return [[{ surface: node.surface, facet: node.facet, sense }]];
         }
         case 'not':

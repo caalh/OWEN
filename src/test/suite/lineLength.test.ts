@@ -25,14 +25,29 @@ suite('OWEN MCNP line-length guard', () => {
     });
 
     test('flags lines longer than the limit', () => {
-        const short = 'c '.padEnd(80, 'x'); // exactly 80
-        const long = 'c '.padEnd(81, 'x'); // 81 columns
+        const short = ('1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(50)).slice(0, 80);
+        const long = '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(80);
         const text = [short, long, 'm1 92235.80c 1.0'].join('\n');
         const over = findOverlengthLines(text, 80);
         assert.strictEqual(over.length, 1);
         assert.strictEqual(over[0].line, 1);
         assert.strictEqual(over[0].startCol, 80);
-        assert.strictEqual(over[0].expandedLength, 81);
+        assert.ok(over[0].expandedLength > 80);
+    });
+
+    test('does not flag a c comment card past the limit', () => {
+        const line = 'c ' + 'x'.repeat(200);
+        assert.strictEqual(findOverlengthLines(line, 80).length, 0);
+    });
+
+    test('does not flag a $ comment that starts before the limit', () => {
+        const line = '1 1 -10.4 -1 imp:n=1 $ ' + 'x'.repeat(200);
+        assert.strictEqual(findOverlengthLines(line, 80).length, 0);
+    });
+
+    test('flags when $ itself sits past the limit', () => {
+        const line = 'x'.repeat(85) + '$ trailing comment';
+        assert.strictEqual(findOverlengthLines(line, 80).length, 1);
     });
 
     test('80-column line is allowed; 81 is flagged', () => {

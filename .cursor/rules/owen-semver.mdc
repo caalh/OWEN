@@ -1,0 +1,16 @@
+---
+description: OWEN releases increment patch by exactly 1 — never skip, never bump minor/major, never 0.x.x
+alwaysApply: true
+---
+
+# OWEN version cadence
+
+Every OWEN release going forward increments **patch by exactly 1**. Nothing larger.
+
+- Current line is `1.4.x`. Next numbers are `1.4.3`, `1.4.4`, … `1.4.9`, `1.4.10` (two-digit patch is required once you pass 9 — never write `1.4.01` or restart at `0.0.10`).
+- **Never** bump minor (`1.5.0`) or major (`2.0.0`) unless the maintainer says so in the prompt.
+- **Never** skip a patch (`1.4.2` → `1.4.4`).
+- **Never** ship `0.x.x` or `0.0.x`. OWEN is past 1.0; do not rewind to a 0.0.xx scheme.
+- This cadence holds until a human explicitly changes it. Do not "save" 1.5.0 for a big feature.
+
+`package.json` `version` is the source of truth in this repo. User-facing release notes go in `CHANGELOG.md`. The public site (`reactormc.net`) still shows the last **downloadable** GitHub Release — do not advertise a version that has no VSIX.

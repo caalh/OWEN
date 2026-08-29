@@ -90,7 +90,7 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
     });
 
     test('MCNP: honors a custom line limit through options', () => {
-        const line = 'c ' + 'x'.repeat(100);
+        const line = '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(80);
         assert.ok(!runLanguageRules('mcnp', line, { mcnpLineLimit: 128 })
             .some((d) => d.code === 'mcnp.line-length'));
         assert.ok(runLanguageRules('mcnp', line, { mcnpLineLimit: 80 })
@@ -98,14 +98,14 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
     });
 
     test('MCNP: dialect option picks the 80/128 limit and the message names it', () => {
-        const line = 'c ' + 'x'.repeat(100); // 102 columns
+        const line = '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(80); // ~101 columns
         const legacy = runLanguageRules('mcnp', line, { mcnpDialect: 'mcnp6.1-and-earlier' })
             .find((d) => d.code === 'mcnp.line-length');
         assert.ok(legacy, 'expected a warning in the 80-column dialect');
         assert.match(legacy!.message, /6\.2\+ allows 128/);
         assert.ok(!runLanguageRules('mcnp', line, { mcnpDialect: 'mcnp6.2+' })
             .some((d) => d.code === 'mcnp.line-length'));
-        const over128 = 'c ' + 'x'.repeat(130);
+        const over128 = '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(120);
         const modern = runLanguageRules('mcnp', over128, { mcnpDialect: 'mcnp6.2+' })
             .find((d) => d.code === 'mcnp.line-length');
         assert.ok(modern, 'expected a warning past 128 in the 6.2+ dialect');
@@ -113,7 +113,7 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
     });
 
     test('MCNP: dialect beats the raw number; file directive beats both', () => {
-        const long = 'c ' + 'x'.repeat(100);
+        const long = '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(80);
         // dialect 6.2+ wins over a conflicting custom 80
         assert.ok(!runLanguageRules('mcnp', long, { mcnpDialect: 'mcnp6.2+', mcnpLineLimit: 80 })
             .some((d) => d.code === 'mcnp.line-length'));
@@ -124,11 +124,31 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
         });
         assert.ok(!diags.some((d) => d.code === 'mcnp.line-length'));
         // and the directive is named when it does flag
-        const still = ['c owen: line-limit=90', 'c ' + 'x'.repeat(100)].join('\n');
+        const still = ['c owen: line-limit=90', long].join('\n');
         const flagged = runLanguageRules('mcnp', still, { mcnpDialect: 'mcnp6.2+' })
             .find((d) => d.code === 'mcnp.line-length');
         assert.ok(flagged);
         assert.match(flagged!.message, /line-limit=90' on line 1/);
+    });
+
+    test('MCNP: fill=0:N 0:M 0:0 on a large lattice names the centered alternative', () => {
+        const diags = runLanguageRules('mcnp', '     fill=0:16 0:16 0:0');
+        const d = diags.find((x) => x.code === 'mcnp.lattice-fill-origin');
+        assert.ok(d, 'expected mcnp.lattice-fill-origin');
+        assert.match(d!.message, /fill=-8:8 -8:8 0:0/);
+        assert.ok(!runLanguageRules('mcnp', '     fill=-8:8 -8:8 0:0')
+            .some((x) => x.code === 'mcnp.lattice-fill-origin'));
+        assert.ok(!runLanguageRules('mcnp', '     fill=0:1 0:1 0:0')
+            .some((x) => x.code === 'mcnp.lattice-fill-origin'));
+    });
+
+    test('MCNP: comment cards and $ tails past the limit are not flagged', () => {
+        assert.ok(!runLanguageRules('mcnp', 'c ' + 'x'.repeat(200))
+            .some((d) => d.code === 'mcnp.line-length'));
+        assert.ok(!runLanguageRules('mcnp', '1 1 -10.4 -1 imp:n=1 $ ' + 'x'.repeat(200))
+            .some((d) => d.code === 'mcnp.line-length'));
+        assert.ok(runLanguageRules('mcnp', 'x'.repeat(85) + '$ comment')
+            .some((d) => d.code === 'mcnp.line-length'));
     });
 
     test('OpenMC: flags deprecated openmc.Source(', () => {

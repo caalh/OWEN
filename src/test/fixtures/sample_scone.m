@@ -1,0 +1,17 @@
+seed = -1157974580;
+pop = 5000;
+Inactive_Cycles = 100;
+Active_Cycles = 300;
+Total_CPU_Time = 4.2851E+02;
+Total_Transport_Time = 4.1093E+02;
+inactive_keff_k_analog = [ 1.29875E+00,3.1200E-03];
+keff_k_analog = [ 1.30124E+00,4.5600E-04];
+keff_IMP_PROD = [ 2.43512E+00,1.2000E-04];
+keff_IMP_ABS = [ 1.87200E+00,9.8000E-05];
+keff_SCATTER_PROD = [ 0.00000E+00,0.0000E+00];
+keff_ANA_LEAK = [ 3.21000E-02,8.4000E-04];
+keff_K_EFF = [ 1.30118E+00,4.3100E-04];
+active_fluxSpectrum_Energy = reshape([ 1.00000E-11,6.25000E-07,6.25000E-07,1.00000E-01,1.00000E-01,8.20000E-01,8.20000E-01,2.00000E+01],2,4);
+active_fluxSpectrum_Res = reshape([ 4.53211E-03,5.4000E-05,7.82145E-03,7.0000E-05,1.24500E-02,8.7000E-05,9.11000E-03,7.3000E-05],2,4);
+active_pinPower_Material = reshape([ {'fuel'},{'clad'},{'water'}],1,3);
+active_pinPower_Res = reshape([ 2.84512E-01,2.5600E-04,1.20400E-03,9.8000E-06,4.31000E-03,2.1000E-05],2,3);

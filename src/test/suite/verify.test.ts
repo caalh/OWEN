@@ -51,8 +51,14 @@ suite('Verify geometry — helper script generation', () => {
 
     test('monkey-patches openmc.run and Model.run so decks cannot start transport', () => {
         assert.ok(script.includes('openmc.run = _skip_run'));
-        assert.ok(script.includes('model_cls.run = _capture_run'));
+        assert.ok(script.includes('model_cls.run = _model_run'));
         assert.ok(script.includes("runpy.run_path(deck, run_name='__main__')"));
+    });
+
+    test('shares the deck loader, so a model built inside main() is still found', () => {
+        assert.ok(script.includes('owen_load_deck'));
+        assert.ok(script.includes('owen_prepare_cross_sections'), 'lends the deck a cross-section path');
+        assert.ok(script.includes('owen_slice_view'), 'planes come from the shared view fit');
     });
 
     test('renders slices with show_overlaps and the sentinel overlap color', () => {

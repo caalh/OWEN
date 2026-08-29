@@ -1,0 +1,129 @@
+/opt/miniconda3/lib/python3.13/site-packages/openmc/tallies.py:1859: RuntimeWarning: invalid value encountered in divide
+  data = self.std_dev[indices] / self.mean[indices]
+                                %%%%%%%%%%%%%%%
+                           %%%%%%%%%%%%%%%%%%%%%%%%
+                        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                                    %%%%%%%%%%%%%%%%%%%%%%%%
+                                     %%%%%%%%%%%%%%%%%%%%%%%%
+                 ###############      %%%%%%%%%%%%%%%%%%%%%%%%
+                ##################     %%%%%%%%%%%%%%%%%%%%%%%
+                ###################     %%%%%%%%%%%%%%%%%%%%%%%
+                ####################     %%%%%%%%%%%%%%%%%%%%%%
+                #####################     %%%%%%%%%%%%%%%%%%%%%
+                ######################     %%%%%%%%%%%%%%%%%%%%
+                #######################     %%%%%%%%%%%%%%%%%%
+                 #######################     %%%%%%%%%%%%%%%%%
+                 ######################     %%%%%%%%%%%%%%%%%
+                  ####################     %%%%%%%%%%%%%%%%%
+                    #################     %%%%%%%%%%%%%%%%%
+                     ###############     %%%%%%%%%%%%%%%%
+                       ############     %%%%%%%%%%%%%%%
+                          ########     %%%%%%%%%%%%%%
+                                      %%%%%%%%%%%
+
+                 | The OpenMC Monte Carlo Code
+       Copyright | 2011-2025 MIT, UChicago Argonne LLC, and contributors
+         License | https://docs.openmc.org/en/latest/license.html
+         Version | 0.15.3
+     Commit Hash | 27e38e894697bb32a1dac7848d2618818b6b8daf
+       Date/Time | 2026-08-29 14:34:45
+   MPI Processes | 1
+  OpenMP Threads | 22
+
+ Reading model XML file 'model.xml' ...
+ Reading cross sections XML file...
+ Reading U235 from /opt/openmc-data/ENDFB-8.0-NNDC_U235.h5
+ Reading U238 from /opt/openmc-data/ENDFB-8.0-NNDC_U238.h5
+ Reading O16 from /opt/openmc-data/ENDFB-8.0-NNDC_O16.h5
+ Reading Zr90 from /opt/openmc-data/ENDFB-8.0-NNDC_Zr90.h5
+ Reading H1 from /opt/openmc-data/ENDFB-8.0-NNDC_H1.h5
+ Reading c_H_in_H2O from /opt/openmc-data/ENDFB-7.1-NNDC_c_H_in_H2O.h5
+ Minimum neutron data temperature: 294 K
+ Maximum neutron data temperature: 294 K
+ Preparing distributed cell instances...
+ Writing summary.h5 file...
+ Maximum neutron transport energy: 20000000 eV for Zr90
+ Initializing source particles...
+
+ ====================>     K EIGENVALUE SIMULATION     <====================
+
+  Bat./Gen.      k            Average k
+  =========   ========   ====================
+        1/1    1.53235
+        2/1    1.38997
+        3/1    1.49975
+        4/1    1.48154
+        5/1    1.29739
+        6/1    1.45671
+        7/1    1.37564
+        8/1    1.34729
+        9/1    1.58413
+       10/1    1.38220
+       11/1    1.37145
+       12/1    1.34145    1.35645 +/- 0.01500
+       13/1    1.31955    1.34415 +/- 0.01504
+       14/1    1.27361    1.32651 +/- 0.02059
+       15/1    1.40612    1.34243 +/- 0.02254
+       16/1    1.41208    1.35404 +/- 0.02176
+       17/1    1.33125    1.35079 +/- 0.01867
+       18/1    1.33636    1.34898 +/- 0.01627
+       19/1    1.47944    1.36348 +/- 0.02040
+       20/1    1.36732    1.36386 +/- 0.01825
+       21/1    1.22502    1.35124 +/- 0.02078
+       22/1    1.39265    1.35469 +/- 0.01928
+       23/1    1.39993    1.35817 +/- 0.01807
+       24/1    1.30465    1.35435 +/- 0.01716
+       25/1    1.42802    1.35926 +/- 0.01672
+       26/1    1.41219    1.36257 +/- 0.01598
+       27/1    1.27602    1.35748 +/- 0.01585
+       28/1    1.32127    1.35546 +/- 0.01508
+       29/1    1.42821    1.35929 +/- 0.01477
+       30/1    1.45356    1.36401 +/- 0.01478
+ Creating state point statepoint.30.h5...
+
+ =======================>     TIMING STATISTICS     <=======================
+
+ Total time for initialization     = 9.7105e-01 seconds
+   Reading cross sections          = 9.3858e-01 seconds
+ Total time in simulation          = 9.7398e-01 seconds
+   Time in transport only          = 4.2117e-01 seconds
+   Time in inactive batches        = 1.2009e-01 seconds
+   Time in active batches          = 8.5389e-01 seconds
+   Time synchronizing fission bank = 7.9279e-03 seconds
+     Sampling source sites         = 2.7767e-03 seconds
+     SEND/RECV source sites        = 9.5501e-04 seconds
+   Time accumulating tallies       = 5.1636e-01 seconds
+   Time writing statepoints        = 1.5365e-02 seconds
+ Total time for finalization       = 1.8134e-04 seconds
+ Total time elapsed                = 1.9607e+00 seconds
+ Calculation Rate (inactive)       = 41634.9 particles/second
+ Calculation Rate (active)         = 11711.1 particles/second
+
+ ============================>     RESULTS     <============================
+
+ k-effective (Collision)     = 1.38036 +/- 0.01376
+ k-effective (Track-length)  = 1.36401 +/- 0.01478
+ k-effective (Absorption)    = 1.36909 +/- 0.00963
+ Combined k-effective        = 1.37223 +/- 0.01037
+ Leakage Fraction            = 0.00000 +/- 0.00000
+
+STATEPOINT: /home/me/owen-truth/statepoint.30.h5
+KEFF: 1.372+/-0.010
+N_REALIZATIONS: 20
+TALLY 1 'fuel spectrum' mean.shape=(4, 1, 1)
+   scores: ['flux'] nuclides: ['total']
+   mean: [1.87803769 3.52148001 4.38857139 3.36572079]
+   rel_err: [0.01098847 0.00908421 0.00823883 0.00792285]
+TALLY 2 'fuel rates' mean.shape=(1, 2, 3)
+   scores: ['fission', 'absorption', 'nu-fission'] nuclides: ['U235', 'U238']
+   mean: [0.52795133 0.64048951 1.28333347 0.02906996 0.29959726 0.08067314]
+   rel_err: [0.01163485 0.01133993 0.01163005 0.00958983 0.01504212 0.00961331]
+TALLY 3 'fission mesh' mean.shape=(16, 1, 1)
+   scores: ['fission'] nuclides: ['total']
+   mean: [0.         0.0148516  0.01507831 0.         0.01453647 0.11035748
+ 0.10956708 0.01435056]
+   rel_err: [       nan 0.01863108 0.01520313        nan 0.0236308  0.01454799
+ 0.01251947 0.02067589]

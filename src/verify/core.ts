@@ -14,6 +14,12 @@
  *      indicate undefined regions. Skipped gracefully when cross sections
  *      are unavailable.
  */
+import {
+    DeckLoadOptions,
+    normalizeDeckOptions,
+    OPENMC_DECK_LOADER_PY,
+    ViewFit,
+} from '../preview/openmcNative/deckLoader';
 
 /** Exact RGB the helper assigns to overlaps before pixel counting. */
 export const OVERLAP_COLOR: [number, number, number] = [255, 0, 255];
@@ -52,6 +58,12 @@ export interface VerifyRequest {
     probeParticles: number;
     /** `max_lost_particles` for the probe run. */
     maxLostParticles: number;
+    /** cross_sections.xml to lend the deck; '' lets the helper look for one. */
+    crossSections: string;
+    /** Argv handed to the deck (presets, thicknesses, …). */
+    deckArgs: string[];
+    /** Which bounding box the sampled planes span. */
+    fit: ViewFit;
 }
 
 export function buildVerifyRequest(
@@ -59,6 +71,7 @@ export function buildVerifyRequest(
     outDir: string,
     planes: VerifyPlaneSpec[] = defaultPlaneSpecs(),
     particleProbe = true,
+    opts?: DeckLoadOptions,
 ): VerifyRequest {
     return {
         deckPath,
@@ -67,6 +80,7 @@ export function buildVerifyRequest(
         particleProbe,
         probeParticles: 1000,
         maxLostParticles: 10,
+        ...normalizeDeckOptions(opts),
     };
 }
 
@@ -173,9 +187,10 @@ import glob
 import json
 import os
 import re
-import runpy
 import sys
 import traceback
+
+${OPENMC_DECK_LOADER_PY}
 
 RESULT = {
     'ok': False,
@@ -187,48 +202,6 @@ RESULT = {
 }
 
 OVERLAP_RGB = (${OVERLAP_COLOR[0]}, ${OVERLAP_COLOR[1]}, ${OVERLAP_COLOR[2]})
-
-
-def finite(value, fallback):
-    try:
-        v = float(value)
-    except Exception:
-        return fallback
-    if v != v or v == float('inf') or v == float('-inf'):
-        return fallback
-    return v
-
-
-def bounds_of(geometry):
-    bb = geometry.bounding_box
-    lower = getattr(bb, 'lower_left', None)
-    upper = getattr(bb, 'upper_right', None)
-    if lower is None or upper is None:
-        lower, upper = bb[0], bb[1]
-    lo = [finite(lower[i], -50.0) for i in range(3)]
-    hi = [finite(upper[i], 50.0) for i in range(3)]
-    for i in range(3):
-        if hi[i] <= lo[i]:
-            lo[i], hi[i] = -50.0, 50.0
-    return lo, hi
-
-
-def plane_view(geometry, basis, fraction):
-    axes = {'xy': (0, 1), 'xz': (0, 2), 'yz': (1, 2)}[basis]
-    normal = {'xy': 2, 'xz': 1, 'yz': 0}[basis]
-    origin = [0.0, 0.0, 0.0]
-    width = [100.0, 100.0]
-    if geometry is not None:
-        try:
-            lo, hi = bounds_of(geometry)
-        except Exception:
-            return origin, width
-        for i in range(3):
-            origin[i] = (lo[i] + hi[i]) / 2.0
-        origin[normal] = lo[normal] + (hi[normal] - lo[normal]) * fraction
-        width = [max(hi[axes[0]] - lo[axes[0]], 0.1) * 1.02,
-                 max(hi[axes[1]] - lo[axes[1]], 0.1) * 1.02]
-    return origin, width
 
 
 def count_overlap_pixels(image_path):
@@ -280,96 +253,19 @@ def load_model(req, out_dir):
     import openmc
 
     RESULT['version'] = str(getattr(openmc, '__version__', 'unknown'))
-    captured = {'model': None}
-    real_run = openmc.run
-
-    def _skip_run(*args, **kwargs):
-        RESULT['warnings'].append('openmc.run() in the deck was skipped (verify-only pass).')
-
-    openmc.run = _skip_run
-    if hasattr(openmc, 'plot_geometry'):
-        real_plot_geometry = openmc.plot_geometry
-        openmc.plot_geometry = lambda *a, **k: None
-    else:
-        real_plot_geometry = None
-    if hasattr(openmc, 'plot_inline'):
-        openmc.plot_inline = lambda *a, **k: None
-
-    model_cls = getattr(openmc, 'Model', None)
-    if model_cls is None and hasattr(openmc, 'model'):
-        model_cls = getattr(openmc.model, 'Model', None)
-    if model_cls is not None:
-        def _capture_run(self, *args, **kwargs):
-            captured['model'] = self
-            RESULT['warnings'].append('model.run() in the deck was skipped (verify-only pass).')
-        model_cls.run = _capture_run
-
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        plt.show = lambda *a, **k: None
-    except Exception:
-        pass
-
-    os.chdir(out_dir)
-    deck = req['deckPath']
-    sys.argv = [deck]
-    namespace = {}
-    try:
-        namespace = runpy.run_path(deck, run_name='__main__')
-    except SystemExit:
-        pass
-    except Exception:
-        RESULT['warnings'].append('Deck raised during execution:' + chr(10) + traceback.format_exc())
-
-    model = captured['model']
-    if model is None and model_cls is not None:
-        for value in namespace.values():
-            if isinstance(value, model_cls):
-                model = value
-                break
-
-    geometry = None
-    materials = None
-    if model is not None:
-        geometry = getattr(model, 'geometry', None)
-        materials = getattr(model, 'materials', None)
-    else:
-        for value in namespace.values():
-            if geometry is None and isinstance(value, openmc.Geometry):
-                geometry = value
-            elif materials is None and isinstance(value, openmc.Materials):
-                materials = value
-
-    have_xml = os.path.exists('geometry.xml') or os.path.exists('model.xml')
-    if geometry is None and not have_xml:
-        raise RuntimeError(
-            'No OpenMC model found: the deck defined no openmc.Model/openmc.Geometry '
-            'and exported no geometry.xml/model.xml.')
-
-    if geometry is not None:
-        if os.path.exists('model.xml'):
-            os.remove('model.xml')
-        geometry.export_to_xml()
-        if materials is None or len(materials) == 0:
-            try:
-                mats = geometry.get_all_materials()
-                materials = openmc.Materials(mats.values())
-            except Exception:
-                materials = None
-        if materials is not None and len(materials) > 0:
-            materials.export_to_xml()
-
-    return openmc, geometry, real_run, real_plot_geometry
+    ctx = owen_load_deck(req, out_dir, RESULT['warnings'], 'verify-only pass')
+    owen_export_model(ctx, out_dir, RESULT['warnings'])
+    return ctx
 
 
 def overlap_scan(openmc, geometry, req, out_dir, real_plot_geometry):
     plots = []
     meta = []
+    fit = 'geometry' if req.get('fit') == 'geometry' else 'materials'
     for spec in req['planes']:
         basis = spec.get('basis', 'xy')
-        origin, width = plane_view(geometry, basis, float(spec.get('fraction', 0.5)))
+        origin, width = owen_slice_view(geometry, basis, fit, RESULT['warnings'],
+                                        float(spec.get('fraction', 0.5)))
         stem = 'owen_verify_' + str(spec['id'])
         plot = openmc.Plot()
         plot.filename = stem
@@ -391,15 +287,17 @@ def overlap_scan(openmc, geometry, req, out_dir, real_plot_geometry):
     if not plots:
         raise RuntimeError('No verification planes were requested.')
 
-    # A minimal settings.xml so 'openmc --plot' has everything it needs.
-    settings = openmc.Settings()
-    settings.batches = 1
-    settings.particles = 1
-    settings.inactive = 0
-    try:
-        settings.export_to_xml()
-    except Exception:
-        RESULT['warnings'].append('settings.xml export failed; relying on defaults.')
+    # 'openmc --plot' needs a settings.xml. The loader writes the deck's own;
+    # this covers the XML-adoption path, where there may not be one.
+    if not os.path.exists(os.path.join(out_dir, 'settings.xml')):
+        settings = openmc.Settings()
+        settings.batches = 1
+        settings.particles = 1
+        settings.inactive = 0
+        try:
+            settings.export_to_xml()
+        except Exception:
+            RESULT['warnings'].append('settings.xml export failed; relying on defaults.')
 
     openmc.Plots(plots).export_to_xml()
 
@@ -444,7 +342,7 @@ def overlap_scan(openmc, geometry, req, out_dir, real_plot_geometry):
         RESULT['planes'].append(entry)
 
 
-def lost_particle_probe(openmc, req, out_dir, real_run):
+def lost_particle_probe(openmc, req, out_dir, real_run, cross_sections, deck_settings):
     report = {
         'ran': False,
         'lostCount': 0,
@@ -456,14 +354,26 @@ def lost_particle_probe(openmc, req, out_dir, real_run):
     if not req.get('particleProbe', False):
         report['message'] = 'Particle probe disabled.'
         return
-    if not os.environ.get('OPENMC_CROSS_SECTIONS') and not os.path.exists('cross_sections.xml'):
-        report['message'] = ('Skipped: no cross sections configured '
-                             '(set OPENMC_CROSS_SECTIONS to enable the lost-particle probe).')
+    if not cross_sections and not os.path.exists('cross_sections.xml'):
+        report['message'] = ('Skipped: no cross-section library found '
+                             '(set owen.openmc.crossSections or OPENMC_CROSS_SECTIONS '
+                             'to enable the lost-particle probe).')
         return
+    if cross_sections:
+        # The loader withdraws its stand-in before plotting; transport needs
+        # the real library back in the environment.
+        os.environ['OPENMC_CROSS_SECTIONS'] = cross_sections
 
-    settings = openmc.Settings()
-    settings.run_mode = 'fixed source'
-    settings.batches = 1
+    # Probe with the deck's own source when it has one: a default point source
+    # at the origin would sample a quite different set of paths.
+    settings = deck_settings if deck_settings is not None else openmc.Settings()
+    if getattr(settings, 'run_mode', None) is None:
+        settings.run_mode = 'fixed source'
+    if str(getattr(settings, 'run_mode', '')) == 'eigenvalue':
+        settings.inactive = 0
+        settings.batches = 2
+    else:
+        settings.batches = 1
     settings.particles = report['particles']
     try:
         settings.max_lost_particles = report['maxLost']
@@ -504,9 +414,10 @@ def lost_particle_probe(openmc, req, out_dir, real_run):
 
 
 def verify(req, out_dir):
-    openmc, geometry, real_run, real_plot_geometry = load_model(req, out_dir)
-    overlap_scan(openmc, geometry, req, out_dir, real_plot_geometry)
-    lost_particle_probe(openmc, req, out_dir, real_run)
+    ctx = load_model(req, out_dir)
+    overlap_scan(ctx['openmc'], ctx['geometry'], req, out_dir, ctx['realPlotGeometry'])
+    lost_particle_probe(ctx['openmc'], req, out_dir, ctx['realRun'], ctx['crossSections'],
+                        ctx['settings'])
 
 
 if __name__ == '__main__':

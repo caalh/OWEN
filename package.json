@@ -2,14 +2,15 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "assets/owen-icon.png",
   "homepage": "https://reactormc.net",
   "bugs": {
-    "url": "https://github.com/caalh/owen/issues"
+    "url": "https://github.com/caalh/owen/issues",
+    "email": "help@reactormc.net"
   },
   "repository": {
     "type": "git",
@@ -22,6 +23,22 @@
   },
   "engines": {
     "vscode": "^1.85.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "restrictedConfigurations": [
+        "owen.openmc.executable",
+        "owen.openmc.pythonExecutable",
+        "owen.openmc.crossSections",
+        "owen.mcnp.executable",
+        "owen.serpent.executable",
+        "owen.scone.executable",
+        "owen.simulation.workingDirectory",
+        "owen.mcnp.projectRoot"
+      ],
+      "description": "Reading decks, diagnostics, and the 3D preview work in Restricted Mode. Running a code, Render/Verify with OpenMC, and loading a live OpenMC model need a trusted workspace because they execute files in this folder. If Cursor asks whether you trust the authors of these files, that is VS Code workspace trust — not a Marketplace warning that OWEN is unsafe. Click Trust Workspace & Install, or Trust later from the Restricted Mode banner."
+    }
   },
   "categories": [
     "Programming Languages",
@@ -76,6 +93,7 @@
     "onCommand:owen.showMcnpReferences",
     "onCommand:owen.setMcnpProjectRoot",
     "onCommand:owen.toggleMcnpLineLimit",
+    "onCommand:owen.reportProblem",
     "onView:owenMcnpReferences",
     "onStartupFinished"
   ],
@@ -291,6 +309,12 @@
         "command": "owen.toggleMcnpLineLimit",
         "title": "OWEN: Toggle MCNP Line Limit (80/128)",
         "category": "OWEN"
+      },
+      {
+        "command": "owen.reportProblem",
+        "title": "OWEN: Report a problem (help@reactormc.net)",
+        "category": "OWEN",
+        "icon": "$(mail)"
       }
     ],
     "keybindings": [
@@ -428,6 +452,10 @@
           "when": "editorLangId == mcnp"
         },
         {
+          "command": "owen.reportProblem",
+          "group": "5_help@0"
+        },
+        {
           "command": "owen.openTutorial",
           "group": "5_help@1"
         },
@@ -523,6 +551,10 @@
           "group": "3_run@4"
         },
         {
+          "command": "owen.reportProblem",
+          "group": "4_help@0"
+        },
+        {
           "command": "owen.openTutorial",
           "group": "4_help@1"
         },
@@ -586,6 +618,18 @@
           "type": "string",
           "default": "python",
           "description": "Python interpreter used to run OpenMC model scripts (e.g. build_model.py). When explicitly set, it is also the first candidate probed by 'OWEN: Render with OpenMC (authoritative)'; otherwise that command falls back to the ms-python interpreter, python/python3 on PATH, then WSL."
+        },
+        "owen.openmc.crossSections": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to cross_sections.xml, as seen by the interpreter that runs your deck (a WSL path such as /opt/openmc-data/cross_sections.xml when OpenMC lives in WSL). OWEN sets OPENMC_CROSS_SECTIONS from this when rendering or verifying, because a shell profile that exports it is not read by the non-interactive process OWEN starts. Leave blank to let OWEN search the environment, the openmc config, and the usual install locations."
+        },
+        "owen.openmc.deckArgs": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Arguments passed to an OpenMC model script when OWEN runs it for 'Render with OpenMC' or 'Verify Geometry' — e.g. '--preset seventy_thirty_base'. Quotes group arguments; nothing is passed through a shell."
         },
         "owen.mcnp.executable": {
           "type": "string",
@@ -850,6 +894,11 @@
     "test": "node ./out/src/test/runTest.js",
     "verify:mcnp-rules": "node ./scripts/verify-mcnp-rules.mjs",
     "verify:openmc-tokens": "node ./scripts/verify-openmc-tokens.mjs",
+    "verify:openmc-native": "tsc -p . && node ./scripts/verify-openmc-native.mjs",
+    "verify:results": "tsc -p . && node ./scripts/verify-results.mjs",
+    "verify:h5-bundle": "node ./scripts/verify-h5-bundle.mjs",
+    "verify:run": "tsc -p . && node ./scripts/verify-run.mjs",
+    "verify:converter": "tsc -p . && node ./scripts/verify-converter.mjs",
     "package": "vsce package",
     "publish": "vsce publish",
     "export-nrdp": "node ./scripts/export-nrdp-snapshot.mjs",

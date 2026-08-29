@@ -17,8 +17,8 @@ generated a fixed deck and could not repeat anything.
 The webview posts a `DeckModel` on every edit; the host answers with
 `{ text, lines, owners, sections, counts, checks, summary }`. Line ownership is
 what the right-hand pane highlights from when a section is selected, and what a
-check row scrolls to. Errors block insertion behind a modal "Insert anyway";
-warnings and infos do not block.
+check row scrolls to. Errors block Insert, New File, and Copy behind a modal
+"Continue anyway"; warnings and infos do not block.
 
 Webview exceptions post `clientError` so the host can surface them — without it a
 thrown render simply stops the panel updating, with nothing in any log.
@@ -31,6 +31,10 @@ thrown render simply stops the panel updating, with nothing in any log.
   test instance and drives the handshake, the document round trip and
   `focusSection`, asserting no `clientError` arrives. This is what catches a typo
   in the injected script, which is otherwise invisible until a user opens it.
+
+Adding a lattice (or opening the Lattice tab on a pin-cell starter) points the
+Boundary section at that lattice and grows the box to the map span. An unfilled
+lattice is a blocking pre-insert error; a second unused lattice is a warning.
 
 ## Known gaps
 

@@ -1,4 +1,7 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
+import { PREBUILT_MODELS } from '../paths';
 import {
     buildMcnpReferenceIndex,
     resolveAt,
@@ -92,6 +95,17 @@ suite('OWEN MCNP reference tracker', () => {
         const fillHighlights = getHighlightOccurrences(index, lineIdx, 7);
         assert.ok(fillHighlights.every((o) => o.kind === 'universe' && o.id === 2));
         assert.strictEqual(fillHighlights.length, 7, 'universe 2 fill highlights should not merge other ids');
+        const fillSiblings = fillHighlights.filter((o) => o.line === lineIdx || o.line === lineIdx + 1 || o.line === lineIdx + 2);
+        assert.ok(fillSiblings.length >= 4, `expected all four fill-array 2s, got ${fillSiblings.length}`);
+    });
+
+    test('material 2 is not the same entity as a fill-array 2', () => {
+        const index = buildMcnpReferenceIndex(LATTICE_DECK);
+        const m2 = getDefinition(index, 'material', 2)!;
+        const matHits = getHighlightOccurrences(index, m2.line, m2.startCol);
+        assert.ok(matHits.every((o) => o.kind === 'material' && o.id === 2));
+        const fillLine = LATTICE_DECK.split('\n').indexOf('     1 2 1');
+        assert.ok(!matHits.some((o) => o.line === fillLine), 'material highlights must not paint lattice universe ids');
     });
 
     test('classifies material definitions by ZAID (UO2 / Zircaloy / Water)', () => {
@@ -302,5 +316,29 @@ suite('OWEN MCNP reference tracker — transforms', () => {
         assert.match(out, /^m5\s/m);
         assert.match(out, /^mt5\s/m);
         assert.doesNotMatch(out, /\bm16\b/);
+    });
+});
+
+suite('OWEN MCNP reference tracker — 17×17 prebuilt fill map', () => {
+    test('a 2 in the assembly fill array highlights every other 2 in that lattice, not material 2', () => {
+        const text = fs.readFileSync(path.join(PREBUILT_MODELS, 'assembly_17x17_mcnp.i'), 'utf8');
+        const index = buildMcnpReferenceIndex(text);
+        const lat = index.lattices.find((l) => l.cellId === 20);
+        assert.ok(lat, 'expected the u=10 lattice in cell 20');
+        assert.strictEqual(lat!.universeCounts.get(2), 24, `expected 24 guide-tube positions, got ${lat!.universeCounts.get(2)}`);
+
+        const fillOcc = index.occurrences.find(
+            (o) => o.kind === 'universe' && o.id === 2 && o.cellContext === 20 && !o.isDefinition,
+        );
+        assert.ok(fillOcc, 'expected a fill-array universe-2 occurrence');
+        const hits = getHighlightOccurrences(index, fillOcc!.line, fillOcc!.startCol);
+        const mapHits = hits.filter((o) => o.cellContext === 20 && !o.isDefinition);
+        assert.strictEqual(mapHits.length, 24, `expected 24 highlighted fill 2s, got ${mapHits.length}`);
+        assert.ok(hits.every((o) => o.kind === 'universe' && o.id === 2));
+
+        const m2 = getDefinition(index, 'material', 2)!;
+        const matHits = getHighlightOccurrences(index, m2.line, m2.startCol);
+        assert.ok(matHits.every((o) => o.kind === 'material'));
+        assert.ok(!matHits.some((o) => o.cellContext === 20 && o.kind === 'universe'));
     });
 });

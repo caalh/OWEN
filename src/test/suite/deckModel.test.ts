@@ -1,9 +1,13 @@
 import * as assert from 'assert';
 import {
     applySconeTemperature,
+    attachLatticeToBoundary,
     buildDeckDocument,
     declaredMaterialName,
     IdAllocator,
+    latticeHalfSpan,
+    retargetBoundariesAfterLatticeRemoved,
+    type BoundarySection,
     type DeckModel,
     type DeckSection,
 } from '../../inputBuilder/deckModel';
@@ -273,13 +277,13 @@ suite('Input Builder — pre-insert checks', () => {
     });
 
     test('an over-long MCNP card is an error in the 80-column dialect and clean at 128', () => {
-        const long = 'c ' + 'x'.repeat(140);
+        const long = '1 1 -10.4 -1 imp:n=1 ' + 'x'.repeat(140);
         const model = pinCellModel('mcnp', [{ id: 'c1', kind: 'custom', region: 'cells', text: long }]);
         const legacy = checkDeck(model, buildDeckDocument(model));
         assert.ok(legacy.some((c) => c.severity === 'error' && /columns/.test(c.message)));
         const modern: DeckModel = { ...model, lineLimit: 128 };
         const wide = checkDeck(modern, buildDeckDocument(modern));
-        assert.ok(wide.some((c) => c.severity === 'error' && /columns/.test(c.message)), '140 columns is over 128 too');
+        assert.ok(wide.some((c) => c.severity === 'error' && /columns/.test(c.message)), '140+ columns is over 128 too');
     });
 
     test('SCONE decks stay ASCII', () => {
@@ -304,5 +308,103 @@ suite('Input Builder — pre-insert checks', () => {
         assert.strictEqual(s.warnings, 1);
         assert.strictEqual(s.infos, 1);
         assert.match(s.text, /1 problem/);
+    });
+
+    test('a lattice left on a pin-cell boundary is an error (the map is never transported)', () => {
+        const model = pinCellModel('mcnp');
+        const orphaned: DeckModel = {
+            ...model,
+            sections: model.sections.map((s) => (s.kind === 'boundary' ? { ...s, fillLatticeId: undefined, fillUniverse: 1, size: 0.63 } : s)),
+        };
+        const checks = checkDeck(orphaned, buildDeckDocument(orphaned));
+        assert.ok(
+            checks.some((c) => c.severity === 'error' && /never transports the map/.test(c.message)),
+            'an unfilled lattice went unreported',
+        );
+    });
+
+    test('a second lattice that the boundary does not fill is a warning, not an error', () => {
+        const second: DeckSection = {
+            id: 'l2', kind: 'lattice', nx: 3, ny: 3, pitch: 1.26,
+            grid: [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+            pins: [{ id: 1, label: 'fuel', universe: 1, pincellId: 'p1' }],
+        };
+        const model = pinCellModel('mcnp', [second]);
+        const checks = checkDeck(model, buildDeckDocument(model));
+        assert.strictEqual(summarizeChecks(checks).errors, 0, checks.filter((c) => c.severity === 'error').map((c) => c.message).join(' | '));
+        assert.ok(checks.some((c) => c.severity === 'warning' && /never filled/.test(c.message)));
+    });
+});
+
+suite('Input Builder — lattice/boundary wiring', () => {
+    test('attachLatticeToBoundary fills the pin-cell box and grows it to the 17×17 span', () => {
+        const bound: BoundarySection = {
+            id: 'b1', kind: 'boundary', shape: 'box', size: 0.63,
+            zMin: 0, zMax: 365.76, bc: 'reflective', fillUniverse: 1,
+        };
+        const lat: DeckSection = {
+            id: 'l1', kind: 'lattice', nx: 17, ny: 17, pitch: 1.26,
+            grid: Array.from({ length: 17 }, () => Array(17).fill(1)),
+            pins: [{ id: 1, label: 'fuel', universe: 1, pincellId: 'p1' }],
+            latticeUniverse: 10,
+        };
+        const sections: DeckSection[] = [bound, lat];
+        attachLatticeToBoundary(sections, 'l1');
+        assert.strictEqual(bound.fillLatticeId, 'l1');
+        assert.strictEqual(bound.fillUniverse, undefined);
+        assert.strictEqual(bound.size, 10.71);
+        assert.strictEqual(latticeHalfSpan({ nx: 17, ny: 17, pitch: 1.26 }), 10.71);
+    });
+
+    test('a second lattice does not steal the boundary fill', () => {
+        const bound: BoundarySection = {
+            id: 'b1', kind: 'boundary', shape: 'box', size: 10.71,
+            zMin: 0, zMax: 365.76, bc: 'reflective', fillLatticeId: 'l1',
+        };
+        const l1: DeckSection = {
+            id: 'l1', kind: 'lattice', nx: 17, ny: 17, pitch: 1.26,
+            grid: Array.from({ length: 17 }, () => Array(17).fill(1)),
+            pins: [{ id: 1, label: 'fuel', universe: 1 }],
+        };
+        const l2: DeckSection = {
+            id: 'l2', kind: 'lattice', nx: 17, ny: 17, pitch: 1.26,
+            grid: Array.from({ length: 17 }, () => Array(17).fill(1)),
+            pins: [{ id: 1, label: 'fuel', universe: 1 }],
+        };
+        const sections = [bound, l1, l2];
+        attachLatticeToBoundary(sections, 'l2');
+        assert.strictEqual(bound.fillLatticeId, 'l1');
+    });
+
+    test('removing the filled lattice retargets the boundary at the remaining one', () => {
+        const bound: BoundarySection = {
+            id: 'b1', kind: 'boundary', shape: 'box', size: 1.89,
+            zMin: 0, zMax: 365.76, bc: 'reflective', fillLatticeId: 'l1',
+        };
+        const l2: DeckSection = {
+            id: 'l2', kind: 'lattice', nx: 3, ny: 3, pitch: 1.26,
+            grid: [[1, 1, 1], [1, 1, 1], [1, 1, 1]],
+            pins: [{ id: 1, label: 'fuel', universe: 1 }],
+        };
+        const sections = [bound, l2];
+        retargetBoundariesAfterLatticeRemoved(sections, 'l1');
+        assert.strictEqual(bound.fillLatticeId, 'l2');
+    });
+
+    test('a wired lattice emits fill=<lattice universe>, not fill=1', () => {
+        const model = pinCellModel('mcnp');
+        const bound = model.sections.find((s): s is BoundarySection => s.kind === 'boundary')!;
+        bound.fillLatticeId = undefined;
+        bound.fillUniverse = 1;
+        bound.size = 0.63;
+        attachLatticeToBoundary(model.sections, 'l1');
+        const doc = buildDeckDocument(model);
+        const latCard = doc.lines.find((l) => /\blat=1\b/.test(l));
+        const uni = /(?:^|\s)u=(\d+)/.exec(latCard ?? '')?.[1];
+        assert.ok(uni, `no lattice universe on: ${latCard ?? '(missing lat=1 card)'}`);
+        const outer = doc.lines.find((l) => new RegExp(`\\bfill=${uni}\\b`).test(l) && !/\blat=1\b/.test(l));
+        assert.ok(outer, `no outer cell fills universe ${uni}:\n${doc.lines.filter((l) => /fill=/.test(l)).join('\n')}`);
+        assert.ok(!doc.lines.some((l) => /\bfill=1\s+imp:n=1/.test(l)),
+            `outer cell still filled the pin:\n${doc.lines.filter((l) => /fill=/.test(l)).join('\n')}`);
     });
 });

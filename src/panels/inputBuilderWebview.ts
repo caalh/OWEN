@@ -290,6 +290,45 @@ function newSection(kind) {
 
 function countKind(kind) { return model.sections.filter((s) => s.kind === kind).length; }
 
+function latticeHalfSpan(lat) {
+  return Math.max(lat.nx, lat.ny) * lat.pitch / 2;
+}
+function firstEnabledBoundary() {
+  return model.sections.find((s) => s.kind === 'boundary' && s.enabled !== false);
+}
+/** Wire a newly added lattice into the pin-cell starter boundary so the map is actually transported. */
+function attachLatticeToBoundary(latticeId) {
+  const lat = model.sections.find((s) => s.id === latticeId && s.kind === 'lattice');
+  if (!lat) return;
+  const bound = firstEnabledBoundary();
+  if (!bound) return;
+  if (!bound.fillLatticeId) {
+    bound.fillLatticeId = latticeId;
+    if (bound.fillUniverse === 1) bound.fillUniverse = undefined;
+  }
+  if (bound.fillLatticeId === latticeId && bound.shape !== 'sphere') {
+    const span = latticeHalfSpan(lat);
+    if (bound.size < span - 1e-9) bound.size = Number(span.toFixed(4));
+  }
+}
+function syncFilledBoundaries() {
+  for (const s of model.sections) {
+    if (s.kind !== 'boundary' || s.enabled === false || !s.fillLatticeId) continue;
+    const lat = model.sections.find((x) => x.id === s.fillLatticeId && x.kind === 'lattice');
+    if (!lat || s.shape === 'sphere') continue;
+    const span = latticeHalfSpan(lat);
+    if (s.size < span - 1e-9) s.size = Number(span.toFixed(4));
+  }
+}
+function retargetBoundariesAfterLatticeRemoved(removedId) {
+  const replacement = model.sections.find((s) => s.kind === 'lattice' && s.enabled !== false);
+  for (const s of model.sections) {
+    if (s.kind !== 'boundary' || s.fillLatticeId !== removedId) continue;
+    s.fillLatticeId = undefined;
+    if (replacement) attachLatticeToBoundary(replacement.id);
+  }
+}
+
 // ------------------------------------------------------------------ app state
 const saved = vscodeApi.getState();
 let model = (saved && saved.model && saved.model.sections) ? saved.model : defaultModel('mcnp');
@@ -678,6 +717,11 @@ document.getElementById('dialect').addEventListener('change', (e) => { model.lin
 document.getElementById('add').addEventListener('click', () => {
   const s = newSection(document.getElementById('addKind').value);
   model.sections.push(s);
+  if (s.kind === 'lattice') attachLatticeToBoundary(s.id);
+  if (s.kind === 'boundary') {
+    const lat = model.sections.find((x) => x.kind === 'lattice' && x.enabled !== false);
+    if (lat) attachLatticeToBoundary(lat.id);
+  }
   selectedId = s.id;
   expanded.add(s.id);
   renderSections();
@@ -693,24 +737,21 @@ document.getElementById('reset').addEventListener('click', () => {
 /** Nothing to hand over until the host has answered with a deck. */
 function deckText() { return doc && doc.text ? doc.text : null; }
 
-document.getElementById('insert').addEventListener('click', () => {
+function exportDeck(command) {
   const text = deckText();
   if (!text) return;
   const errors = checks.filter((c) => c.severity === 'error').length;
   if (errors > 0) {
-    vscodeApi.postMessage({ command: 'insertWithErrors', text, errors, codeLang: model.code });
+    vscodeApi.postMessage({ command: 'exportWithErrors', then: command, text, errors, codeLang: model.code });
     return;
   }
-  vscodeApi.postMessage({ command: 'insert', text });
-});
-document.getElementById('newFile').addEventListener('click', () => {
-  const text = deckText();
-  if (text) vscodeApi.postMessage({ command: 'newFile', text, codeLang: model.code });
-});
-document.getElementById('copy').addEventListener('click', () => {
-  const text = deckText();
-  if (text) vscodeApi.postMessage({ command: 'copy', text });
-});
+  if (command === 'insert') vscodeApi.postMessage({ command: 'insert', text });
+  else if (command === 'newFile') vscodeApi.postMessage({ command: 'newFile', text, codeLang: model.code });
+  else if (command === 'copy') vscodeApi.postMessage({ command: 'copy', text });
+}
+document.getElementById('insert').addEventListener('click', () => exportDeck('insert'));
+document.getElementById('newFile').addEventListener('click', () => exportDeck('newFile'));
+document.getElementById('copy').addEventListener('click', () => exportDeck('copy'));
 
 document.getElementById('sections').addEventListener('click', (ev) => {
   const btn = ev.target.closest('[data-act]');
@@ -739,8 +780,18 @@ document.getElementById('sections').addEventListener('click', (ev) => {
     model.sections.splice(idx + 1, 0, copy);
     selectedId = copy.id; expanded.add(copy.id);
   }
-  else if (act === 'mute') { s.enabled = s.enabled === false; }
-  else if (act === 'del') { model.sections.splice(idx, 1); expanded.delete(sid); if (selectedId === sid) selectedId = null; }
+  else if (act === 'mute') {
+    s.enabled = s.enabled === false;
+    if (s.kind === 'lattice' && s.enabled === false) retargetBoundariesAfterLatticeRemoved(s.id);
+    else if (s.kind === 'lattice') attachLatticeToBoundary(s.id);
+  }
+  else if (act === 'del') {
+    const kind = s.kind;
+    model.sections.splice(idx, 1);
+    expanded.delete(sid);
+    if (selectedId === sid) selectedId = null;
+    if (kind === 'lattice') retargetBoundariesAfterLatticeRemoved(sid);
+  }
   else if (act === 'addLayer') { s.layers.push({ material: s.outerMaterial, outerRadius: (s.layers.length ? s.layers[s.layers.length - 1].outerRadius + 0.05 : 0.4) }); }
   else if (act === 'delLayer') { s.layers.splice(Number(btn.getAttribute('data-idx')), 1); }
   else if (act === 'addLib') { s.entries.push({ key: 'mat' + (s.entries.length + 1), source: 'library', libraryId: MATERIAL_LIBRARY[0].id }); }
@@ -812,6 +863,7 @@ document.getElementById('sections').addEventListener('input', (ev) => {
     const n = Math.max(1, Math.min(200, Number(el.value) || 1));
     setPath(s, path, n);
     resizeGrid(s);
+    syncFilledBoundaries();
     renderSections();
   } else if (type === 'zaids') {
     const comps = el.value.split('\\n').map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -829,6 +881,8 @@ document.getElementById('sections').addEventListener('input', (ev) => {
   } else {
     setPath(s, path, el.value);
   }
+  if (s.kind === 'lattice' && (path === 'pitch' || path === 'nx' || path === 'ny')) syncFilledBoundaries();
+  if (s.kind === 'boundary' && path === 'fillLatticeId' && s.fillLatticeId) attachLatticeToBoundary(s.fillLatticeId);
   post();
 });
 
@@ -955,7 +1009,11 @@ window.addEventListener('message', (event) => {
     // "Open Input Builder (Lattice tab)" — select a lattice, adding one if the
     // deck has none yet.
     let lat = model.sections.find((s) => s.kind === 'lattice');
-    if (!lat) { lat = newSection('lattice'); model.sections.push(lat); }
+    if (!lat) {
+      lat = newSection('lattice');
+      model.sections.push(lat);
+      attachLatticeToBoundary(lat.id);
+    }
     selectedId = lat.id;
     expanded.add(lat.id);
     renderSections();

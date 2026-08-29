@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import type { RunResults } from './types';
-import { detectOutputsInDir, guessWorkDir, pickPrimaryOutput } from './detectOutputs';
-import { parseOutput } from './index';
+import { detectOutputsInDir, guessWorkDir, pickPrimaryOutput, staleOutputNote } from './detectOutputs';
+import { parseOutput, parseOutputFile } from './index';
 import { postMeshOverlay } from '../preview/webview';
 
 export class ResultsPanel {
@@ -53,7 +52,8 @@ export class ResultsPanel {
                     const uris = await vscode.window.showOpenDialog({
                         canSelectMany: false,
                         filters: {
-                            'Run outputs': ['h5', 'mctal', 'm', 'out', 'log'],
+                            'Run outputs': ['h5', 'mctal', 'm', 'out', 'outp', 'log', 'txt', 'o'],
+                            'All files': ['*'],
                         },
                     });
                     if (uris?.[0]) {
@@ -84,22 +84,25 @@ export class ResultsPanel {
             });
             return;
         }
-        await this._loadDetected(primary);
+        await this._loadDetected(primary, staleOutputNote(outputs, primary));
     }
 
     private async _loadFile(filePath: string) {
-        const ext = path.extname(filePath).toLowerCase();
-        let code: RunResults['code'] = 'openmc';
-        if (ext === '' || path.basename(filePath).toLowerCase() === 'mctal') code = 'mcnp';
-        else if (filePath.includes('_res.m') || filePath.includes('_det')) code = 'serpent';
-        else if (ext === '.out') code = 'scone';
-        const detected = { path: filePath, code, kind: 'statepoint' as const, label: path.basename(filePath) };
-        await this._loadDetected(detected);
+        try {
+            this._showResults(await parseOutputFile(filePath));
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`OWEN Results: ${message}`);
+        }
     }
 
-    private async _loadDetected(detected: { path: string; code: RunResults['code']; kind: string; label: string }) {
+    private async _loadDetected(
+        detected: { path: string; code: RunResults['code']; kind: string; label: string },
+        note?: string,
+    ) {
         try {
             const results = await parseOutput(detected as Parameters<typeof parseOutput>[0]);
+            if (note) results.notes = [note, ...(results.notes ?? [])];
             this._showResults(results);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -158,6 +161,21 @@ export class ResultsPanel {
     .meta { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
     .empty { color: var(--muted); padding: 24px; text-align: center; }
     .keff-banner { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .chip { font-size: 11px; color: var(--muted); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+    .chip b { color: var(--text); font-weight: 600; }
+    .msgs { margin-bottom: 12px; }
+    .msg { font-size: 11px; border-left: 2px solid var(--border); padding: 4px 10px; margin-bottom: 4px; color: var(--muted); }
+    .msg.warn { border-left-color: #f59e0b; }
+    .msg.note { border-left-color: var(--accent); }
+    .msgs details summary { cursor: pointer; font-size: 11px; color: var(--muted); }
+    tr.bin td { color: var(--muted); font-size: 11px; }
+    tr.bin td:first-child { padding-left: 24px; }
+    .tag { font-size: 10px; letter-spacing: 0.06em; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--border); }
+    .tag.passed { color: #34d399; border-color: rgba(52,211,153,0.4); }
+    .tag.missed { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
+    .tag.zero { color: #f87171; border-color: rgba(248,113,113,0.4); }
+    .expand { cursor: pointer; user-select: none; color: var(--accent); }
   </style>
 </head>
 <body>
@@ -175,6 +193,8 @@ export class ResultsPanel {
   </div>
   <main>
     <div id="meta" class="meta">Load a run output or open from last simulation directory.</div>
+    <div id="chips" class="chips"></div>
+    <div id="msgs" class="msgs"></div>
     <div id="keffTab">
       <div id="keffBanner" class="keff-banner"></div>
       <div id="keffChart" class="chart"></div>
@@ -183,7 +203,7 @@ export class ResultsPanel {
       <div id="specChart" class="chart"></div>
     </div>
     <div id="talliesTab" style="display:none">
-      <table><thead><tr><th>ID</th><th>Label</th><th>Value</th><th>Error</th></tr></thead><tbody id="tallyBody"></tbody></table>
+      <table><thead><tr><th>ID</th><th>Tally</th><th>Value</th><th>Rel. error</th><th>Checks</th></tr></thead><tbody id="tallyBody"></tbody></table>
     </div>
     <div id="meshTab" style="display:none">
       <canvas id="meshCanvas" width="600" height="400" style="max-width:100%;background:var(--card);border-radius:8px"></canvas>
@@ -216,15 +236,28 @@ export class ResultsPanel {
       if (keffPlot) { keffPlot.destroy(); keffPlot = null; }
       if (!keff || !keff.mean.length) { host.innerHTML = '<div class="empty">No k-eff history</div>'; return; }
       host.innerHTML = '';
+      const inactive = keff.inactive ?? 0;
+      // Split the series so discarded settling cycles read differently.
+      const settling = keff.mean.map((m, i) => (i < inactive ? m : null));
+      const active = keff.mean.map((m, i) => (i >= inactive ? m : null));
+      const hasSigma = keff.std.some(s => s > 0);
+      const series = [{},
+        { label: inactive ? 'k (settling)' : 'k', stroke: '#64748b', width: 1 },
+        { label: inactive ? 'k (active)' : 'k', stroke: '#38bdf8', width: 2 }];
+      const data = [keff.cycles, settling, active];
+      if (hasSigma) {
+        series.push({ label: '+σ', stroke: 'rgba(56,189,248,0.35)', width: 1 });
+        data.push(keff.mean.map((m, i) => (keff.std[i] > 0 ? m + keff.std[i] : null)));
+      }
       keffPlot = new uPlot({
         width: host.clientWidth, height: 260,
         scales: { x: { time: false }, y: { auto: true } },
         axes: [
-          { label: 'Cycle / batch', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' } },
+          { label: inactive ? 'Cycle / batch (' + inactive + ' discarded)' : 'Cycle / batch', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' } },
           { label: 'k-eff', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' } },
         ],
-        series: [{}, { label: 'k-eff', stroke: '#38bdf8', width: 2 }, { label: '±σ', stroke: 'rgba(56,189,248,0.3)', width: 1 }],
-      }, [keff.cycles, keff.mean, keff.mean.map((m,i) => m + keff.std[i])], host);
+        series,
+      }, data, host);
     }
 
     function buildSpecPlot(host, spectra) {
@@ -264,20 +297,69 @@ export class ResultsPanel {
       }
     }
 
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+    function fmt(v) {
+      if (v == null || !isFinite(v)) return '—';
+      if (v === 0) return '0';
+      return Math.abs(v) >= 1e-3 && Math.abs(v) < 1e5 ? v.toPrecision(6) : v.toExponential(4);
+    }
+
     function renderResults(r) {
       document.getElementById('meta').textContent =
         (r.code ? r.code.toUpperCase() + ' · ' : '') + (r.sourceFile || 'unknown source');
+
+      const chips = document.getElementById('chips');
+      chips.innerHTML = Object.entries(r.metadata || {})
+        .map(([k, v]) => '<span class="chip">' + esc(k) + ' <b>' + esc(v) + '</b></span>').join('');
+
+      const msgs = document.getElementById('msgs');
+      const notes = (r.notes || []).map(n => '<div class="msg note">' + esc(n) + '</div>').join('');
+      const warns = r.warnings && r.warnings.length
+        ? '<details open><summary>' + r.warnings.length + ' warning' + (r.warnings.length === 1 ? '' : 's') +
+          ' from the output file</summary>' +
+          r.warnings.map(w => '<div class="msg warn">' + esc(w) + '</div>').join('') + '</details>'
+        : '';
+      msgs.innerHTML = notes + warns;
+
       const kb = document.getElementById('keffBanner');
       if (r.keff?.final) {
-        kb.textContent = 'k-eff = ' + r.keff.final.mean.toFixed(5) + ' ± ' + r.keff.final.std.toFixed(5);
+        const f = r.keff.final;
+        kb.textContent = 'k-eff = ' + f.mean.toFixed(5) + (f.std ? ' ± ' + f.std.toFixed(5) : '');
       } else kb.textContent = '';
       buildKeffPlot(document.getElementById('keffChart'), r.keff);
       buildSpecPlot(document.getElementById('specChart'), r.spectra || []);
+
       const tb = document.getElementById('tallyBody');
-      tb.innerHTML = (r.tallies || []).map(t =>
-        '<tr><td>' + t.id + '</td><td>' + t.label + '</td><td>' + t.value.toExponential(4) + '</td><td>' +
-        (t.error != null ? t.error.toExponential(4) : '—') + '</td></tr>'
-      ).join('');
+      tb.innerHTML = (r.tallies || []).map((t, i) => {
+        const tag = t.checks && t.checks !== 'unknown'
+          ? '<span class="tag ' + t.checks + '" title="' + esc(t.note || '') + '">' + t.checks + '</span>' : '';
+        const bins = t.bins || [];
+        const head =
+          '<tr><td>' + esc(t.id) + '</td><td>' + esc(t.label) +
+          (bins.length > 1 ? ' <span class="expand" data-toggle="' + i + '">' + bins.length + ' bins ▾</span>' : '') +
+          (t.fom != null && isFinite(t.fom) ? ' <span class="chip">FOM ' + fmt(t.fom) + '</span>' : '') +
+          '</td><td>' + fmt(t.value) + '</td><td>' + (t.error != null ? t.error.toExponential(2) : '—') +
+          '</td><td>' + tag + '</td></tr>';
+        const rows = bins.length > 1
+          ? bins.map(b =>
+              '<tr class="bin" data-parent="' + i + '" style="display:none"><td></td><td>' + esc(b.label) +
+              '</td><td>' + fmt(b.value) + '</td><td>' +
+              (b.error != null ? b.error.toExponential(2) : '—') + '</td><td></td></tr>').join('')
+          : '';
+        return head + rows;
+      }).join('');
+      tb.querySelectorAll('[data-toggle]').forEach(el => {
+        el.onclick = () => {
+          const id = el.dataset.toggle;
+          const rows = tb.querySelectorAll('tr.bin[data-parent="' + id + '"]');
+          const open = rows.length && rows[0].style.display !== 'none';
+          rows.forEach(rw => { rw.style.display = open ? 'none' : 'table-row'; });
+          el.textContent = rows.length + ' bins ' + (open ? '▾' : '▴');
+        };
+      });
+
       document.getElementById('meshBtn').style.display = (r.meshTallies?.length) ? 'inline-block' : 'none';
       if (r.meshTallies?.length) drawMeshHeatmap(r.meshTallies[0]);
     }
@@ -315,17 +397,7 @@ export async function openResultsViewer(
     }
 
     if (opts?.filePath) {
-        const ext = path.extname(opts.filePath).toLowerCase();
-        let code: RunResults['code'] = 'openmc';
-        if (path.basename(opts.filePath).toLowerCase() === 'mctal') code = 'mcnp';
-        else if (opts.filePath.includes('_res.m')) code = 'serpent';
-        else if (ext === '.out') code = 'scone';
-        const results = await parseOutput({
-            path: opts.filePath,
-            code,
-            kind: 'statepoint',
-            label: path.basename(opts.filePath),
-        });
+        const results = await parseOutputFile(opts.filePath);
         await ResultsPanel.createOrShow(extensionUri, results, workDir);
         return;
     }
