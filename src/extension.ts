@@ -25,6 +25,8 @@ import { openAllenCrossSections } from './allen/panel';
 import { openResultsViewer } from './results/panel';
 import { setMcnpProjectRoot } from './commands/setMcnpProjectRoot';
 import { registerReportProblem } from './commands/reportProblem';
+import { registerOpenReference } from './commands/openReference';
+import { registerCellMap } from './cellmap/panel';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('OWEN extension activated');
@@ -80,6 +82,8 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
         registerReportProblem(context),
+        registerOpenReference(context),
+        registerCellMap(context),
 
         registerGeometryPreview(context),
         registerOpenmcNativeRender(context),

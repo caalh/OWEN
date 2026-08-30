@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-08-29
+
+### Added
+
+- **MCNP Cell Map** (beaker menu → *Show MCNP Cell Map*, MCNP files only). A
+  deck is written as a flat list of cells, but it describes a tree: universe 0
+  holds the real world, a cell with `fill=` hands its interior to another
+  universe, and a `lat=` cell tiles one. The Cell Map draws that tree. Cells are
+  cards grouped inside their universe; an arrow runs from the cell that fills to
+  the universe it fills with, labelled with the placement count decoded from the
+  `fill` array — on the bundled 17×17 assembly, `×264` to the fuel-pin universe,
+  `×24` to the guide tubes, `×1` to the instrument tube. Each card shows its
+  material and density (with the sign read the way MCNP means it: negative is
+  g/cm³, positive is atoms/b·cm), its region, and a chip per bounding surface
+  carrying the sense. Click a cell or a surface chip to jump to that card in the
+  editor; the side panel adds the surface definitions, the cells subtracted with
+  `#`, and what sits across each shared surface. Pan, zoom, search, and collapse
+  a universe to a single bar; decks over 300 cells open collapsed.
+- **Cell Map reads the deck for input errors that geometry checks miss** and
+  lists them above the map: a universe that nothing fills, a `fill=` pointing at
+  a universe no cell declares, a `#` complement of a cell that does not exist, a
+  surface with no surface card, a universe fill cycle, and a deck with no
+  `imp:n=0` cell to terminate histories.
+- **Reference Documentation** in the beaker menu opens upstream's own manual for
+  whatever you have open — the LANL manual index for MCNP, docs.openmc.org for
+  OpenMC, VTT's documentation for Serpent, Read the Docs for SCONE — with the
+  nuclear-data services (NNDC, IAEA, JANIS) and ReactorMC below. The active
+  file's code sorts to the top with its manual first. Serpent's primary entry is
+  the maintained documentation at `serpent.vtt.fi/docs/`; the wiki is still
+  listed, labelled legacy, because VTT no longer updates it.
+
+### Fixed
+
+- **`verify:openmc-tokens` had been failing since 1.1.4 and nobody was reading
+  it.** That release taught the scanner the Python layer around the openmc
+  symbols — comments, strings, numbers, keywords, `def` names — so it emits
+  more than the injection grammar declares. The guard compared the whole token
+  stream against the grammar's four patterns and went red, which is a different
+  question from the one it exists to ask. It now compares the openmc symbols to
+  the grammar and pins the Python layer separately, including the gate that
+  makes a file whose only mention of openmc is inside a comment cost nothing.
+
 ## [1.4.2] - 2026-08-29
 
 ### Added

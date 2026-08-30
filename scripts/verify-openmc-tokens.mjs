@@ -52,12 +52,40 @@ const { forcedColorCss } = await import(pathToFileURL(cssFile).href);
 
 const failures = [];
 
+/**
+ * The scopes the injection grammar actually declares. v1.1.4 taught the scanner
+ * the surrounding Python layer as well — comments, strings, numbers, keywords,
+ * `def` names — so it now emits more than the grammar does. That is deliberate
+ * (the grammar never colors those; the decorations do), but it is a different
+ * question from "do the two mechanisms agree about openmc symbols", which is
+ * what the cases below are for. Comparing against the raw stream conflated the
+ * two and left this check red from v1.1.4 to v1.4.2 without anyone reading it.
+ */
+const GRAMMAR_SCOPES = new Set([
+  'variable.language.openmc',
+  'support.type.openmc',
+  'support.class.openmc',
+  'support.function.openmc',
+  'support.variable.openmc',
+]);
+
 /** Every token, as `text:scope` pairs in source order. */
-function tokens(src) {
-  return findOpenmcTokens(src).map((t) => `${src.slice(t.start, t.end)}:${t.scope}`);
+function tokens(src, filter) {
+  return findOpenmcTokens(src)
+    .filter((t) => !filter || filter(t))
+    .map((t) => `${src.slice(t.start, t.end)}:${t.scope}`);
 }
 
+/** Compares the openmc symbols only — what the grammar and the scanner share. */
 function expect(label, src, want) {
+  const got = tokens(src, (t) => GRAMMAR_SCOPES.has(t.scope));
+  if (JSON.stringify(got) !== JSON.stringify(want)) {
+    failures.push(`${label}\n      want [${want.join(', ')}]\n      got  [${got.join(', ')}]`);
+  }
+}
+
+/** Compares the full stream, for the Python layer the grammar has no say over. */
+function expectAll(label, src, want) {
   const got = tokens(src);
   if (JSON.stringify(got) !== JSON.stringify(want)) {
     failures.push(`${label}\n      want [${want.join(', ')}]\n      got  [${got.join(', ')}]`);
@@ -164,6 +192,45 @@ expect(
 
 expect('unrelated python', 'import numpy as np\nnp.zeros(3)', []);
 
+// --- the Python layer the grammar does not cover --------------------------
+// Added in v1.1.4 so a palette colors a whole model script, not just the
+// openmc symbols in it. Pinned here in full, in source order, because nothing
+// else asserts these scopes and the offsets drive decoration ranges.
+
+expectAll(
+  'python layer: keywords, def name, comment, attribute and number',
+  'def build():  # make it\n    m = openmc.Material()\n    m.temperature = 900.0\n    return m',
+  [
+    'def:keyword.control.openmc',
+    'build:entity.name.function.openmc',
+    '# make it:comment.line.openmc',
+    'openmc:variable.language.openmc',
+    'Material:support.class.openmc',
+    'temperature:support.variable.openmc',
+    '900.0:constant.numeric.openmc',
+    'return:keyword.control.openmc',
+  ],
+);
+
+// A comment is one token; the openmc symbols inside it stay unclaimed, or the
+// injection selector's `-comment` and the decorations would disagree.
+expectAll(
+  'python layer: a comment is claimed whole, its openmc symbols are not',
+  'import openmc\n# openmc.Material here',
+  [
+    'import:keyword.control.openmc',
+    'openmc:variable.language.openmc',
+    '# openmc.Material here:comment.line.openmc',
+  ],
+);
+
+// The scanner runs on every keystroke in every Python file, so it bails when
+// masking leaves no live `openmc`. A file whose only mention is in a comment
+// is therefore not an OpenMC file, and costs nothing — including no Python
+// layer. Pinned because it is the difference between a decoration pass and a
+// full tokenize on unrelated Python.
+expectAll('a mention only inside a comment does not make it an OpenMC file', '# openmc.Material here', []);
+
 // --- the decoration has to outrank the theme's token color ----------------
 // Without `!important` the palette is computed, applied, and invisible, which
 // is exactly what 1.0.4 shipped. Equal specificity means ordering decides, and
@@ -207,6 +274,6 @@ if (failures.length) {
 }
 
 console.log(
-  '[verify-openmc-tokens] OK — 15 cases across the four patterns, precedence and masking, ' +
-  'plus the forced-color declaration that makes the decorations visible.',
+  '[verify-openmc-tokens] OK — 18 cases across the four patterns, precedence, masking and the ' +
+  'Python layer, plus the forced-color declaration that makes the decorations visible.',
 );

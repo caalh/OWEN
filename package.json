@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -94,6 +94,8 @@
     "onCommand:owen.setMcnpProjectRoot",
     "onCommand:owen.toggleMcnpLineLimit",
     "onCommand:owen.reportProblem",
+    "onCommand:owen.openReference",
+    "onCommand:owen.showMcnpCellMap",
     "onView:owenMcnpReferences",
     "onStartupFinished"
   ],
@@ -315,6 +317,18 @@
         "title": "OWEN: Report a problem (help@reactormc.net)",
         "category": "OWEN",
         "icon": "$(mail)"
+      },
+      {
+        "command": "owen.openReference",
+        "title": "OWEN: Reference Documentation...",
+        "category": "OWEN",
+        "icon": "$(book)"
+      },
+      {
+        "command": "owen.showMcnpCellMap",
+        "title": "OWEN: Show MCNP Cell Map",
+        "category": "OWEN",
+        "icon": "$(type-hierarchy)"
       }
     ],
     "keybindings": [
@@ -388,6 +402,11 @@
           "when": "editorLangId == mcnp"
         },
         {
+          "command": "owen.showMcnpCellMap",
+          "group": "1_analyze@5",
+          "when": "editorLangId == mcnp"
+        },
+        {
           "command": "owen.openInputBuilder",
           "group": "2_build@0"
         },
@@ -452,7 +471,7 @@
           "when": "editorLangId == mcnp"
         },
         {
-          "command": "owen.reportProblem",
+          "command": "owen.openReference",
           "group": "5_help@0"
         },
         {
@@ -466,6 +485,10 @@
         {
           "command": "owen.openCommunityLibrary",
           "group": "5_help@3"
+        },
+        {
+          "command": "owen.reportProblem",
+          "group": "5_help@4"
         }
       ],
       "editor/context": [
@@ -497,6 +520,11 @@
         {
           "command": "owen.showMcnpReferences",
           "group": "1_analyze@4",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.showMcnpCellMap",
+          "group": "1_analyze@5",
           "when": "editorLangId == mcnp"
         },
         {
@@ -551,7 +579,7 @@
           "group": "3_run@4"
         },
         {
-          "command": "owen.reportProblem",
+          "command": "owen.openReference",
           "group": "4_help@0"
         },
         {
@@ -565,6 +593,10 @@
         {
           "command": "owen.openCommunityLibrary",
           "group": "4_help@3"
+        },
+        {
+          "command": "owen.reportProblem",
+          "group": "4_help@4"
         },
         {
           "command": "owen.chooseHighlightPalette",
@@ -583,6 +615,10 @@
       "commandPalette": [
         {
           "command": "owen.showMcnpReferences",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.showMcnpCellMap",
           "when": "editorLangId == mcnp"
         },
         {
