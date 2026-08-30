@@ -114,6 +114,10 @@ c ----- BA plenum geometry u=14 -----
 41 4  4.34389e-2   8 -9   u=14 imp:n=1   $ Zircaloy
 42 5  7.41863e-2    9      u=14 imp:n=1   $ water
 c ----- SS-filled guide tube u=15 / dashpot u=16 (BA transition) -----
+c u=16 is defined but nothing fills it, so OWEN's Cell Map reports it as an
+c unused universe. That is correct and intentional: the dashpot occupies only
+c the bottom ~1/8 of a guide tube, and this fixture models one axial zone. The
+c pin is kept so the axial stack can be built without re-deriving it.
 43 7  8.79322e-2 -4      u=15 imp:n=1
 44 4  4.34389e-2   4 -5   u=15 imp:n=1
 45 5  7.41863e-2    5      u=15 imp:n=1
