@@ -24,6 +24,15 @@ function loadManifest(): Manifest {
 }
 
 suite('OWEN community library wiring', () => {
+    test('searchReactorLibrary is titled Input from Community Library', () => {
+        const cmd = loadManifest().contributes.commands.find(
+            (c) => c.command === 'owen.searchReactorLibrary',
+        );
+        assert.ok(cmd, 'owen.searchReactorLibrary is not contributed');
+        assert.strictEqual(cmd.title, 'OWEN: Input from Community Library');
+        assert.ok(!/Search Reactor Library/.test(cmd.title));
+    });
+
     test('openCommunityLibrary command is declared with an OWEN category', () => {
         const cmd = loadManifest().contributes.commands.find(
             (c) => c.command === 'owen.openCommunityLibrary',

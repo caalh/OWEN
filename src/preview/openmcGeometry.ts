@@ -229,6 +229,10 @@ export function parseOpenmcGeometryXml(text: string): McnpGeometryModel {
 }
 
 export function looksLikeOpenmcXml(text: string): boolean {
-    const head = text.trimStart().slice(0, 2500);
-    return /^(<\?xml\b|<model\b|<geometry\b)/i.test(head);
+    const head = text.trimStart();
+    // Concatenated live exports often start with <materials>, not <geometry>.
+    // Python decks can mention those tags in comments, so the first non-space
+    // character has to be the start of a tag.
+    if (!head.startsWith('<')) return false;
+    return /<\?xml\b|<model\b|<geometry\b|<materials\b/i.test(head.slice(0, 2500));
 }

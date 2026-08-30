@@ -100,6 +100,8 @@ export interface CellEdge {
 }
 
 export interface CellMapModel {
+    /** Which code produced this map; the webview uses it for labels. */
+    language: 'mcnp' | 'openmc' | 'serpent' | 'scone';
     cells: CellNode[];
     universes: UniverseNode[];
     edges: CellEdge[];
@@ -389,6 +391,7 @@ export function buildCellMap(text: string): CellMapModel {
     }
 
     return {
+        language: 'mcnp',
         cells,
         universes,
         edges,

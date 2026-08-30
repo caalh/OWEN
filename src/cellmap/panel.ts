@@ -1,9 +1,19 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
-import { buildCellMap, type CellMapModel } from './model';
-import { buildCellMapHtml } from './webview';
+import { detectMonteCarloLanguage, type MonteCarloLanguage } from '../util/detectLanguage';
+import { parseDeckToModel } from '../preview/engineDispatch';
+import { looksLikeOpenmcXml, parseOpenmcGeometryXml } from '../preview/openmcGeometry';
+import { exportOpenmcGeometryXml } from '../preview/openmcNative/exportGeometry';
 import { buildMcnpReferenceIndex, getDefinition } from '../references/mcnpReferences';
+import { isCaptureNoise } from '../preview/openmcNative/captureNoise';
+import { buildCellMapFromGeometry } from './fromGeometry';
+import { buildCellMap, type CellMapModel } from './model';
+import { findCellMapTarget } from './reveal';
+import { buildCellMapHtml } from './webview';
 
 const RETHROTTLE_MS = 350;
+const OPENMC_EXPORT_THROTTLE_MS = 2000;
 
 function makeNonce(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -12,14 +22,64 @@ function makeNonce(): string {
     return out;
 }
 
-function isMcnp(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
-    return !!doc && doc.languageId === 'mcnp';
+function isMapped(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
+    if (!doc) return false;
+    return detectMonteCarloLanguage(doc) !== null;
+}
+
+function languageOf(doc: vscode.TextDocument): MonteCarloLanguage {
+    return detectMonteCarloLanguage(doc) ?? 'mcnp';
+}
+
+function emptyModel(language: CellMapModel['language'] = 'mcnp'): CellMapModel {
+    return {
+        language,
+        cells: [],
+        universes: [],
+        edges: [],
+        warnings: [],
+        stats: { cells: 0, universes: 0, maxDepth: 0, graveyards: 0 },
+    };
+}
+
+function siblingOpenmcXml(fsPath: string): string | null {
+    const dir = path.dirname(fsPath);
+    for (const name of ['geometry.xml', 'model.xml']) {
+        const p = path.join(dir, name);
+        try {
+            if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+        } catch { /* ignore unreadable siblings */ }
+    }
+    return null;
+}
+
+function parseCellMap(text: string, language: MonteCarloLanguage): CellMapModel {
+    if (language === 'mcnp') return buildCellMap(text);
+    if (language === 'openmc') {
+        if (looksLikeOpenmcXml(text)) {
+            return buildCellMapFromGeometry(parseOpenmcGeometryXml(text), 'openmc');
+        }
+        const geom = parseDeckToModel(text, 'openmc');
+        if (geom && geom.cells.size) return buildCellMapFromGeometry(geom, 'openmc');
+        const empty = emptyModel('openmc');
+        empty.warnings.push(
+            'OpenMC Python decks get a Cell Map from the geometry OpenMC writes. ' +
+            'OWEN is loading that the same way Render with OpenMC does.',
+        );
+        return empty;
+    }
+    const geom = parseDeckToModel(text, language);
+    if (!geom || geom.cells.size === 0) {
+        const empty = emptyModel(language);
+        empty.warnings.push(`No cells could be parsed from this ${language} deck.`);
+        return empty;
+    }
+    return buildCellMapFromGeometry(geom, language);
 }
 
 /**
- * OWEN: MCNP Cell Map — a flowchart of the cells in the active deck, grouped by
- * universe and wired by `fill=`. Follows the active editor and re-reads on
- * edit, so it behaves like a view of the deck rather than a snapshot of it.
+ * OWEN Cell Map — a flowchart of the cells in the active deck, grouped by
+ * universe and wired by fill. Follows the active editor and re-reads on edit.
  */
 export class CellMapPanel {
     public static current: CellMapPanel | undefined;
@@ -30,6 +90,7 @@ export class CellMapPanel {
     private _ready = false;
     private _uri: vscode.Uri | undefined;
     private _pending: NodeJS.Timeout | undefined;
+    private _openmcGen = 0;
 
     public static show(): void {
         const column = vscode.window.activeTextEditor
@@ -43,7 +104,7 @@ export class CellMapPanel {
         }
         const panel = vscode.window.createWebviewPanel(
             CellMapPanel.viewType,
-            'OWEN: MCNP Cell Map',
+            'OWEN: Cell Map',
             { viewColumn: column, preserveFocus: true },
             { enableScripts: true, retainContextWhenHidden: true },
         );
@@ -61,11 +122,8 @@ export class CellMapPanel {
         );
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
-        // Follow the active MCNP editor, but hold the last deck when focus moves
-        // to the panel itself or to an unrelated file — otherwise clicking a
-        // cell would blank the map that was just clicked.
         vscode.window.onDidChangeActiveTextEditor(
-            (ed) => { if (isMcnp(ed?.document)) this._sync(); },
+            (ed) => { if (isMapped(ed?.document)) this._sync(); },
             null,
             this._disposables,
         );
@@ -92,47 +150,101 @@ export class CellMapPanel {
     private async _reveal(kind: 'cell' | 'surface', id: number): Promise<void> {
         if (!this._uri) return;
         const doc = await vscode.workspace.openTextDocument(this._uri);
-        const def = getDefinition(buildMcnpReferenceIndex(doc.getText()), kind, id);
-        if (!def) {
-            vscode.window.setStatusBarMessage(`OWEN: no ${kind} ${id} card in this deck`, 3000);
-            return;
+        const lang = languageOf(doc);
+        let line = 0, startCol = 0, endCol = 1;
+        if (lang === 'mcnp') {
+            const def = getDefinition(buildMcnpReferenceIndex(doc.getText()), kind, id);
+            if (!def) {
+                vscode.window.setStatusBarMessage(`OWEN: no ${kind} ${id} card in this deck`, 3000);
+                return;
+            }
+            line = def.line; startCol = def.startCol; endCol = def.endCol;
+        } else {
+            const text = doc.getText();
+            const hit = findCellMapTarget(text, kind, id);
+            if (!hit) {
+                vscode.window.setStatusBarMessage(`OWEN: could not find ${kind} ${id} in this file`, 3000);
+                return;
+            }
+            line = hit.line; startCol = hit.start; endCol = hit.end;
         }
         const editor = await vscode.window.showTextDocument(doc, {
             preview: false,
             preserveFocus: false,
             viewColumn: vscode.ViewColumn.One,
         });
-        const range = new vscode.Range(def.line, def.startCol, def.line, def.endCol);
+        const range = new vscode.Range(line, startCol, line, endCol);
         editor.selection = new vscode.Selection(range.start, range.end);
         editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     }
 
     private _schedule(): void {
         if (this._pending) clearTimeout(this._pending);
-        this._pending = setTimeout(() => { this._pending = undefined; this._sync(); }, RETHROTTLE_MS);
+        const ms = this._uri && languageOfWait(this._uri) === 'openmc'
+            ? OPENMC_EXPORT_THROTTLE_MS
+            : RETHROTTLE_MS;
+        this._pending = setTimeout(() => { this._pending = undefined; this._sync(); }, ms);
     }
 
     private _sync(): void {
         if (!this._ready) return;
         const active = vscode.window.activeTextEditor?.document;
-        const doc = isMcnp(active)
+        const doc = isMapped(active)
             ? active
             : vscode.workspace.textDocuments.find((d) => this._uri && d.uri.toString() === this._uri.toString());
         if (!doc) {
-            this._post(emptyModel(), 'open an MCNP deck');
+            this._post(emptyModel(), 'open a Monte Carlo deck');
             return;
         }
         this._uri = doc.uri;
+        const lang = languageOf(doc);
+        const text = doc.getText();
         let model: CellMapModel;
         try {
-            model = buildCellMap(doc.getText());
+            model = parseCellMap(text, lang);
         } catch (err) {
-            model = emptyModel();
+            model = emptyModel(lang);
             model.warnings.push(
                 `Could not read this deck: ${err instanceof Error ? err.message : String(err)}`,
             );
         }
         this._post(model, doc.uri.path.split('/').pop() ?? '');
+
+        if (lang === 'openmc' && !looksLikeOpenmcXml(text) && model.cells.length === 0) {
+            void this._loadOpenmcXml(doc);
+        }
+    }
+
+    private async _loadOpenmcXml(doc: vscode.TextDocument): Promise<void> {
+        const gen = ++this._openmcGen;
+        const sibling = doc.uri.scheme === 'file' ? siblingOpenmcXml(doc.uri.fsPath) : null;
+        if (sibling) {
+            if (gen !== this._openmcGen) return;
+            this._post(
+                buildCellMapFromGeometry(parseOpenmcGeometryXml(sibling), 'openmc'),
+                doc.uri.path.split('/').pop() ?? '',
+            );
+            return;
+        }
+        if (doc.uri.scheme !== 'file') return;
+        try {
+            const exported = await exportOpenmcGeometryXml(doc.uri.fsPath, doc.uri);
+            if (gen !== this._openmcGen) return;
+            const xml = `${exported.geometryXml}\n${exported.materialsXml ?? ''}`;
+            const model = buildCellMapFromGeometry(parseOpenmcGeometryXml(xml), 'openmc');
+            for (const w of exported.warnings) {
+                if (isCaptureNoise(w)) continue;
+                model.warnings.push(w);
+            }
+            this._post(model, doc.uri.path.split('/').pop() ?? '');
+        } catch (err) {
+            if (gen !== this._openmcGen) return;
+            const model = emptyModel('openmc');
+            model.warnings.push(
+                `Could not load OpenMC geometry: ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`,
+            );
+            this._post(model, doc.uri.path.split('/').pop() ?? '');
+        }
     }
 
     private _post(model: CellMapModel, fileName: string): void {
@@ -147,22 +259,19 @@ export class CellMapPanel {
     }
 }
 
-function emptyModel(): CellMapModel {
-    return {
-        cells: [],
-        universes: [],
-        edges: [],
-        warnings: [],
-        stats: { cells: 0, universes: 0, maxDepth: 0, graveyards: 0 },
-    };
+function languageOfWait(_uri: vscode.Uri): MonteCarloLanguage | null {
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === _uri.toString());
+    return doc ? languageOf(doc) : null;
 }
+
+export { isCaptureNoise } from '../preview/openmcNative/captureNoise';
 
 export function registerCellMap(_context: vscode.ExtensionContext): vscode.Disposable {
     return vscode.commands.registerCommand('owen.showMcnpCellMap', () => {
         const doc = vscode.window.activeTextEditor?.document;
-        if (!isMcnp(doc)) {
+        if (!isMapped(doc)) {
             vscode.window.showInformationMessage(
-                'OWEN: the Cell Map reads MCNP cell cards — open an MCNP deck first.',
+                'OWEN: the Cell Map reads MCNP, OpenMC, Serpent or SCONE — open a deck first.',
             );
             return;
         }

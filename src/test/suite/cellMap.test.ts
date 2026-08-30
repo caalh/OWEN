@@ -3,7 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PREBUILT_MODELS } from '../paths';
 import { buildCellMap, collectSurfaceSenses, computeUniverseDepths } from '../../cellmap/model';
+import { buildCellMapFromGeometry } from '../../cellmap/fromGeometry';
 import { buildCellMapHtml } from '../../cellmap/webview';
+import { findCellMapTarget } from '../../cellmap/reveal';
+import { parseDeckToModel } from '../../preview/engineDispatch';
 import { parseMcnpDeck, parseRegion } from '../../converter/mcnpModel';
 import {
     orderedReferenceSites,
@@ -224,6 +227,58 @@ suite('OWEN Cell Map — 17x17 assembly fixture', () => {
     });
 });
 
+suite('OWEN Cell Map — other codes via the geometry engine', () => {
+    test('a Serpent pin cell produces a Cell Map', () => {
+        const pin = fs.readFileSync(path.join(PREBUILT_MODELS, 'pincell_serpent.sss'), 'utf8');
+        const geom = parseDeckToModel(pin, 'serpent');
+        assert.ok(geom && geom.cells.size > 0, 'Serpent pin should parse');
+        const model = buildCellMapFromGeometry(geom!, 'serpent');
+        assert.strictEqual(model.language, 'serpent');
+        assert.ok(model.cells.length >= 3, `expected fuel/clad/moderator cells, got ${model.cells.length}`);
+        assert.ok(model.universes.some((u) => u.id === 0), 'root universe is present');
+        assert.ok(!model.warnings.some((w) => /imp:n=0/.test(w)), 'Serpent must not get the MCNP graveyard warning');
+    });
+
+    test('OpenMC XML with a fill becomes a fill edge', () => {
+        const xml = `<?xml version="1.0"?>
+<geometry>
+  <surface id="1" type="sphere" coeffs="0 0 0 10"/>
+  <cell id="1" material="void" region="-1" fill="2"/>
+  <cell id="2" universe="2" material="1" region="-1"/>
+</geometry>`;
+        const geom = parseDeckToModel(xml, 'openmc');
+        assert.ok(geom);
+        const model = buildCellMapFromGeometry(geom!, 'openmc');
+        assert.strictEqual(model.language, 'openmc');
+        const fill = model.edges.find((e) => e.kind === 'fill' && e.from === 1 && e.to === 2);
+        assert.ok(fill, 'cell 1 should fill with universe 2');
+        assert.strictEqual(model.cells.find((c) => c.id === 1)?.role, 'container');
+    });
+
+    test('click-to-reveal does not land on a higher-numbered surface or the first id=', () => {
+        const xml = [
+            '<?xml version="1.0"?>',
+            '<materials><material id="2" name="clad"/></materials>',
+            '<geometry>',
+            '  <surface id="12" type="sphere" coeffs="0 0 0 5"/>',
+            '  <surface id="2" type="sphere" coeffs="0 0 0 10"/>',
+            '  <cell id="2" material="2" region="-2"/>',
+            '</geometry>',
+        ].join('\n');
+        const surf = findCellMapTarget(xml, 'surface', 2);
+        assert.ok(surf, 'surface 2 should be found');
+        assert.strictEqual(surf!.line, 4, `surface 2 is the second <surface>, got line ${surf!.line}`);
+        const cell = findCellMapTarget(xml, 'cell', 2);
+        assert.ok(cell, 'cell 2 should be found');
+        assert.strictEqual(cell!.line, 5, `cell 2 must not be the material id=2, got line ${cell!.line}`);
+
+        const serpent = ['surf s12 cyl 0.0 0.0 1.0', 'surf s2 cyl 0.0 0.0 0.4'].join('\n');
+        const s2 = findCellMapTarget(serpent, 'surface', 2);
+        assert.ok(s2);
+        assert.strictEqual(s2!.line, 1, 'surf s2 must not match surf s12');
+    });
+});
+
 suite('OWEN Cell Map — webview HTML', () => {
     const html = buildCellMapHtml('vscode-webview://x', 'NONCE123');
 
@@ -260,6 +315,12 @@ suite('OWEN Cell Map — webview HTML', () => {
         assert.ok(html.includes("command: 'ready'"));
         assert.ok(html.includes("command: 'revealCell'"));
         assert.ok(html.includes("command: 'revealSurface'"));
+    });
+
+    test('lays fill depth out left to right, not top to bottom', () => {
+        assert.ok(html.includes('vertical columns by fill depth'), 'layout comment describes columns');
+        assert.ok(html.includes('x += colW + BAND_GAP'), 'next depth steps in x');
+        assert.ok(html.includes('from.x + dx'), 'fill edges run left to right');
     });
 });
 

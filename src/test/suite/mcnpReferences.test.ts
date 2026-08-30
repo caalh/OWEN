@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { PREBUILT_MODELS } from '../paths';
 import {
     buildMcnpReferenceIndex,
@@ -12,6 +13,7 @@ import {
     nextMcnpMaterialNumber,
     remapMcnpMaterialCard,
 } from '../../references/mcnpReferences';
+import { occurrencesForSelection } from '../../references/occurrenceDecorations';
 
 // A compact 3×3 PWR-style lattice: fuel (u=1) + guide tube (u=2), placed by a
 // lat=1 fill array in cell 10, wrapped by the root fill cell 20.
@@ -97,6 +99,20 @@ suite('OWEN MCNP reference tracker', () => {
         assert.strictEqual(fillHighlights.length, 7, 'universe 2 fill highlights should not merge other ids');
         const fillSiblings = fillHighlights.filter((o) => o.line === lineIdx || o.line === lineIdx + 1 || o.line === lineIdx + 2);
         assert.ok(fillSiblings.length >= 4, `expected all four fill-array 2s, got ${fillSiblings.length}`);
+    });
+
+    test('the exclusive end of a fill-array digit still resolves (double-click / LTR drag)', () => {
+        const index = buildMcnpReferenceIndex(LATTICE_DECK);
+        const lineIdx = LATTICE_DECK.split('\n').indexOf('     1 2 1');
+        // "     1 2 1" — the 2 sits at column 7; a double-click leaves the caret at 8.
+        assert.ok(getHighlightOccurrences(index, lineIdx, 7).length > 0, 'caret on the digit');
+        const atExclusiveEnd = getHighlightOccurrences(index, lineIdx, 8);
+        // resolveAt itself misses the exclusive end; paintMcnpAtCursor retries end-1.
+        assert.strictEqual(atExclusiveEnd.length, 0, 'exclusive end is past the token for resolveAt');
+        const sel = new vscode.Selection(lineIdx, 7, lineIdx, 8);
+        const hits = occurrencesForSelection(index, sel);
+        assert.ok(hits.length > 0, 'double-click selection must still highlight');
+        assert.ok(hits.every((o) => o.kind === 'universe' && o.id === 2));
     });
 
     test('material 2 is not the same entity as a fill-array 2', () => {

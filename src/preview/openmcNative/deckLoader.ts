@@ -275,8 +275,6 @@ def owen_prepare_cross_sections(req, out_dir, warnings):
         state['path'] = found
         if state['previous'] != found:
             os.environ['OPENMC_CROSS_SECTIONS'] = found
-            warnings.append('OPENMC_CROSS_SECTIONS was not set for this process; '
-                            'using the library found at ' + found + '.')
         return state
     stand_in = os.path.join(out_dir, 'owen_empty_cross_sections.xml')
     try:
@@ -398,7 +396,63 @@ def owen_install_capture(openmc, warnings, label):
     except Exception:
         pass
 
+    _owen_install_statepoint_stub(openmc)
     return captured, real
+
+
+def _owen_install_statepoint_stub(openmc):
+    """Decks routinely do with openmc.StatePoint(model.run()). run() now
+    returns a path that is never written, so the real constructor raises
+    FileNotFoundError and the capture overlay fills with that traceback.
+    A dummy context manager with empty tallies lets the rest of the deck
+    finish without pretending a transport result exists."""
+    class _OwenDummyTally(object):
+        def __init__(self):
+            try:
+                import numpy as np
+                z = np.zeros(1)
+            except Exception:
+                class _Z(object):
+                    def flatten(self):
+                        return [0.0]
+                    def sum(self):
+                        return 0.0
+                    def __pow__(self, _n):
+                        return self
+                z = _Z()
+            self.mean = z
+            self.std_dev = z
+            self.nuclides = []
+            self.scores = []
+            self.name = ''
+            self.id = 0
+
+    class _OwenDummyStatePoint(object):
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+        def get_tally(self, *args, **kwargs):
+            return _OwenDummyTally()
+        @property
+        def tallies(self):
+            return {}
+        @property
+        def keff(self):
+            return 0.0
+        @property
+        def k_combined(self):
+            return (0.0, 0.0)
+
+    openmc.StatePoint = _OwenDummyStatePoint
+    sp_mod = getattr(openmc, 'statepoint', None)
+    if sp_mod is not None:
+        try:
+            sp_mod.StatePoint = _OwenDummyStatePoint
+        except Exception:
+            pass
 
 
 def owen_deck_attempts(req, deck):
@@ -437,12 +491,16 @@ def owen_run_deck(req, captured, warnings):
                 warnings.append('The deck exited early: SystemExit(' + str(code) + ').')
         except Exception as exc:
             if captured['intercepted']:
-                # Everything after the intercepted run/export is code OWEN
-                # deliberately starved of a real result; the model is already
-                # in hand, so this is expected rather than a deck defect.
-                warnings.append('The deck continued past the point OWEN stopped it and raised ' +
-                                type(exc).__name__ + ': ' + str(exc)[:200] +
-                                ' - expected, the model was already captured.')
+                msg = str(exc)
+                # Decks that do StatePoint(model.run()) used to FileNotFound
+                # the skipped path. The stub swallows that; anything else after
+                # an intercept is still expected, so do not treat it as a defect.
+                if 'owen_skipped_statepoint' in msg or 'Unable to synchronously open' in msg:
+                    pass
+                else:
+                    warnings.append('The deck continued past the point OWEN stopped it and raised ' +
+                                    type(exc).__name__ + ': ' + str(exc)[:200] +
+                                    ' - expected, the model was already captured.')
             else:
                 warnings.append('The deck raised while running:' + chr(10) + traceback.format_exc())
         if captured['model'] is not None or captured['geometry'] is not None:
@@ -696,7 +754,7 @@ def owen_geometry_bounds(geometry, fit, warnings):
 
 
 def owen_slice_view(geometry, basis, fit, warnings, fraction=0.5):
-    """(origin, width) for a slice plot: centred, 2% margin, fraction along
+    """(origin, width) for a slice plot: centred, 12% margin, fraction along
     the axis normal to the basis (0.5 = through the middle)."""
     axes = {'xy': (0, 1), 'xz': (0, 2), 'yz': (1, 2)}[basis]
     normal = {'xy': 2, 'xz': 1, 'yz': 0}[basis]
@@ -707,8 +765,8 @@ def owen_slice_view(geometry, basis, fit, warnings, fraction=0.5):
     for i in range(3):
         origin[i] = (lo[i] + hi[i]) / 2.0
     origin[normal] = lo[normal] + (hi[normal] - lo[normal]) * float(fraction)
-    width = [max(hi[axes[0]] - lo[axes[0]], 0.1) * 1.02,
-             max(hi[axes[1]] - lo[axes[1]], 0.1) * 1.02]
+    width = [max(hi[axes[0]] - lo[axes[0]], 0.1) * 1.12,
+             max(hi[axes[1]] - lo[axes[1]], 0.1) * 1.12]
     return origin, width
 # --- end OWEN shared deck loader ---
 `;

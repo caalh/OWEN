@@ -141,7 +141,7 @@ Palette and type `OWEN:` — all 8 commands should be listed.
 
 **Expected / pass criteria:** `OWEN extension activated` logged, no activation error,
 all eight `OWEN:` commands visible (Open Lattice Builder, Validate Input File, Run
-Simulation, Open 3D Geometry Preview, Search Reactor Library, Insert Material from Database,
+Simulation, Open 3D Geometry Preview, Input from Community Library, Insert Material from Database,
 Open Tutorial, Run Parameter Sweep). This confirms the lazy-Supabase activation fix.
 
 **Score:** ☐ Pass ☐ Partial ☐ Fail ☐ Blocked — notes: ________________
@@ -504,13 +504,13 @@ wrong `owen.openmc.pythonExecutable`) — not an OWEN bug.
 
 ---
 
-## T11 — Community Library (Search Reactor Library)
+## T11 — Community Library (Input from Community Library)
 
-**Feature:** `OWEN: Search Reactor Library` (`owen.searchReactorLibrary` →
+**Feature:** `OWEN: Input from Community Library` (`owen.searchReactorLibrary` →
 `src/community/browser.ts`, Supabase-backed). **Disabled by default**
 (`owen.community.enabled = false`); requires `owen.supabase.url` + `owen.supabase.anonKey`.
 
-**Invoke:** Command Palette → **OWEN: Search Reactor Library**.
+**Invoke:** Command Palette → **OWEN: Input from Community Library**.
 
 **Steps:**
 1. With defaults (community disabled), run the command.

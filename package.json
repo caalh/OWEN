@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -239,7 +239,7 @@
       },
       {
         "command": "owen.searchReactorLibrary",
-        "title": "OWEN: Search Reactor Library",
+        "title": "OWEN: Input from Community Library",
         "category": "OWEN"
       },
       {
@@ -314,7 +314,7 @@
       },
       {
         "command": "owen.reportProblem",
-        "title": "OWEN: Report a problem (help@reactormc.net)",
+        "title": "OWEN: Report a problem (plain text to help@reactormc.net)",
         "category": "OWEN",
         "icon": "$(mail)"
       },
@@ -326,7 +326,7 @@
       },
       {
         "command": "owen.showMcnpCellMap",
-        "title": "OWEN: Show MCNP Cell Map",
+        "title": "OWEN: Show Cell Map",
         "category": "OWEN",
         "icon": "$(type-hierarchy)"
       }
@@ -404,7 +404,7 @@
         {
           "command": "owen.showMcnpCellMap",
           "group": "1_analyze@5",
-          "when": "editorLangId == mcnp"
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
           "command": "owen.openInputBuilder",
@@ -525,7 +525,7 @@
         {
           "command": "owen.showMcnpCellMap",
           "group": "1_analyze@5",
-          "when": "editorLangId == mcnp"
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
           "command": "owen.openInputBuilder",
@@ -619,7 +619,7 @@
         },
         {
           "command": "owen.showMcnpCellMap",
-          "when": "editorLangId == mcnp"
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
           "command": "owen.convertDeckAdapter",
@@ -726,7 +726,7 @@
         "owen.community.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Browse the ReactorMC Community Library from inside the editor (OWEN: Search Reactor Library). Turn this off to stop OWEN contacting reactormc.net's backend entirely; the bundled prebuilt models and snippets keep working either way."
+          "description": "Browse the ReactorMC Community Library from inside the editor (OWEN: Input from Community Library). Turn this off to stop OWEN contacting reactormc.net's backend entirely; the bundled prebuilt models and snippets keep working either way."
         },
         "owen.community.webUrl": {
           "type": "string",

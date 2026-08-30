@@ -44,6 +44,8 @@ suite('Webview scripts parse', () => {
         const bodies = scripts(html);
         assert.ok(bodies.length > 0, 'expected at least one script block');
         bodies.forEach((s, i) => assertParses(s, `geometry preview script #${i + 1}`));
+        assert.ok(html.includes('Math.min(8, next)'), '2D slice zoom must be allowed past the fitted window');
+        assert.ok(html.includes('function zoomLabel'), 'zoom label distinguishes in vs out');
     });
 
     test('the Input Builder script is syntactically valid', () => {

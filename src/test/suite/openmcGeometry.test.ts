@@ -35,6 +35,16 @@ suite('OpenMC geometry.xml → exact engine', () => {
     test('looksLikeOpenmcXml accepts XML and rejects Python', () => {
         assert.ok(looksLikeOpenmcXml(SPHERE_XML));
         assert.ok(looksLikeOpenmcXml('<geometry><cell id="1" material="void" region="-1"/></geometry>'));
+        assert.ok(looksLikeOpenmcXml(ANNULUS_XML), 'a concatenated materials+geometry dump is still XML');
+        const materialsFirst = `<materials><material id="1" name="fuel"/></materials>
+<geometry>
+  <surface id="1" type="sphere" coeffs="0 0 0 10"/>
+  <cell id="1" material="1" region="-1"/>
+</geometry>
+`;
+        assert.ok(looksLikeOpenmcXml(materialsFirst), 'live export often starts with <materials>');
+        const scene = buildScene(materialsFirst, 'openmc');
+        assert.ok(scene.cylinders.length > 0, 'materials-first XML must take the CSG path, not the Python pin heuristic');
         assert.ok(!looksLikeOpenmcXml('import openmc\ngeom = openmc.Geometry()'));
         assert.ok(!looksLikeOpenmcXml('# a comment that mentions <geometry> in passing\nimport openmc\n'));
     });

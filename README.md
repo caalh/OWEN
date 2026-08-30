@@ -155,13 +155,13 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | `OWEN: Convert to OpenMC XML (openmc adapters)` | Second-opinion MCNP/Serpent → OpenMC conversion via the OpenMC team's adapters in your Python (geometry + materials only) |
 | `OWEN: Open Prebuilt Model…` | Load a bundled BEAVRS full-core, assembly, or pin-cell deck |
 | `OWEN: Show MCNP References (Cross-Reference Tracker)` | Open the MCNP cross-reference tracker dock |
-| `OWEN: Show MCNP Cell Map` | Flowchart of the cells by universe — `fill=` arrows with lattice counts, per-cell material/density and bounding surfaces, click to jump to the card |
+| `OWEN: Show Cell Map` | Flowchart of the cells by universe — fill arrows with lattice counts, per-cell material/density and bounding surfaces, click to jump to the card. MCNP, OpenMC, Serpent, and SCONE. |
 | `OWEN: Set MCNP Project Root` | Root `.inp` for cross-file workspace validation |
 | `OWEN: Insert Material from Database` | NRDP + PNNL-15870 material picker, language-aware (auto-numbered `mN`) |
 | `OWEN: Search ReactorMC (Tutorials & NRDP)` | In-editor search over reactormc.net tutorials, NRDP, and site tools |
 | `OWEN: Choose Highlight Palette` | Switch between Classic / Solarized / High Contrast / Pastel / Custom |
 | `OWEN: Toggle Invisible Characters` | Reveal tabs/trailing whitespace that break fixed-format decks |
-| `OWEN: Search Reactor Library` | Browse approved ReactorMC community models and insert one |
+| `OWEN: Input from Community Library` | Browse approved ReactorMC community models and insert one |
 | `OWEN: Open Community Library on reactormc.net` | Open the community library in a browser to upload, rate, or comment |
 | `OWEN: Reference Documentation...` | Upstream manuals for the code you have open, plus NNDC / IAEA / JANIS and ReactorMC |
 

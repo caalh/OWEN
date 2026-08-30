@@ -13,6 +13,7 @@ import {
     parseDeckArgs,
 } from '../../preview/openmcNative/core';
 import { normalizeDeckOptions } from '../../preview/openmcNative/deckLoader';
+import { isCaptureNoise } from '../../preview/openmcNative/captureNoise';
 
 suite('OpenMC native render — deck arguments', () => {
     test('splits on whitespace and respects quotes', () => {
@@ -160,6 +161,15 @@ suite('OpenMC native render — helper script generation', () => {
         assert.ok(script.includes('owen_prepare_cross_sections'));
         assert.ok(script.includes('owen_release_cross_sections'));
         assert.ok(script.includes("os.environ['OPENMC_CROSS_SECTIONS'] = found"));
+        assert.ok(!script.includes('was not set for this process'),
+            'finding a library is success, not a warning that paints the empty overlay');
+    });
+
+    test('stubs openmc.StatePoint so decks that open model.run() do not FileNotFound', () => {
+        assert.ok(script.includes('_owen_install_statepoint_stub'));
+        assert.ok(script.includes('_OwenDummyStatePoint'));
+        assert.ok(script.includes('openmc.StatePoint = _OwenDummyStatePoint'));
+        assert.ok(script.includes('owen_skipped_statepoint.h5'));
     });
 
     test('automatic framing prefers the material-filled cells', () => {
@@ -185,6 +195,13 @@ suite('OpenMC native render — helper script generation', () => {
     test('is ASCII-only so it survives any locale/codec on the Python side', () => {
         // eslint-disable-next-line no-control-regex
         assert.ok(/^[\x00-\x7F]*$/.test(script), 'helper script must be pure ASCII');
+    });
+
+    test('capture chatter is classified as noise, not a deck defect', () => {
+        assert.ok(isCaptureNoise('OPENMC_CROSS_SECTIONS was not set for this process; using /tmp/xs.xml.'));
+        assert.ok(isCaptureNoise('model.run() in the deck was skipped (geometry-export pass).'));
+        assert.ok(isCaptureNoise('The deck continued past the point OWEN stopped it and raised FileNotFoundError: owen_skipped_statepoint.h5'));
+        assert.ok(!isCaptureNoise('No OpenMC cells were found in this XML.'));
     });
 
     test('render request carries translated paths + plot specs verbatim', () => {

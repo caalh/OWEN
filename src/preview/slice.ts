@@ -110,8 +110,8 @@ export function defaultWindow(
     const along = (dir: Vec3) =>
         dir[0] * (mid[0] - plane.origin[0]) + dir[1] * (mid[1] - plane.origin[1]) + dir[2] * (mid[2] - plane.origin[2]);
     return {
-        halfU: Math.max(1e-3, project(plane.uDir) * 1.02),
-        halfV: Math.max(1e-3, project(plane.vDir) * 1.02),
+        halfU: Math.max(1e-3, project(plane.uDir) * 1.12),
+        halfV: Math.max(1e-3, project(plane.vDir) * 1.12),
         centerU: along(plane.uDir),
         centerV: along(plane.vDir),
     };

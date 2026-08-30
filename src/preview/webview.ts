@@ -7,6 +7,7 @@ import { McnpGeometryModel } from './mcnpGeometry';
 import { parseDeckToModel, sliceSupportNote } from './engineDispatch';
 import { worldBounds } from './mcnpEvaluate';
 import { looksLikeOpenmcXml, openmcMaterialLookup, parseOpenmcGeometryXml } from './openmcGeometry';
+import { isCaptureNoise } from './openmcNative/captureNoise';
 import { exportOpenmcGeometryXml } from './openmcNative/exportGeometry';
 import {
     axisPlane, beginSlice, defaultWindow, hexToRgb, identifyAt, sliceRowsToRgba,
@@ -77,7 +78,7 @@ interface SliceViewMsg {
     offset: number;
     res: number;
     colorBy: 'cell' | 'material';
-    /** Fraction of the fitted window shown (1 = fit, 0.1 = 10× zoom). */
+    /** Scale relative to the fitted window (1 = fit, 0.1 = 10× in, 2 = 2× out). */
     zoom?: number;
     /** Window center in plane coordinates (cm). */
     centerU?: number;
@@ -130,7 +131,7 @@ function sliceMaterialNames(): Map<number, { name: string; component: string }> 
 function sliceRequestFor(model: McnpGeometryModel, msg: SliceViewMsg): SliceRequest {
     const plane = axisPlane(msg.axis, msg.offset);
     const fit = defaultWindow(model, plane);
-    const zoom = Math.max(0.002, Math.min(1, msg.zoom ?? 1));
+    const zoom = Math.max(0.002, Math.min(8, msg.zoom ?? 1));
     const res = clampRes(msg.res);
     const mats = msg.colorBy === 'material' ? sliceMaterialNames() : null;
     return {
@@ -372,7 +373,7 @@ async function refreshOpenmcExact(): Promise<void> {
     try {
         const exported = await exportOpenmcGeometryXml(lastDeckPath, vscode.Uri.file(lastDeckPath));
         if (gen !== openmcExportGen || lastText !== text) return;
-        lastOpenmcXml = `${exported.materialsXml ?? ''}\n${exported.geometryXml}`;
+        lastOpenmcXml = `${exported.geometryXml}\n${exported.materialsXml ?? ''}`;
         lastOpenmcModel = parseOpenmcGeometryXml(lastOpenmcXml);
         sliceCache = { text, language: 'openmc', model: lastOpenmcModel };
         const hasLattice = /RectLattice|HexLattice|\.universes\b/.test(text);
@@ -382,7 +383,10 @@ async function refreshOpenmcExact(): Promise<void> {
                 `Live OpenMC geometry loaded (${exported.source ?? 'captured'}).`,
                 ...lastScene.notes,
             ];
-            lastScene.warnings = [...exported.warnings, ...lastScene.warnings];
+            lastScene.warnings = [
+                ...exported.warnings.filter((w) => !isCaptureNoise(w)),
+                ...lastScene.warnings,
+            ];
             postScene();
         } else if (lastScene) {
             lastScene.notes = [
@@ -1682,7 +1686,7 @@ function buildHtml(webview: vscode.Webview): string {
 
       const cmPx = (data.cmPerPixel && data.cmPerPixel[0]) || 0;
       document.getElementById('sliceZoomVal').textContent =
-        (sliceZoom >= 0.999 ? 'fit' : (1 / sliceZoom).toFixed(1) + '×') +
+        zoomLabel(sliceZoom) +
         (cmPx > 0 ? ' · ' + cmPx.toFixed(3) + ' cm/px' : '');
       document.getElementById('sliceSamplesNote').textContent =
         data.samples > 1 ? data.samples + '×' + data.samples + ' subpixels' : '1 point/px';
@@ -1815,8 +1819,15 @@ function buildHtml(webview: vscode.Webview): string {
     });
 
     function setSliceZoom(next) {
-      // 500× in is enough to inspect a clad gap; 1 is the fitted view.
-      sliceZoom = Math.max(0.002, Math.min(1, next));
+      // 500× in is enough to inspect a clad gap; 8× out frames vacuum around
+      // a model whose fitted window sits flush on the geometry.
+      sliceZoom = Math.max(0.002, Math.min(8, next));
+    }
+
+    function zoomLabel(z) {
+      if (z > 0.97 && z < 1.03) return 'fit';
+      if (z < 1) return (1 / z).toFixed(1) + '\u00d7 in';
+      return z.toFixed(1) + '\u00d7 out';
     }
 
     /** Plane-space cm under a canvas pixel, using the window the host reported. */

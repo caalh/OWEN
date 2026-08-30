@@ -170,7 +170,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     <div id="viewport">
       <div id="canvas"><svg id="edges"></svg></div>
     </div>
-    <div id="detail"><p class="empty">Open an MCNP deck and select a cell.</p></div>
+    <div id="detail"><p class="empty">Open a Monte Carlo deck and select a cell.</p></div>
   </div>
 </div>
 <script nonce="${nonce}">
@@ -183,10 +183,15 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     void:      { color: 'var(--role-void)',      label: 'void' },
     container: { color: 'var(--role-container)', label: 'fill' },
     lattice:   { color: 'var(--role-lattice)',   label: 'lattice' },
-    graveyard: { color: 'var(--role-graveyard)', label: 'imp:n=0' },
+    graveyard: { color: 'var(--role-graveyard)', label: 'outside' },
   };
 
-  const CELL_W = 208, PAD = 10, HEAD = 26, COL_GAP = 14, ROW_GAP = 10, UNI_GAP = 34, BAND_GAP = 56;
+  function roleLabel(role) {
+    if (role === 'graveyard' && model && model.language === 'mcnp') return 'imp:n=0';
+    return ROLES[role].label;
+  }
+
+  const CELL_W = 208, PAD = 10, HEAD = 26, COL_GAP = 14, ROW_GAP = 10, UNI_GAP = 28, BAND_GAP = 72;
   const AUTO_COLLAPSE_OVER = 300;
 
   let model = null;
@@ -219,8 +224,8 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   }
 
   // ---- layout -------------------------------------------------------------
-  // Universes are grouped into horizontal bands by fill depth, so an edge
-  // always runs downward from the cell that fills to the universe it fills
+  // Universes are grouped into vertical columns by fill depth, so an edge
+  // always runs rightward from the cell that fills to the universe it fills
   // with. Inside a universe, cells wrap into as square a grid as fits.
   function computeLayout() {
     layout.cells.clear();
@@ -233,9 +238,9 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
       bands.get(u.depth).push(u);
     }
 
-    let y = 0, maxW = 0;
+    let x = 0, maxH = 0;
     for (const depth of [...bands.keys()].sort((a, b) => a - b)) {
-      let x = 0, bandH = 0;
+      let y = 0, colW = 0;
       for (const u of bands.get(depth)) {
         const isCollapsed = collapsed.has(u.id);
         let w, h;
@@ -264,14 +269,14 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
           const c = layout.cells.get(cid);
           if (c) { c.ax = x + c.x; c.ay = y + c.y; }
         }
-        x += w + UNI_GAP;
-        bandH = Math.max(bandH, h);
+        y += h + UNI_GAP;
+        colW = Math.max(colW, w);
       }
-      maxW = Math.max(maxW, x - UNI_GAP);
-      y += bandH + BAND_GAP;
+      maxH = Math.max(maxH, y - UNI_GAP);
+      x += colW + BAND_GAP;
     }
-    layout.w = maxW;
-    layout.h = y - BAND_GAP;
+    layout.w = x - BAND_GAP;
+    layout.h = maxH;
   }
 
   // ---- render -------------------------------------------------------------
@@ -324,7 +329,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     if (c.lattice) tags.push('lat=' + c.lattice);
     if (c.hasTrcl) tags.push('trcl');
     if (c.temperatureK != null) tags.push(Math.round(c.temperatureK) + 'K');
-    if (c.importanceZero) tags.push('imp:n=0');
+    if (c.importanceZero) tags.push(model.language === 'mcnp' ? 'imp:n=0' : 'outside');
 
     const mat = c.material === 0
       ? 'void'
@@ -349,8 +354,8 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     const b = layout.cells.get(cellId);
     if (!b) return null;
     const uni = layout.unis.get(b.uni);
-    if (uni && collapsed.has(b.uni)) return { x: uni.x + uni.w / 2, y: uni.y + uni.h };
-    return { x: b.ax + b.w / 2, y: b.ay + b.h };
+    if (uni && collapsed.has(b.uni)) return { x: uni.x + uni.w, y: uni.y + uni.h / 2 };
+    return { x: b.ax + b.w, y: b.ay + b.h / 2 };
   }
 
   function drawEdges() {
@@ -361,20 +366,20 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
       if (e.kind === 'fill') {
         const box = layout.unis.get(e.to);
         if (!box) continue;
-        to = { x: box.x + Math.min(60, box.w / 2), y: box.y };
+        to = { x: box.x, y: box.y + Math.min(28, box.h / 2) };
       } else {
         const b = layout.cells.get(e.to);
         const uni = b && layout.unis.get(b.uni);
         if (!b || !uni) continue;
         to = collapsed.has(b.uni)
-          ? { x: uni.x + uni.w / 2, y: uni.y }
-          : { x: b.ax + b.w / 2, y: b.ay };
+          ? { x: uni.x, y: uni.y + uni.h / 2 }
+          : { x: b.ax, y: b.ay + b.h / 2 };
       }
-      const dy = Math.max(24, Math.abs(to.y - from.y) / 2);
+      const dx = Math.max(28, Math.abs(to.x - from.x) / 2);
       const path = document.createElementNS(SVGNS, 'path');
       path.setAttribute('d',
         'M' + from.x + ',' + from.y +
-        ' C' + from.x + ',' + (from.y + dy) + ' ' + to.x + ',' + (to.y - dy) + ' ' + to.x + ',' + to.y);
+        ' C' + (from.x + dx) + ',' + from.y + ' ' + (to.x - dx) + ',' + to.y + ' ' + to.x + ',' + to.y);
       path.setAttribute('class', 'edge' + (e.kind === 'complement' ? ' comp' : ''));
       path.dataset.from = String(e.from);
       path.dataset.to = String(e.to);
@@ -439,7 +444,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     const d = $('detail');
     if (!c) { d.innerHTML = '<p class="empty">Select a cell.</p>'; return; }
     const rows = [];
-    rows.push(['Role', ROLES[c.role].label]);
+    rows.push(['Role', roleLabel(c.role)]);
     rows.push(['Universe', c.universe === 0 ? '0 (root)' : String(c.universe)]);
     rows.push(['Material', c.material === 0 ? 'void' : 'm' + c.material + ' \\u2014 ' + esc(c.materialLabel)]);
     if (c.density != null) {
@@ -545,9 +550,12 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   });
   $('q').addEventListener('input', (ev) => { query = ev.target.value; applyFilter(); });
 
-  $('legend').innerHTML = Object.keys(ROLES).map((k) =>
-    '<span class="key"><span class="dot" style="background:' + ROLES[k].color + '"></span>' +
-    ROLES[k].label + '</span>').join('');
+  function paintLegend() {
+    $('legend').innerHTML = Object.keys(ROLES).map((k) =>
+      '<span class="key"><span class="dot" style="background:' + ROLES[k].color + '"></span>' +
+      roleLabel(k) + '</span>').join('');
+  }
+  paintLegend();
 
   // ---- host messages ------------------------------------------------------
   window.addEventListener('message', (ev) => {
@@ -558,6 +566,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     model = msg.model;
     model.byId = {};
     for (const c of model.cells) model.byId[c.id] = c;
+    paintLegend();
 
     if (first && model.cells.length > AUTO_COLLAPSE_OVER) {
       collapsed = new Set(model.universes.filter((u) => u.id !== 0).map((u) => u.id));

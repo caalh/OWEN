@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-08-29
+
+### Added
+
+- **Cell Map for OpenMC, Serpent, and SCONE**, not only MCNP. The same flowchart
+  now reads those decks from the exact-geometry model (OpenMC Python decks use
+  the live `geometry.xml` the same way Render with OpenMC does). Depth runs
+  left to right.
+
+### Changed
+
+- **`OWEN: Input from Community Library`** is the new title for
+  `owen.searchReactorLibrary` (command id unchanged).
+- **Report a problem** asks for plain text only — do not attach files. Paste a
+  short excerpt of the deck in the email instead.
+
+### Fixed
+
+- **OpenMC geometry capture** no longer raises `FileNotFoundError` on
+  `owen_skipped_statepoint.h5` when a deck does `StatePoint(model.run())`, and
+  no longer paints "OPENMC_CROSS_SECTIONS was not set" as a defect when a
+  library was found. Concatenated `materials.xml` + `geometry.xml` is recognized
+  as OpenMC XML so spherical / CSG models draw instead of an empty axis overlay.
+- **2D slice zoom** can go past the fitted window (up to 8× out) so vacuum
+  around a tight model is visible. Fit still frames with a 12% margin.
+- **MCNP lattice fill numbers highlight on double-click**, not only when the
+  caret sits on the digit after a right-to-left drag.
+- **Cell Map click-to-reveal** on OpenMC / Serpent no longer jumps to the first
+  `id=2` in the file or to `surf s12` when you clicked surface 2.
+
 ## [1.4.3] - 2026-08-29
 
 ### Added

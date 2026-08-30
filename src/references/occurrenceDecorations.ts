@@ -64,16 +64,44 @@ export function paintMcnpEntity(editor: vscode.TextEditor, kind: McnpEntityKind,
     paintMcnpOccurrences(editor, getOccurrences(getIndexFor(editor.document), kind, id));
 }
 
-/** Paint the entity under the cursor, or clear if the caret is not on one. */
+/** Paint the entity under the cursor or the current selection. */
 export function paintMcnpAtCursor(editor: vscode.TextEditor): void {
     if (editor.document.languageId !== 'mcnp') {
         clearMcnpOccurrences(editor);
         return;
     }
-    const pos = editor.selection.active;
-    const occs = getHighlightOccurrences(getIndexFor(editor.document), pos.line, pos.character);
+    const index = getIndexFor(editor.document);
+    const occs = occurrencesForSelection(index, editor.selection);
     if (occs.length) paintMcnpOccurrences(editor, occs);
     else clearMcnpOccurrences(editor);
+}
+
+/**
+ * Resolve the entity a selection is on. Double-click and left-to-right drag
+ * both put the caret at the exclusive end of the token (one past the last
+ * digit), which `resolveAt` treats as a miss because fill-array integers are
+ * not editor words. Trying the start of the span and the last included column
+ * is what makes a double-clicked lattice number light up the rest of the map.
+ */
+export function occurrencesForSelection(
+    index: ReturnType<typeof getIndexFor>,
+    sel: vscode.Selection,
+): Occurrence[] {
+    const tries: Array<{ line: number; character: number }> = [
+        { line: sel.active.line, character: sel.active.character },
+        { line: sel.start.line, character: sel.start.character },
+    ];
+    if (!sel.isEmpty && sel.end.character > 0) {
+        tries.push({ line: sel.end.line, character: sel.end.character - 1 });
+    }
+    if (sel.active.character > 0) {
+        tries.push({ line: sel.active.line, character: sel.active.character - 1 });
+    }
+    for (const pos of tries) {
+        const occs = getHighlightOccurrences(index, pos.line, pos.character);
+        if (occs.length) return occs;
+    }
+    return [];
 }
 
 export function registerMcnpOccurrenceHighlights(context: vscode.ExtensionContext): void {

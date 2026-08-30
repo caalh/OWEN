@@ -25,6 +25,7 @@ import {
     SliceBasis,
     ViewFit,
 } from './core';
+import { isCaptureNoise } from './captureNoise';
 import {
     readDeckOptions,
     resolveOpenmcInterpreter,
@@ -167,7 +168,7 @@ class OpenmcRenderPanel {
                 type: 'result',
                 ok: result.ok,
                 images,
-                warnings: result.warnings,
+                warnings: result.warnings.filter((w) => !isCaptureNoise(w)),
                 error: result.error,
                 rayTraceAvailable: !!result.capabilities.rayTrace,
                 modelSource: result.modelSource,
