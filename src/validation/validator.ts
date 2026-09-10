@@ -13,7 +13,8 @@
  */
 
 import * as vscode from 'vscode';
-import { detectMonteCarloLanguage, MonteCarloLanguage } from '../util/detectLanguage';
+import { detectMonteCarloLanguage, detectMonteCarloLanguageFromText, MonteCarloLanguage } from '../util/detectLanguage';
+import { joinNotebookCode, notebookOfCell } from '../util/deckSource';
 import { runLanguageRules } from '../language/rules';
 import { PlainDiagnostic } from '../language/types';
 
@@ -44,6 +45,37 @@ function toVscodeDiagnostic(d: PlainDiagnostic): vscode.Diagnostic {
  * `dispatch` returns the diagnostics array so tests can introspect it directly.
  */
 export function validateInputFile(document: vscode.TextDocument): Diags {
+    // A notebook cell is validated as part of its notebook: every code cell
+    // joined, then each diagnostic mapped back to the cell it belongs to.
+    const nb = notebookOfCell(document);
+    if (nb) {
+        const { text, cells } = joinNotebookCode(nb);
+        const lang = detectMonteCarloLanguageFromText(text, 'python');
+        const all = runValidators(lang, text);
+        const perCell = new Map<vscode.TextDocument, Diags>();
+        for (const cell of cells) perCell.set(cell, []);
+        for (const d of all) {
+            // Joined text is the cells separated by one newline: walk to the owner.
+            let line = d.range.start.line;
+            for (const cell of cells) {
+                if (line < cell.lineCount) {
+                    const moved = new vscode.Diagnostic(
+                        new vscode.Range(line, d.range.start.character, line, d.range.end.character),
+                        d.message, d.severity,
+                    );
+                    moved.source = d.source; moved.code = d.code;
+                    perCell.get(cell)!.push(moved);
+                    break;
+                }
+                line -= cell.lineCount;
+            }
+        }
+        for (const [cell, diags] of perCell) diagnosticCollection.set(cell.uri, diags);
+        if (all.length === 0) vscode.window.showInformationMessage('OWEN: No issues found in this notebook\'s OpenMC model.');
+        else vscode.window.showWarningMessage(`OWEN: Found ${all.length} issue(s) across the notebook's code cells.`);
+        return all;
+    }
+
     const lang = detectMonteCarloLanguage(document);
     const diagnostics = dispatch(document);
 

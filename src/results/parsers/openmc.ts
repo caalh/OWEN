@@ -19,7 +19,7 @@
 // mean = sum / n; std = sqrt((sum_sq/n - mean^2)/(n-1)); the last filter in the
 // list varies fastest, and the score index is nuclide-major.
 import * as fs from 'fs';
-import type { RunResults, KeffHistory, FluxSpectrum, MeshTally, TallyEntry, TallyBin } from '../types';
+import type { RunResults, KeffHistory, KeffEstimator, FluxSpectrum, MeshTally, TallyEntry, TallyBin } from '../types';
 import { parseKeff } from '../../workflows/sweepCore';
 import { NUM, pushIfFinite } from './numeric';
 
@@ -41,6 +41,7 @@ export function parseOpenmcStdout(text: string, sourceFile?: string): RunResults
     const leakRe = new RegExp(String.raw`Leakage Fraction\s*=\s*(${NUM})\s*\+\/-\s*(${NUM})`, 'i');
 
     let combined: { mean: number; std: number } | undefined;
+    const estimators: KeffEstimator[] = [];
     let inactive: number | undefined;
 
     for (const line of lines) {
@@ -65,6 +66,7 @@ export function parseOpenmcStdout(text: string, sourceFile?: string): RunResults
         const est = finalRe.exec(line);
         if (est) {
             metadata[`k-effective (${est[1].toLowerCase()})`] = `${est[2]} +/- ${est[3]}`;
+            estimators.push({ name: est[1].toLowerCase(), mean: parseFloat(est[2]), std: parseFloat(est[3]) });
             continue;
         }
         const leak = leakRe.exec(line);
@@ -101,6 +103,7 @@ export function parseOpenmcStdout(text: string, sourceFile?: string): RunResults
               }
             : undefined;
 
+    if (combined) estimators.push({ name: 'combined', mean: combined.mean, std: combined.std });
     return {
         code: 'openmc',
         sourceFile,
@@ -110,6 +113,7 @@ export function parseOpenmcStdout(text: string, sourceFile?: string): RunResults
         meshTallies: [],
         metadata,
         warnings: warnings.length ? warnings : undefined,
+        convergence: estimators.length ? { estimators, verdict: 'unknown', reasons: [] } : undefined,
     };
 }
 
@@ -368,6 +372,7 @@ export async function parseOpenmcStatepoint(filePath: string): Promise<RunResult
         const kCombined = asNumbers(value('k_combined'));
         const inactive = asNumbers(value('n_inactive'))[0];
         let keff: KeffHistory | undefined;
+        let convergenceSeed: RunResults['convergence'];
         if (kGen.length > 0 || kCombined.length >= 2) {
             keff = {
                 cycles: kGen.map((_, i) => i + 1),
@@ -379,6 +384,16 @@ export async function parseOpenmcStatepoint(filePath: string): Promise<RunResult
                         : { mean: kGen[kGen.length - 1], std: 0 },
                 inactive: Number.isFinite(inactive) ? inactive : undefined,
             };
+            // Shannon entropy per batch is written when the run had an entropy mesh.
+            const entropy = asNumbers(value('entropy'));
+            if (entropy.length && entropy.length === kGen.length) keff.entropy = entropy;
+            // Final estimators: OpenMC stores each as [mean, std].
+            const estimators: KeffEstimator[] = [];
+            for (const [key, name] of [['k_collision', 'collision'], ['k_absorption', 'absorption'], ['k_tracklength', 'track-length'], ['k_combined', 'combined']] as const) {
+                const v = asNumbers(value(key));
+                if (v.length >= 2 && Number.isFinite(v[0])) estimators.push({ name, mean: v[0], std: v[1] });
+            }
+            if (estimators.length) convergenceSeed = { estimators, verdict: 'unknown', reasons: [] };
             if (kGen.length > 0) {
                 notes.push(
                     'k-eff by generation is the raw per-generation estimate (inactive batches included); the final value is OpenMC\'s combined estimator.',
@@ -547,6 +562,7 @@ export async function parseOpenmcStatepoint(filePath: string): Promise<RunResult
             meshTallies,
             metadata,
             notes: notes.length ? notes : undefined,
+            convergence: convergenceSeed,
         };
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

@@ -10,6 +10,7 @@ import {
     McnpGeometryModel,
     RegionNode,
 } from '../preview/mcnpGeometry';
+import { rootUniverseId } from '../preview/mcnpEvaluate';
 import {
     CellEdge,
     CellMapModel,
@@ -93,8 +94,9 @@ type DeckCell = McnpCell & { universe: number };
 
 function universeDepths(
     cellsByUniverse: Map<number, McnpCell[]>,
+    root: number,
 ): { depths: Map<number, number>; cycle: number[] } {
-    const depths = new Map<number, number>([[ROOT_UNIVERSE, 0]]);
+    const depths = new Map<number, number>([[root, 0]]);
     const cycle: number[] = [];
     const onPath = new Set<number>();
 
@@ -117,7 +119,7 @@ function universeDepths(
         }
         onPath.delete(uid);
     };
-    walk(ROOT_UNIVERSE, 0);
+    walk(root, 0);
     let maxReached = 0;
     for (const d of depths.values()) maxReached = Math.max(maxReached, d);
     for (const uid of cellsByUniverse.keys()) {
@@ -148,7 +150,8 @@ export function buildCellMapFromGeometry(
         cellsByUniverse.set(uid, list);
     }
 
-    const { depths, cycle } = universeDepths(cellsByUniverse);
+    const root = rootUniverseId(geom);
+    const { depths, cycle } = universeDepths(cellsByUniverse, root);
     if (cycle.length) {
         warnings.push(
             `Universe fill cycle through ${cycle.map((u) => `u=${u}`).join(' → ')}.`,
@@ -185,17 +188,20 @@ export function buildCellMapFromGeometry(
     const edges: CellEdge[] = [];
     const filledBy = new Map<number, number[]>();
 
+    const names = geom.names;
     const cells: CellNode[] = cellsList.map((cell) => {
         const universe = cell.universe ?? ROOT_UNIVERSE;
         const surfaces: SurfaceRef[] = [...(senseMap.get(cell.id) ?? [])]
             .sort((a, b) => a[0] - b[0])
             .map(([id, ss]) => {
                 const surf = geom.surfaces.get(id);
+                const sname = names?.surfaces.get(id);
                 const ref: SurfaceRef = {
                     id,
                     sense: senseSymbol(ss),
-                    summary: surf ? surf.mnemonic : '',
+                    summary: surf ? (sname ? `${surf.mnemonic} ${sname}` : surf.mnemonic) : '',
                 };
+                if (sname) ref.name = sname;
                 if (!definedSurfaces.has(id)) ref.undefined = true;
                 return ref;
             });
@@ -221,15 +227,21 @@ export function buildCellMapFromGeometry(
             }
         }
 
-        const regionRaw = surfaces.map((s) => `${s.sense === '+/-' ? '±' : s.sense}${s.id}`).join(' ');
-        return {
+        // Region text in the deck's own vocabulary: surface names where the
+        // parser invented the numbers, so `-fuel_or +clad_ir` reads like the card.
+        const regionRaw = surfaces
+            .map((s) => `${s.sense === '+/-' ? '±' : s.sense}${s.name ?? s.id}`)
+            .join(' ');
+        const cellName = names?.cells.get(cell.id);
+        const matName = names?.materials.get(cell.material);
+        const node: CellNode = {
             id: cell.id,
-            line: 0,
+            line: null,
             role: classifyRole(cell),
             universe,
             depth: depths.get(universe) ?? 0,
             material: cell.material,
-            materialLabel: cell.material === 0 ? 'void' : `m${cell.material}`,
+            materialLabel: cell.material === 0 ? 'void' : (matName ?? `m${cell.material}`),
             density: cell.density,
             densityUnit:
                 cell.density === null ? null : cell.density < 0 ? 'g/cm3' : 'atom/b-cm',
@@ -244,20 +256,25 @@ export function buildCellMapFromGeometry(
             complements,
             neighbors: [...(neighborSets.get(cell.id) ?? [])].sort((a, b) => a - b),
         };
+        if (cellName !== undefined && cellName !== String(cell.id)) node.name = cellName;
+        return node;
     });
 
     const universes: UniverseNode[] = [...cellsByUniverse.keys()]
         .sort((a, b) => (depths.get(a) ?? 0) - (depths.get(b) ?? 0) || a - b)
         .map((id) => {
             const parents = filledBy.get(id) ?? [];
-            return {
+            const uname = names?.universes.get(id);
+            const node: UniverseNode = {
                 id,
                 depth: depths.get(id) ?? 0,
                 summary: '',
                 cells: (cellsByUniverse.get(id) ?? []).map((c) => c.id),
                 filledBy: [...new Set(parents)].sort((a, b) => a - b),
-                orphan: id !== ROOT_UNIVERSE && parents.length === 0,
+                orphan: id !== root && parents.length === 0,
             };
+            if (uname !== undefined && uname !== String(id)) node.name = uname;
+            return node;
         });
 
     for (const u of universes) {

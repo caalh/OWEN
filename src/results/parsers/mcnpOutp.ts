@@ -11,7 +11,9 @@
 // surface, multiplier, energy) is open, which keeps the confidence-interval and
 // "value at nps+1" tables from being mistaken for results.
 import * as fs from 'fs';
-import type { RunResults, TallyEntry, TallyBin, FluxSpectrum, KeffHistory } from '../types';
+import type {
+    RunResults, TallyEntry, TallyBin, FluxSpectrum, KeffHistory, KeffEstimator, StatisticalCheck,
+} from '../types';
 
 const N = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][-+]?\d+)?`;
 const RE_NUM = new RegExp(`^${N}$`);
@@ -275,56 +277,155 @@ function parseKeff(lines: string[], text: string): { keff?: KeffHistory; note?: 
     const mean: number[] = [];
     const std: number[] = [];
 
+    const entropyByCycle = new Map<number, number>();
+
     let cycleCol = -1;
     let keffCol = -1;
+    let entropyCol = -1;
     let active = false;
     for (const raw of lines) {
         const line = raw.replace(/\r$/, '');
-        if (/^\s*cycle\b/i.test(line) && /k\s*eff/i.test(line)) {
+        // A cycle table: `cycle` plus a k-eff column, or `cycle` plus an
+        // entropy column (MCNP prints the Shannon entropy of the fission
+        // source per cycle in its own table when `kopts`/print 175 ask).
+        if (/^\s*cycle\b/i.test(line) && (/k\s*eff|k\(/i.test(line) || /entropy/i.test(line))) {
             const heads = tokens(line);
             cycleCol = heads.findIndex((h) => /^cycle$/i.test(h));
-            keffCol = heads.findIndex((h) => /^k\(?eff/i.test(h) || /^keff/i.test(h));
-            active = cycleCol >= 0 && keffCol > cycleCol;
+            keffCol = heads.findIndex((h) => /^k\(?(eff|col)/i.test(h) || /^keff/i.test(h));
+            entropyCol = heads.findIndex((h) => /entropy/i.test(h));
+            active = cycleCol >= 0 && (keffCol > cycleCol || entropyCol > cycleCol);
             continue;
         }
         if (!active) continue;
         const toks = tokens(line);
-        if (!allNumeric(toks) || toks.length <= keffCol) {
+        if (!allNumeric(toks) || toks.length <= Math.max(keffCol, entropyCol)) {
             if (toks.length > 0 && !allNumeric(toks)) active = false;
             continue;
         }
         const c = num(toks[cycleCol]);
-        const k = num(toks[keffCol]);
-        if (Number.isFinite(c) && Number.isFinite(k) && k > 0 && k < 10) {
-            cycles.push(c);
-            mean.push(k);
-            std.push(0);
+        if (!Number.isFinite(c)) continue;
+        if (keffCol > cycleCol) {
+            const k = num(toks[keffCol]);
+            if (Number.isFinite(k) && k > 0 && k < 10) {
+                cycles.push(c);
+                mean.push(k);
+                std.push(0);
+            }
+        }
+        if (entropyCol > cycleCol) {
+            const h = num(toks[entropyCol]);
+            if (Number.isFinite(h) && h >= 0) entropyByCycle.set(c, h);
         }
     }
+
+    const entropy = cycles.length && cycles.every((c) => entropyByCycle.has(c))
+        ? cycles.map((c) => entropyByCycle.get(c)!)
+        : undefined;
+    const inactiveM = /(\d+)\s+(?:inactive|settle|skip)\s+cycles/i.exec(text)
+        ?? /skip(?:ping)?\s+(?:the\s+)?first\s+(\d+)\s+cycles/i.exec(text);
+    const inactive = inactiveM ? parseInt(inactiveM[1], 10) : undefined;
 
     const finalM = RE_FINAL_KEFF.exec(text);
     if (finalM) {
         const m = num(finalM[1]);
         const s = num(finalM[2]);
         if (Number.isFinite(m)) {
+            const keff: KeffHistory = {
+                cycles: cycles.length ? cycles : [1],
+                mean: mean.length ? mean : [m],
+                std: std.length ? std : [s],
+                final: { mean: m, std: Number.isFinite(s) ? s : 0 },
+            };
+            if (entropy) keff.entropy = entropy;
+            if (inactive !== undefined && cycles.length) keff.inactive = inactive;
             return {
-                keff: {
-                    cycles: cycles.length ? cycles : [1],
-                    mean: mean.length ? mean : [m],
-                    std: std.length ? std : [s],
-                    final: { mean: m, std: Number.isFinite(s) ? s : 0 },
-                },
+                keff,
                 note: cycles.length ? undefined : 'No cycle-by-cycle k-eff table in this output (only the final estimate).',
             };
         }
     }
     if (mean.length > 0) {
+        const keff: KeffHistory = { cycles, mean, std, final: { mean: mean[mean.length - 1], std: 0 } };
+        if (entropy) keff.entropy = entropy;
+        if (inactive !== undefined) keff.inactive = inactive;
         return {
-            keff: { cycles, mean, std, final: { mean: mean[mean.length - 1], std: 0 } },
+            keff,
             note: 'k-eff standard deviation by cycle is not printed in outp; error bars omitted.',
         };
     }
     return {};
+}
+
+/**
+ * The estimator summary MCNP prints for every KCODE run:
+ *   keff estimator   keff   standard deviation   68% …
+ *   collision        1.31245  0.00062 …
+ * plus the combined line. Their spread is the first convergence check a
+ * reviewer makes (estimators disagreeing beyond ~2σ means the source has not
+ * settled), so they are surfaced rather than buried in metadata.
+ */
+export function parseKeffEstimators(lines: string[], text: string): KeffEstimator[] {
+    const out: KeffEstimator[] = [];
+    let inTable = false;
+    for (const raw of lines) {
+        const line = raw.replace(/\r$/, '');
+        if (/^\s*keff estimator\s+keff\s+standard deviation/i.test(line)) { inTable = true; continue; }
+        if (!inTable) continue;
+        const m = new RegExp(String.raw`^\s*(collision|absorption|track-length|col/abs|abs/trk|col/trk|col/abs/trk-len)\s+(${N})\s+(${N})`, 'i').exec(line);
+        if (m) {
+            out.push({ name: m[1].toLowerCase(), mean: num(m[2]), std: num(m[3]) });
+            continue;
+        }
+        if (line.trim() && !/^\s*$/.test(line)) inTable = false;
+    }
+    const finalM = RE_FINAL_KEFF.exec(text);
+    if (finalM) out.push({ name: 'combined', mean: num(finalM[1]), std: num(finalM[2]) });
+    return out;
+}
+
+/** Lost-particle count from the problem summary, when any were lost. */
+export function parseLostParticles(text: string): number | undefined {
+    const m = /(\d+)\s+particles?\s+got\s+lost/i.exec(text) ?? /lost particles?\s*[:=]?\s*(\d+)/i.exec(text);
+    if (m) return parseInt(m[1], 10);
+    if (/^1problem summary/im.test(text)) return 0;
+    return undefined;
+}
+
+const CHECK_NAMES = [
+    'mean behavior', 'relative error value', 'relative error decrease', 'relative error decrease rate',
+    'VOV value', 'VOV decrease', 'VOV decrease rate', 'FOM value', 'FOM behavior', 'PDF slope',
+];
+
+/**
+ * The ten-checks detail table per tally:
+ *   results of 10 statistical checks … of tally  4
+ *   desired   random  <0.10  yes  1/sqrt(nps)  <0.10  yes  1/nps  constant  random  >3.00
+ *   observed  random   0.00  yes      yes       0.00  yes   yes   constant  random  10.00
+ *   passed?     yes     yes  yes      yes        yes  yes   yes       yes     yes    yes
+ * The verdict line elsewhere only names the first failed check; this keeps all ten.
+ */
+export function parseCheckDetails(lines: string[]): Map<string, StatisticalCheck[]> {
+    const out = new Map<string, StatisticalCheck[]>();
+    for (let i = 0; i < lines.length; i++) {
+        const m = /results of 10 statistical checks .*?of tally\s+(\d+)/i.exec(lines[i]);
+        if (!m) continue;
+        let desired: string[] | null = null, observed: string[] | null = null, passed: string[] | null = null;
+        for (let j = i + 1; j < Math.min(lines.length, i + 14); j++) {
+            const t = tokens(lines[j].replace(/\r$/, ''));
+            if (!t.length) continue;
+            if (/^desired$/i.test(t[0])) desired = t.slice(1);
+            else if (/^observed$/i.test(t[0])) observed = t.slice(1);
+            else if (/^passed\??$/i.test(t[0])) { passed = t.slice(1); break; }
+        }
+        if (!desired || !observed || !passed || passed.length < 10) continue;
+        out.set(m[1], CHECK_NAMES.map((name, k) => ({
+            name,
+            desired: desired![k] ?? '',
+            observed: observed![k] ?? '',
+            passed: /^yes$/i.test(passed![k] ?? ''),
+        })));
+    }
+    return out;
 }
 
 function parseMetadata(lines: string[], text: string): { metadata: Record<string, string | number>; warnings: string[] } {
@@ -375,9 +476,12 @@ export function parseMcnpOutp(text: string, sourceFile?: string): RunResults {
     const lines = text.split(/\n/);
     const blocks = parseTallyBlocks(lines);
     const checks = parseStatisticalChecks(lines);
+    const checkDetails = parseCheckDetails(lines);
     const tfc = parseTfc(lines);
     const { keff, note: keffNote } = parseKeff(lines, text);
     const { metadata, warnings } = parseMetadata(lines, text);
+    const estimators = parseKeffEstimators(lines, text);
+    const lostParticles = parseLostParticles(text);
 
     const tallies: TallyEntry[] = [];
     const spectra: FluxSpectrum[] = [];
@@ -403,6 +507,8 @@ export function parseMcnpOutp(text: string, sourceFile?: string): RunResults {
             checks: verdict?.checks ?? 'unknown',
             note: verdict?.note,
         };
+        const detail = checkDetails.get(b.id);
+        if (detail) entry.checkDetail = detail;
         if (hist && hist.x.length > 0) {
             entry.history = { x: hist.x, mean: hist.mean, error: hist.error, fom: hist.fom };
             entry.fom = hist.fom[hist.fom.length - 1];
@@ -431,7 +537,7 @@ export function parseMcnpOutp(text: string, sourceFile?: string): RunResults {
     const missed = tallies.filter((t) => t.checks === 'missed').length;
     if (missed > 0) notes.push(`${missed} tallies failed at least one of MCNP's 10 statistical checks.`);
 
-    return {
+    const result: RunResults = {
         code: 'mcnp',
         sourceFile,
         keff,
@@ -442,6 +548,15 @@ export function parseMcnpOutp(text: string, sourceFile?: string): RunResults {
         warnings: warnings.length ? warnings : undefined,
         notes: notes.length ? notes : undefined,
     };
+    if (estimators.length || lostParticles !== undefined) {
+        result.convergence = {
+            estimators: estimators.length ? estimators : undefined,
+            lostParticles,
+            verdict: 'unknown',
+            reasons: [],
+        };
+    }
+    return result;
 }
 
 export function parseMcnpOutpFile(filePath: string): RunResults {

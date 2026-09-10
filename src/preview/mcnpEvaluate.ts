@@ -24,6 +24,7 @@ import {
     Transform,
     Vec3,
 } from './mcnpGeometry';
+import { pickRootId } from './rootUniverse';
 
 /** Nested-geometry recursion cap (Table 4.1: max 20 levels). */
 const MAX_DEPTH = 20;
@@ -587,25 +588,112 @@ function findInUniverse(
     return deeper ?? hit;
 }
 
+/** Universes that appear as a `fill=` / lattice map entry. */
+export function filledUniverseIds(model: McnpGeometryModel): Set<number> {
+    const filled = new Set<number>();
+    for (const cell of model.cells.values()) {
+        const fill = cell.fill;
+        if (!fill) continue;
+        if (fill.universe !== null) filled.add(fill.universe);
+        if (fill.grid) {
+            for (const e of fill.grid.entries) filled.add(e.universe);
+        }
+    }
+    return filled;
+}
+
+/**
+ * Universe id of the real world: the populated universe that is never used
+ * as a fill. Shared by MCNP, OpenMC XML, Serpent, and SCONE — all four
+ * parsers emit this model. MCNP/Serpent prefer 0 when it is a root; OpenMC
+ * XML numbers the root from 1 (or any other id); SCONE remaps rootUniverse
+ * to 0 at parse. An unused pin universe is never chosen over a busier root.
+ */
+export function rootUniverseId(model: McnpGeometryModel): number {
+    const filled = filledUniverseIds(model);
+    const populated: number[] = [];
+    for (const [id, cells] of model.universes) {
+        if (cells.length > 0) populated.push(id);
+    }
+    return pickRootId(populated, filled, (id) => model.universes.get(id)?.length ?? 0, 0) ?? 0;
+}
+
 /**
  * Locate the material cell containing a world point, descending fills and
- * lattices from universe 0. Reports top-level overlaps (multiple universe-0
+ * lattices from the root universe. Reports top-level overlaps (multiple root
  * cells claiming the point) and lost points (no cell claims it) — the same
  * conventions users know from OpenMC overlap plots.
  */
 export function findCell(model: McnpGeometryModel, p: Vec3): FoundCell {
     const out: FoundCell = { cell: null, path: [], overlaps: [], lost: false, latticeIndices: [] };
-    out.cell = findInUniverse(model, 0, p, 0, out);
+    out.cell = findInUniverse(model, rootUniverseId(model), p, 0, out);
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Problem domain (boundary-condition surfaces)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the problem exists, when the deck marks boundary surfaces (OpenMC
+ * `boundary="vacuum"`, MCNP `*`/`+`). OpenMC has no graveyard cell: beyond the
+ * vacuum sphere there is simply no cell, and a sampler that calls that "lost"
+ * is wrong. The domain is taken as the side of every boundary surface that
+ * contains the centre of the world box — right for the closed shells and
+ * boxes decks are made of. Returns null when nothing marks a boundary.
+ */
+export function domainPredicate(model: McnpGeometryModel): ((p: Vec3) => boolean) | null {
+    const bounded = [...model.surfaces.values()].filter((s) => s.boundary !== 'none');
+    if (!bounded.length) return null;
+    // The domain is the side of each boundary surface where the cells are.
+    // Learn it from points that land in a cell (the world box centre is not
+    // reliable: one stray unused plane can drag the box off the geometry).
+    const b = worldBounds(model);
+    const votes = bounded.map(() => ({ neg: 0, pos: 0 }));
+    let seed = 7;
+    const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    let found = 0;
+    for (let i = 0; i < 400 && found < 60; i++) {
+        const p: Vec3 = [
+            b.min[0] + rnd() * (b.max[0] - b.min[0]),
+            b.min[1] + rnd() * (b.max[1] - b.min[1]),
+            b.min[2] + rnd() * (b.max[2] - b.min[2]),
+        ];
+        const f = findCell(model, p);
+        if (f.lost || !f.cell) continue;
+        found++;
+        bounded.forEach((s, k) => { if (surfaceValue(s, 0, p) < 0) votes[k].neg++; else votes[k].pos++; });
+    }
+    const c: Vec3 = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+    const signs = bounded.map((s, k) => {
+        const v = votes[k];
+        if (v.neg + v.pos === 0) return Math.sign(surfaceValue(s, 0, c)) || -1;
+        return v.neg >= v.pos ? -1 : 1;
+    });
+    return (p) => bounded.every((s, i) => {
+        const v = surfaceValue(s, 0, p);
+        return v === 0 || Math.sign(v) === signs[i];
+    });
 }
 
 // ---------------------------------------------------------------------------
 // World bounds (for slicing and CSG clipping)
 // ---------------------------------------------------------------------------
 
-export interface Bounds { min: Vec3; max: Vec3 }
+export interface Bounds {
+    min: Vec3;
+    max: Vec3;
+    /** Axes whose extent is the ±1000 fallback because no surface bounds them. */
+    unconstrained?: [boolean, boolean, boolean];
+}
 
-const DEFAULT_HALF_EXTENT = 1000;
+/** Half-width used on an axis no finite surface constrains. */
+export const DEFAULT_HALF_EXTENT = 1000;
+
+/** Which axes of a `boundsOfSurfaces` result came from the fallback. */
+export function unconstrainedAxes(b: Bounds): [boolean, boolean, boolean] {
+    return b.unconstrained ?? [false, false, false];
+}
 
 /**
  * Conservative world bounding box from the finite surfaces present. Each
@@ -614,6 +702,15 @@ const DEFAULT_HALF_EXTENT = 1000;
  * Falls back to ±1000 cm on an axis nothing constrains.
  */
 export function worldBounds(model: McnpGeometryModel): Bounds {
+    return boundsOfSurfaces(model.surfaces.values());
+}
+
+/**
+ * The same conservative box, but from a chosen set of surfaces — e.g. only
+ * those one universe's cells reference, which is the natural sampling window
+ * for checking or integrating that universe in its own frame.
+ */
+export function boundsOfSurfaces(surfaces: Iterable<McnpSurface>): Bounds {
     const axes: number[][] = [[], [], []];
 
     const takeShape = (shape: Shape, tr: Transform | null) => {
@@ -674,10 +771,11 @@ export function worldBounds(model: McnpGeometryModel): Bounds {
         }
     };
 
-    for (const s of model.surfaces.values()) takeShape(s.shape, s.tr);
+    for (const s of surfaces) takeShape(s.shape, s.tr);
 
     const min: Vec3 = [0, 0, 0];
     const max: Vec3 = [0, 0, 0];
+    const unconstrained: [boolean, boolean, boolean] = [false, false, false];
     for (let ax = 0; ax < 3; ax++) {
         const vals = axes[ax];
         if (vals.length >= 2) {
@@ -686,11 +784,13 @@ export function worldBounds(model: McnpGeometryModel): Bounds {
             if (max[ax] - min[ax] < 1e-9) {
                 min[ax] -= DEFAULT_HALF_EXTENT;
                 max[ax] += DEFAULT_HALF_EXTENT;
+                unconstrained[ax] = true;
             }
         } else {
             min[ax] = -DEFAULT_HALF_EXTENT;
             max[ax] = DEFAULT_HALF_EXTENT;
+            unconstrained[ax] = true;
         }
     }
-    return { min, max };
+    return { min, max, unconstrained };
 }

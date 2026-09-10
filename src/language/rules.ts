@@ -86,6 +86,10 @@ function isCommentLine(line: string, lang: 'mcnp' | 'serpent' | 'scone'): boolea
 const ZAID_RE = /\b(\d{4,6})\.(\d{2,})([tcdmgpuyehorsa])\b/gi;
 const ZAID_CLASS_LETTERS = 'tcdmgpuyehorsa';
 const MATERIAL_HEADER_RE = /^\s*m(\d+)\s+/i;
+/** Bare ZAID (no .NNx). Legal when M0 / Mn NLIB= supplies the suffix (§5.6.1). */
+const BARE_ZAID_TOKEN = /^\d{4,6}$/;
+/** Mn keywords whose values are not fractions (NLIB=.81c, GAS=1, …). */
+const MATERIAL_KEYWORD_TOKEN = /^(?:nlib|plib|pnlib|elib|hlib|alib|gas|estep|cond)\s*=/i;
 const MT_CARD_RE = /^\s*mt(\d+)\s+/i;
 const CELL_CARD_RE = /^\s*(\d+)\s+(\d+|0)\s+(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)?\s+/;
 const MACROBODY_RE = /^\s*(\d+)\s+(\*?)(rpp|rcc|rhp|box|hex|cyl|sph|rec|trc|ell|wed|arb)\b/i;
@@ -194,17 +198,27 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
             while ((zm = ZAID_RE.exec(raw)) !== null) {
                 activeMat.zaids.push(zm[1]);
             }
+            // Bare ZAIDs (5010 with NLIB=.81c applying the suffix). Do not
+            // treat those integers as +atom fractions — that is what made
+            // all-weight cards look mixed (issue: Default Material Library).
+            const toks = raw.trim().split(/\s+/);
+            for (let t = 0; t < toks.length; t++) {
+                const tok = toks[t];
+                if (t === 0 && MATERIAL_HEADER_RE.test(tok + ' ')) continue;
+                if (BARE_ZAID_TOKEN.test(tok)) activeMat.zaids.push(tok);
+            }
             // Fraction signs: whole whitespace-delimited tokens only. A ZAID
             // like `40000.80c` must not partially match as a positive number
             // (that made every all-negative weight-fraction material look
             // "mixed"), so skip ZAID/library tokens and require the token to
             // be a complete standalone number.
             const NUMBER_TOKEN = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
-            const toks = raw.trim().split(/\s+/);
             for (let t = 0; t < toks.length; t++) {
                 const tok = toks[t];
                 if (t === 0 && MATERIAL_HEADER_RE.test(tok + ' ')) continue; // mN header
+                if (MATERIAL_KEYWORD_TOKEN.test(tok) || tok.includes('=')) continue;
                 if (/^\d{1,6}\.\d{2,}[a-z]$/i.test(tok)) continue; // ZAID.NNx
+                if (BARE_ZAID_TOKEN.test(tok)) continue; // 5010, 92235, …
                 if (!NUMBER_TOKEN.test(tok)) continue;
                 if (tok.startsWith('-')) activeMat.signs.add('-');
                 else activeMat.signs.add('+');
@@ -294,6 +308,10 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
     }
 
     for (const mat of materials.values()) {
+        // M0 is the default-library card (NLIB=/PLIB=/…), not a composition.
+        // Mixing signs cannot happen there in a well-formed deck, and a false
+        // mixed-sign on it is what broke preview for decks that use it.
+        if (mat.matNum === '0') continue;
         if (mat.signs.has('+') && mat.signs.has('-')) {
             push(diags, mat.line, 0, lines[mat.line]?.length ?? 0,
                 `Material m${mat.matNum} mixes positive and negative fractions — keep consistent (positive=atom, negative=weight).`,
@@ -373,6 +391,42 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
             `For a centered ${nx}×${ny} use fill=-${hi}:${i2 - hi} -${hj}:${j2 - hj} 0:0.`,
             'warning',
             'mcnp.lattice-fill-origin',
+        );
+    }
+
+    // Lattice index direction (§5.5.5): element (1,0,0) lies beyond the FIRST
+    // listed surface of a lat=1 cell, (0,1,0) beyond the third. A cell written
+    // `60 -61 62 -63` with 60 the −x plane therefore runs +i toward −x and +j
+    // toward −y, and a fill array drawn as a picture is read rotated 180°:
+    // baffle plates land on the wrong faces and asymmetric BA patterns flip.
+    // The bundled BEAVRS deck shipped that way until Compare Geometry against
+    // the SCONE twin showed 98 % instead of 100 %. Flag a positive-sense first
+    // surface in either pair; the fix is to list the +x/+y plane first.
+    for (let i = 0; i < lines.length; i++) {
+        if (isCommentLine(lines[i], 'mcnp')) continue;
+        if (!/\blat\s*=\s*1\b/i.test(lines[i])) continue;
+        const toks = lines[i].trim().split(/\s+/);
+        if (toks.length < 3 || !/^\d+$/.test(toks[0])) continue;
+        const gStart = toks[1] === '0' ? 2 : 3;
+        const geom: string[] = [];
+        for (let k = gStart; k < toks.length && !toks[k].includes('='); k++) geom.push(toks[k]);
+        // Plain intersection of four (or six) signed surface numbers only.
+        if (geom.length < 4 || geom.some((t) => !/^[-+]?\d+$/.test(t))) continue;
+        const pairs: [string, string][] = [[geom[0], geom[1]], [geom[2], geom[3]]];
+        if (geom.length >= 6) pairs.push([geom[4], geom[5]]);
+        const inverted = pairs
+            .map((p, idx) => (!p[0].startsWith('-') && p[1].startsWith('-') ? ['i', 'j', 'k'][idx] : null))
+            .filter((x): x is string => x !== null);
+        if (!inverted.length) continue;
+        const start = lines[i].indexOf(geom[0], toks[0].length);
+        push(
+            diags, i, Math.max(0, start), Math.max(0, start) + geom.slice(0, pairs.length * 2).join(' ').length + 2,
+            `Lattice index ${inverted.join(' and ')} points toward the negative axis: MCNP puts element (1,0,0) beyond the ` +
+            `FIRST listed surface of each pair (§5.5.5), and "${pairs[0][0]} ${pairs[0][1]}" lists the low plane first. ` +
+            `The fill array is then read mirrored along ${inverted.join('/')} (rotated 180° when both). ` +
+            `If the map was drawn with +i = +x and +j = +y, list the high plane first, e.g. "${pairs.map((p) => `${p[1]} ${p[0].replace(/^\+/, '')}`).join(' ')}".`,
+            'warning',
+            'mcnp.lattice-index-direction',
         );
     }
 }

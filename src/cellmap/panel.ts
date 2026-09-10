@@ -2,15 +2,53 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { detectMonteCarloLanguage, type MonteCarloLanguage } from '../util/detectLanguage';
+import { deckSourceOf, notebookOfCell } from '../util/deckSource';
 import { parseDeckToModel } from '../preview/engineDispatch';
 import { looksLikeOpenmcXml, parseOpenmcGeometryXml } from '../preview/openmcGeometry';
 import { exportOpenmcGeometryXml } from '../preview/openmcNative/exportGeometry';
-import { buildMcnpReferenceIndex, getDefinition } from '../references/mcnpReferences';
 import { isCaptureNoise } from '../preview/openmcNative/captureNoise';
 import { buildCellMapFromGeometry } from './fromGeometry';
 import { buildCellMap, type CellMapModel } from './model';
-import { findCellMapTarget } from './reveal';
+import { pickDeck } from './pickDeck';
+import { revealDeckTarget } from './revealInEditor';
 import { buildCellMapHtml } from './webview';
+
+type CellMapLocation = 'newWindow' | 'beside' | 'activeGroup';
+
+function configuredLocation(): CellMapLocation | 'ask' {
+    const raw = vscode.workspace.getConfiguration('owen').get<string>('cellMap.openIn');
+    return raw === 'beside' || raw === 'activeGroup' || raw === 'newWindow' ? raw : 'ask';
+}
+
+/**
+ * Where should the map go this time? Asked on every open unless
+ * `owen.cellMap.openIn` pins an answer; the last item in the pick offers to
+ * pin it. Returns undefined when the pick is dismissed.
+ */
+export async function pickLocation(): Promise<CellMapLocation | undefined> {
+    const configured = configuredLocation();
+    if (configured !== 'ask') return configured;
+    type Item = vscode.QuickPickItem & { location: CellMapLocation; remember?: boolean };
+    const items: Item[] = [
+        { label: '$(multiple-windows) New window', description: 'floating window you can drag to a second monitor', location: 'newWindow' },
+        { label: '$(split-horizontal) Tab beside the deck', description: 'split editor in this window', location: 'beside' },
+        { label: '$(window) Tab in this group', description: 'replaces the deck in view; switch tabs to go back', location: 'activeGroup' },
+        { label: '', kind: vscode.QuickPickItemKind.Separator, location: 'beside' },
+        { label: '$(pin) Always use a new window', description: 'sets owen.cellMap.openIn', location: 'newWindow', remember: true },
+        { label: '$(pin) Always open beside the deck', description: 'sets owen.cellMap.openIn', location: 'beside', remember: true },
+    ];
+    const pick = await vscode.window.showQuickPick(items, {
+        title: 'OWEN Cell Map',
+        placeHolder: 'Open the Cell Map where?',
+    });
+    if (!pick) return undefined;
+    if (pick.remember) {
+        await vscode.workspace.getConfiguration('owen').update(
+            'cellMap.openIn', pick.location, vscode.ConfigurationTarget.Global,
+        );
+    }
+    return pick.location;
+}
 
 const RETHROTTLE_MS = 350;
 const OPENMC_EXPORT_THROTTLE_MS = 2000;
@@ -24,11 +62,11 @@ function makeNonce(): string {
 
 function isMapped(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
     if (!doc) return false;
-    return detectMonteCarloLanguage(doc) !== null;
+    return deckSourceOf(doc) !== null;
 }
 
 function languageOf(doc: vscode.TextDocument): MonteCarloLanguage {
-    return detectMonteCarloLanguage(doc) ?? 'mcnp';
+    return deckSourceOf(doc)?.language ?? detectMonteCarloLanguage(doc) ?? 'mcnp';
 }
 
 function emptyModel(language: CellMapModel['language'] = 'mcnp'): CellMapModel {
@@ -84,6 +122,8 @@ function parseCellMap(text: string, language: MonteCarloLanguage): CellMapModel 
 export class CellMapPanel {
     public static current: CellMapPanel | undefined;
     private static readonly viewType = 'owen.cellMap';
+    /** Public for the tab-group scan in `deckColumn`. */
+    public static get viewTypeId(): string { return CellMapPanel.viewType; }
 
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
@@ -91,28 +131,67 @@ export class CellMapPanel {
     private _uri: vscode.Uri | undefined;
     private _pending: NodeJS.Timeout | undefined;
     private _openmcGen = 0;
+    private _floated = false;
+    private readonly _location: CellMapLocation;
 
-    public static show(): void {
-        const column = vscode.window.activeTextEditor
-            ? vscode.ViewColumn.Beside
-            : vscode.ViewColumn.One;
-
+    public static async show(deck?: vscode.Uri): Promise<void> {
+        const target = deck ?? vscode.window.activeTextEditor?.document.uri;
         if (CellMapPanel.current) {
-            CellMapPanel.current._panel.reveal(column, true);
+            if (target) CellMapPanel.current._uri = target;
+            await CellMapPanel.current._place();
             CellMapPanel.current._sync();
             return;
         }
+        const location = await pickLocation();
+        if (!location) return;
+        // newWindow needs focus on the webview so _place moves the map and not
+        // the deck; the in-window locations leave focus in the editor.
+        const column = location === 'beside' ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active;
         const panel = vscode.window.createWebviewPanel(
             CellMapPanel.viewType,
             'OWEN: Cell Map',
-            { viewColumn: column, preserveFocus: true },
+            { viewColumn: column, preserveFocus: location !== 'newWindow' },
             { enableScripts: true, retainContextWhenHidden: true },
         );
-        CellMapPanel.current = new CellMapPanel(panel);
+        CellMapPanel.current = new CellMapPanel(panel, target, location);
+        await CellMapPanel.current._place();
     }
 
-    private constructor(panel: vscode.WebviewPanel) {
+    /**
+     * Put the flowchart where `owen.cellMap.openIn` asks for. VS Code owns the
+     * bounds of floating windows — an extension cannot pass them — so the
+     * escape hatch for a window that lands somewhere unwanted is `beside`.
+     * Auxiliary windows report no viewColumn once the panel is already there;
+     * `_floated` distinguishes that from "just created, not yet shown".
+     */
+    private async _place(): Promise<void> {
+        if (this._location !== 'newWindow') {
+            const column = this._location === 'beside' ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active;
+            this._panel.reveal(this._panel.viewColumn ?? column, true);
+            return;
+        }
+        if (this._floated && this._panel.viewColumn === undefined) {
+            this._panel.reveal(undefined, false);
+            return;
+        }
+        this._panel.reveal(this._panel.viewColumn ?? vscode.ViewColumn.Active, false);
+        // The webview tab has to be the active editor or this command moves
+        // the deck instead. A tick is enough for createWebviewPanel to focus.
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        try {
+            await vscode.commands.executeCommand('workbench.action.moveEditorToNewWindow');
+            this._floated = true;
+        } catch {
+            this._panel.reveal(vscode.ViewColumn.Beside, true);
+        }
+    }
+
+    private constructor(panel: vscode.WebviewPanel, deck?: vscode.Uri, location: CellMapLocation = 'newWindow') {
         this._panel = panel;
+        // Remember the deck before the panel can be floated: an auxiliary
+        // window has no active text editor, so this is all _sync has to go on.
+        this._uri = deck;
+        this._location = location;
         this._panel.webview.html = buildCellMapHtml(this._panel.webview.cspSource, makeNonce());
 
         this._panel.webview.onDidReceiveMessage(
@@ -121,6 +200,13 @@ export class CellMapPanel {
             this._disposables,
         );
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+        // Moving the tab to another window reloads the webview and drops any
+        // model posted before the move.
+        this._panel.onDidChangeViewState(
+            () => { if (this._panel.visible) this._sync(); },
+            null,
+            this._disposables,
+        );
 
         vscode.window.onDidChangeActiveTextEditor(
             (ed) => { if (isMapped(ed?.document)) this._sync(); },
@@ -128,54 +214,33 @@ export class CellMapPanel {
             this._disposables,
         );
         vscode.workspace.onDidChangeTextDocument(
-            (ev) => { if (this._uri && ev.document.uri.toString() === this._uri.toString()) this._schedule(); },
+            (ev) => {
+                if (!this._uri) return;
+                const key = notebookOfCell(ev.document)?.uri.toString() ?? ev.document.uri.toString();
+                if (key === this._uri.toString()) this._schedule();
+            },
             null,
             this._disposables,
         );
     }
 
-    private _onMessage(msg: { command?: string; id?: number }): void {
+    private _onMessage(msg: { command?: string; id?: number; name?: string }): void {
         if (msg?.command === 'ready') {
             this._ready = true;
             this._sync();
             return;
         }
+        const name = typeof msg.name === 'string' && msg.name ? msg.name : undefined;
         if (msg?.command === 'revealCell' && typeof msg.id === 'number') {
-            void this._reveal('cell', msg.id);
+            void this._reveal('cell', msg.id, name);
         } else if (msg?.command === 'revealSurface' && typeof msg.id === 'number') {
-            void this._reveal('surface', msg.id);
+            void this._reveal('surface', msg.id, name);
         }
     }
 
-    private async _reveal(kind: 'cell' | 'surface', id: number): Promise<void> {
+    private async _reveal(kind: 'cell' | 'surface', id: number, name?: string): Promise<void> {
         if (!this._uri) return;
-        const doc = await vscode.workspace.openTextDocument(this._uri);
-        const lang = languageOf(doc);
-        let line = 0, startCol = 0, endCol = 1;
-        if (lang === 'mcnp') {
-            const def = getDefinition(buildMcnpReferenceIndex(doc.getText()), kind, id);
-            if (!def) {
-                vscode.window.setStatusBarMessage(`OWEN: no ${kind} ${id} card in this deck`, 3000);
-                return;
-            }
-            line = def.line; startCol = def.startCol; endCol = def.endCol;
-        } else {
-            const text = doc.getText();
-            const hit = findCellMapTarget(text, kind, id);
-            if (!hit) {
-                vscode.window.setStatusBarMessage(`OWEN: could not find ${kind} ${id} in this file`, 3000);
-                return;
-            }
-            line = hit.line; startCol = hit.start; endCol = hit.end;
-        }
-        const editor = await vscode.window.showTextDocument(doc, {
-            preview: false,
-            preserveFocus: false,
-            viewColumn: vscode.ViewColumn.One,
-        });
-        const range = new vscode.Range(line, startCol, line, endCol);
-        editor.selection = new vscode.Selection(range.start, range.end);
-        editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+        await revealDeckTarget(this._uri, kind, id, name, CellMapPanel.viewTypeId);
     }
 
     private _schedule(): void {
@@ -188,17 +253,16 @@ export class CellMapPanel {
 
     private _sync(): void {
         if (!this._ready) return;
-        const active = vscode.window.activeTextEditor?.document;
-        const doc = isMapped(active)
-            ? active
-            : vscode.workspace.textDocuments.find((d) => this._uri && d.uri.toString() === this._uri.toString());
-        if (!doc) {
+        const doc = this._deck();
+        const src = doc ? deckSourceOf(doc) : null;
+        if (!doc || !src) {
             this._post(emptyModel(), 'open a Monte Carlo deck');
             return;
         }
-        this._uri = doc.uri;
-        const lang = languageOf(doc);
-        const text = doc.getText();
+        // A notebook cell maps the whole notebook; remember the notebook.
+        this._uri = src.uri;
+        const lang = src.language;
+        const text = src.text;
         let model: CellMapModel;
         try {
             model = parseCellMap(text, lang);
@@ -208,11 +272,26 @@ export class CellMapPanel {
                 `Could not read this deck: ${err instanceof Error ? err.message : String(err)}`,
             );
         }
-        this._post(model, doc.uri.path.split('/').pop() ?? '');
+        this._post(model, src.uri.path.split('/').pop() ?? '');
 
-        if (lang === 'openmc' && !looksLikeOpenmcXml(text) && model.cells.length === 0) {
+        if (lang === 'openmc' && !looksLikeOpenmcXml(text) && model.cells.length === 0 && !src.fromNotebook) {
             void this._loadOpenmcXml(doc);
         }
+    }
+
+    /** The deck this map is showing. See `pickDeck` for why focus is not enough. */
+    private _deck(): vscode.TextDocument | undefined {
+        // Notebook cells share their notebook's key so the remembered deck
+        // (the notebook URI) still resolves to one of its cell documents.
+        const keyOf = (doc: vscode.TextDocument) => notebookOfCell(doc)?.uri.toString() ?? doc.uri.toString();
+        const wrap = (doc: vscode.TextDocument) => ({ key: keyOf(doc), mapped: isMapped(doc), doc });
+        const active = vscode.window.activeTextEditor?.document;
+        return pickDeck({
+            active: active ? wrap(active) : undefined,
+            remembered: this._uri?.toString(),
+            visible: vscode.window.visibleTextEditors.map((ed) => wrap(ed.document)),
+            open: vscode.workspace.textDocuments.map(wrap),
+        })?.doc;
     }
 
     private async _loadOpenmcXml(doc: vscode.TextDocument): Promise<void> {
@@ -275,6 +354,6 @@ export function registerCellMap(_context: vscode.ExtensionContext): vscode.Dispo
             );
             return;
         }
-        CellMapPanel.show();
+        void CellMapPanel.show(deckSourceOf(doc)?.uri ?? doc.uri);
     });
 }

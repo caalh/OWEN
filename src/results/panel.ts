@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { vendorUri } from '../util/vendor';
 import type { RunResults } from './types';
 import { detectOutputsInDir, guessWorkDir, pickPrimaryOutput, staleOutputNote } from './detectOutputs';
 import { parseOutput, parseOutputFile } from './index';
@@ -37,12 +38,12 @@ export class ResultsPanel {
 
     private constructor(
         panel: vscode.WebviewPanel,
-        _extensionUri: vscode.Uri,
+        extensionUri: vscode.Uri,
         initial?: RunResults,
         workDir?: string,
     ) {
         this._panel = panel;
-        this._panel.webview.html = this._getHtml();
+        this._panel.webview.html = this._getHtml(vendorUri(panel.webview, extensionUri, 'uplot'));
 
         this._panel.webview.onDidReceiveMessage(
             async (msg) => {
@@ -129,11 +130,11 @@ export class ResultsPanel {
         }
     }
 
-    private _getHtml(): string {
+    private _getHtml(uplotBase: string): string {
         const csp = [
             "default-src 'none'",
-            `style-src ${this._panel.webview.cspSource} 'unsafe-inline' https://unpkg.com`,
-            `script-src ${this._panel.webview.cspSource} 'unsafe-inline' https://unpkg.com`,
+            `style-src ${this._panel.webview.cspSource} 'unsafe-inline'`,
+            `script-src ${this._panel.webview.cspSource} 'unsafe-inline'`,
         ].join('; ');
 
         return `<!DOCTYPE html>
@@ -141,7 +142,7 @@ export class ResultsPanel {
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
-  <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css" />
+  <link rel="stylesheet" href="${uplotBase}/uPlot.min.css" />
   <style>
     :root { --bg: #0b1020; --card: #121a2e; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --border: rgba(255,255,255,0.08); }
     body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 13px; }
@@ -161,6 +162,24 @@ export class ResultsPanel {
     .meta { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
     .empty { color: var(--muted); padding: 24px; text-align: center; }
     .keff-banner { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+    .conv { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); }
+    .conv .verdict { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-right: 8px; }
+    .conv .verdict.converged { background: rgba(34,197,94,.18); color: #4ade80; }
+    .conv .verdict.suspect { background: rgba(245,158,11,.18); color: #fbbf24; }
+    .conv .verdict.unconverged { background: rgba(239,68,68,.18); color: #f87171; }
+    .conv .verdict.unknown { background: rgba(148,163,184,.18); color: var(--muted); }
+    .conv ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+    .conv ul li { margin: 2px 0; }
+    .conv .stats { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; color: var(--muted); font-size: 12px; }
+    .conv .stats b { color: var(--text); font-weight: 600; }
+    .conv-h { font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+    #estimators table { margin-top: 10px; width: auto; }
+    #estimators td.spread { color: var(--muted); }
+    tr.checks td { padding: 4px 8px 8px 24px; }
+    .checks table { width: auto; font-size: 12px; }
+    .checks td, .checks th { padding: 2px 10px; }
+    .checks .no { color: #f87171; font-weight: 600; }
+    .checks .ok { color: #4ade80; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
     .chip { font-size: 11px; color: var(--muted); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
     .chip b { color: var(--text); font-weight: 600; }
@@ -197,7 +216,13 @@ export class ResultsPanel {
     <div id="msgs" class="msgs"></div>
     <div id="keffTab">
       <div id="keffBanner" class="keff-banner"></div>
+      <div id="convergence" class="conv"></div>
       <div id="keffChart" class="chart"></div>
+      <div id="entropyWrap" style="display:none">
+        <div class="conv-h">Shannon entropy of the fission source</div>
+        <div id="entropyChart" class="chart"></div>
+      </div>
+      <div id="estimators"></div>
     </div>
     <div id="spectrumTab" style="display:none">
       <div id="specChart" class="chart"></div>
@@ -209,10 +234,10 @@ export class ResultsPanel {
       <canvas id="meshCanvas" width="600" height="400" style="max-width:100%;background:var(--card);border-radius:8px"></canvas>
     </div>
   </main>
-  <script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+  <script src="${uplotBase}/uPlot.iife.min.js"></script>
   <script>
     const vscode = acquireVsCodeApi();
-    let keffPlot = null, specPlot = null;
+    let keffPlot = null, specPlot = null, entropyPlot = null;
 
     function supExp(p) {
       const m = { '-': '\\u207b', '0': '\\u2070', '1': '\\u00b9', '2': '\\u00b2', '3': '\\u00b3', '4': '\\u2074', '5': '\\u2075', '6': '\\u2076', '7': '\\u2077', '8': '\\u2078', '9': '\\u2079' };
@@ -258,6 +283,60 @@ export class ResultsPanel {
         ],
         series,
       }, data, host);
+    }
+
+    function buildEntropyPlot(host, keff) {
+      if (entropyPlot) { entropyPlot.destroy(); entropyPlot = null; }
+      const wrap = document.getElementById('entropyWrap');
+      const ent = keff && keff.entropy;
+      if (!ent || ent.length !== keff.cycles.length) { wrap.style.display = 'none'; return; }
+      wrap.style.display = 'block';
+      host.innerHTML = '';
+      const inactive = keff.inactive ?? 0;
+      const settling = ent.map((v, i) => (i < inactive ? v : null));
+      const active = ent.map((v, i) => (i >= inactive ? v : null));
+      entropyPlot = new uPlot({
+        width: host.clientWidth, height: 180,
+        scales: { x: { time: false }, y: { auto: true } },
+        axes: [
+          { label: 'Cycle / batch', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' } },
+          { label: 'H (bits)', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' } },
+        ],
+        series: [{}, { label: 'H (settling)', stroke: '#64748b', width: 1 }, { label: 'H (active)', stroke: '#a78bfa', width: 2 }],
+      }, [keff.cycles, settling, active], host);
+    }
+
+    function renderConvergence(r) {
+      const box = document.getElementById('convergence');
+      const c = r.convergence;
+      if (!c) { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      const label = { converged: 'converged', suspect: 'check', unconverged: 'not converged', unknown: 'no verdict' }[c.verdict] || c.verdict;
+      const stats = [];
+      if (c.activeCycles) stats.push('<span><b>' + c.activeCycles + '</b> active cycles</span>');
+      if (c.firstHalf != null) stats.push('<span>halves <b>' + c.firstHalf.toFixed(5) + '</b> / <b>' + c.secondHalf.toFixed(5) + '</b></span>');
+      if (c.cycleSigma != null) stats.push('<span>per-cycle σ <b>' + c.cycleSigma.toExponential(2) + '</b></span>');
+      if (c.driftZ != null) stats.push('<span>drift <b>' + c.driftZ.toFixed(1) + 'σ</b></span>');
+      if (c.entropyZ != null) stats.push('<span>entropy step <b>' + c.entropyZ.toFixed(1) + 'σ</b></span>');
+      if (c.lostParticles != null) stats.push('<span>lost particles <b>' + c.lostParticles + '</b></span>');
+      box.innerHTML =
+        '<span class="verdict ' + esc(c.verdict) + '">' + esc(label) + '</span>' +
+        '<span style="color:var(--muted)">Convergence reading (heuristic — look at the plot)</span>' +
+        (stats.length ? '<div class="stats">' + stats.join('') + '</div>' : '') +
+        (c.reasons && c.reasons.length ? '<ul>' + c.reasons.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '');
+
+      const est = document.getElementById('estimators');
+      if (c.estimators && c.estimators.length) {
+        const ref = c.estimators.find(e => e.name === 'combined') || c.estimators[c.estimators.length - 1];
+        est.innerHTML = '<div class="conv-h">k-eff estimators</div><table><thead><tr><th>Estimator</th><th>k</th><th>σ</th><th>vs combined</th></tr></thead><tbody>' +
+          c.estimators.map(e => {
+            const d = ref && ref !== e ? (e.mean - ref.mean) : 0;
+            const sig = ref && ref !== e && (e.std || ref.std) ? Math.abs(d) / Math.sqrt(e.std * e.std + ref.std * ref.std) : null;
+            return '<tr><td>' + esc(e.name) + '</td><td>' + e.mean.toFixed(5) + '</td><td>' + (e.std ? e.std.toFixed(5) : '—') +
+              '</td><td class="spread">' + (sig == null ? '' : (d >= 0 ? '+' : '−') + Math.abs(d).toFixed(5) + ' (' + sig.toFixed(1) + 'σ)') + '</td></tr>';
+          }).join('') + '</tbody></table>' +
+          '<div class="conv-h">Estimators that disagree by more than ~2σ usually mean the fission source had not converged when the active cycles began.</div>';
+      } else est.innerHTML = '';
     }
 
     function buildSpecPlot(host, spectra) {
@@ -328,13 +407,18 @@ export class ResultsPanel {
         const f = r.keff.final;
         kb.textContent = 'k-eff = ' + f.mean.toFixed(5) + (f.std ? ' ± ' + f.std.toFixed(5) : '');
       } else kb.textContent = '';
+      renderConvergence(r);
       buildKeffPlot(document.getElementById('keffChart'), r.keff);
+      buildEntropyPlot(document.getElementById('entropyChart'), r.keff);
       buildSpecPlot(document.getElementById('specChart'), r.spectra || []);
 
       const tb = document.getElementById('tallyBody');
       tb.innerHTML = (r.tallies || []).map((t, i) => {
+        const detail = t.checkDetail || [];
         const tag = t.checks && t.checks !== 'unknown'
-          ? '<span class="tag ' + t.checks + '" title="' + esc(t.note || '') + '">' + t.checks + '</span>' : '';
+          ? '<span class="tag ' + t.checks + '" title="' + esc(t.note || '') + '">' + t.checks + '</span>' +
+            (detail.length ? ' <span class="expand" data-checks="' + i + '">10 checks ▾</span>' : '')
+          : '';
         const bins = t.bins || [];
         const head =
           '<tr><td>' + esc(t.id) + '</td><td>' + esc(t.label) +
@@ -342,14 +426,28 @@ export class ResultsPanel {
           (t.fom != null && isFinite(t.fom) ? ' <span class="chip">FOM ' + fmt(t.fom) + '</span>' : '') +
           '</td><td>' + fmt(t.value) + '</td><td>' + (t.error != null ? t.error.toExponential(2) : '—') +
           '</td><td>' + tag + '</td></tr>';
+        const checkRow = detail.length
+          ? '<tr class="checks" data-checks-row="' + i + '" style="display:none"><td colspan="5"><div class="checks"><table><thead><tr><th>Check</th><th>Desired</th><th>Observed</th><th></th></tr></thead><tbody>' +
+            detail.map(d => '<tr><td>' + esc(d.name) + '</td><td>' + esc(d.desired) + '</td><td>' + esc(d.observed) + '</td><td class="' + (d.passed ? 'ok' : 'no') + '">' + (d.passed ? 'passed' : 'FAILED') + '</td></tr>').join('') +
+            '</tbody></table></div></td></tr>'
+          : '';
         const rows = bins.length > 1
           ? bins.map(b =>
               '<tr class="bin" data-parent="' + i + '" style="display:none"><td></td><td>' + esc(b.label) +
               '</td><td>' + fmt(b.value) + '</td><td>' +
               (b.error != null ? b.error.toExponential(2) : '—') + '</td><td></td></tr>').join('')
           : '';
-        return head + rows;
+        return head + checkRow + rows;
       }).join('');
+      tb.querySelectorAll('[data-checks]').forEach(el => {
+        el.onclick = () => {
+          const row = tb.querySelector('tr.checks[data-checks-row="' + el.dataset.checks + '"]');
+          if (!row) return;
+          const open = row.style.display !== 'none';
+          row.style.display = open ? 'none' : 'table-row';
+          el.textContent = '10 checks ' + (open ? '▾' : '▴');
+        };
+      });
       tb.querySelectorAll('[data-toggle]').forEach(el => {
         el.onclick = () => {
           const id = el.dataset.toggle;
@@ -374,6 +472,7 @@ export class ResultsPanel {
     window.addEventListener('resize', () => {
       if (keffPlot) keffPlot.setSize({ width: document.getElementById('keffChart').clientWidth, height: 260 });
       if (specPlot) specPlot.setSize({ width: document.getElementById('specChart').clientWidth, height: 260 });
+      if (entropyPlot) entropyPlot.setSize({ width: document.getElementById('entropyChart').clientWidth, height: 180 });
     });
   </script>
 </body>

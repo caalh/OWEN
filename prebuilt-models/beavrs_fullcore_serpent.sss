@@ -677,310 +677,404 @@ cell sqbr_w sqbr water (-bxp:bym)
 % ===================== ASSEMBLY LATTICES =====================
 % Per-assembly Pyrex BA clusters ported verbatim from the verified SCONE core.
 %% A16: 0 BA
-lat a16 1 0.0 0.0 17 17 1.26
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colgt    colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colgt    colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colit    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colgt    colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colgt    colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colgt    colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
-colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16   colf16
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a16 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colgt  colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colgt  colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colit  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colgt  colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colgt  colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colgt  colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 colf16 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A24: 0 BA
-lat a24 1 0.0 0.0 17 17 1.26
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colgt    colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colgt    colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colit    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colgt    colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colgt    colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a24 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colgt  colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colgt  colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colit  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colgt  colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colgt  colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31: 0 BA
-lat a31 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colit    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colit  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A24_BA12: 12 BA
-lat a24ba12 1 0.0 0.0 17 17 1.26
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colgt    colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colba    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colba    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colit    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colba    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colba    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colgt    colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a24ba12 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colgt  colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colba  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colba  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colit  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colba  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colba  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colgt  colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A24_BA16: 16 BA
-lat a24ba16 1 0.0 0.0 17 17 1.26
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colba    colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colba    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colba    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colba    colf24   colf24   colgt    colf24   colf24   colit    colf24   colf24   colgt    colf24   colf24   colba    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colba    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colgt    colf24   colf24   colba    colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colba    colf24   colf24   colba    colf24   colf24   colba    colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
-colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24   colf24
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a24ba16 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colba  colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colba  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colba  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colba  colf24 colf24 colgt  colf24 colf24 colit  colf24 colf24 colgt  colf24 colf24 colba  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colba  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colgt  colf24 colf24 colba  colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colba  colf24 colf24 colba  colf24 colf24 colba  colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 colf24 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA16: 16 BA
-lat a31ba16 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colit    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31ba16 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colit  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA20: 20 BA
-lat a31ba20 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colit    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31ba20 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colit  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA6T: 6 BA
-lat a31ba6t 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colit    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31ba6t 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colit  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA6B: 6 BA
-lat a31ba6b 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colit    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31ba6b 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colit  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA6L: 6 BA
-lat a31ba6l 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colit    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31ba6l 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colit  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA6R: 6 BA
-lat a31ba6r 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colit    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31ba6r 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colit  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA15BR: 15 BA
-lat a31b15br 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colit    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31b15br 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colit  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA15BL: 15 BA
-lat a31b15bl 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colit    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31b15bl 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colit  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA15TR: 15 BA
-lat a31b15tr 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colit    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colgt    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31b15tr 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colit  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colgt  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 %% A31_BA15TL: 15 BA
-lat a31b15tl 1 0.0 0.0 17 17 1.26
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colgt    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colit    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colgt    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colgt    colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colba    colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
-colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31   colf31
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+% 19x19: a ring of water pins covers the 0.043 cm strip between the 17-pin array
+% (17 x 1.26 = 21.42 cm) and the 21.50364 cm assembly pitch, as MCNP/SCONE do.
+lat a31b15tl 1 0.0 0.0 19 19 1.26
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colba  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colit  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colgt  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 colba  colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colgt  colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 colf31 pw
+pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw     pw
 
 % ===================== CORE LATTICE =====================
-lat core 1 0.0 0.0 17 17 21.50364
-pw       pw       pw       pw       sqbr     baft     baft     baft     baft     baft     baft     baft     sqbl     pw       pw       pw       pw
-pw       pw       sqbr     baft     bafbr    a31      a31ba6b  a31      a31ba6b  a31      a31ba6b  a31      bafbl    baft     sqbl     pw       pw
-pw       sqbr     bafbr    a31      a31      a31ba16  a16      a31ba20  a16      a31ba20  a16      a31ba16  a31      a31      bafbl    sqbl     pw
-pw       bafl     a31      a31b15tl a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a31b15tr a31      bafr     pw
-sqbr     bafbr    a31      a24ba16  a24      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba16  a24      a24ba16  a31      bafbl    sqbl
-bafl     a31      a31ba16  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba16  a31      bafr
-bafl     a31ba6r  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba6l  bafr
-bafl     a31      a31ba20  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a31ba20  a31      bafr
-bafl     a31ba6r  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba6l  bafr
-bafl     a31      a31ba20  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a31ba20  a31      bafr
-bafl     a31ba6r  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba6l  bafr
-bafl     a31      a31ba16  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba16  a31      bafr
-sqtr     baftr    a31      a24ba16  a24      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba16  a24      a24ba16  a31      baftl    sqtl
-pw       bafl     a31      a31b15bl a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a31b15br a31      bafr     pw
-pw       sqtr     baftr    a31      a31      a31ba16  a16      a31ba20  a16      a31ba20  a16      a31ba16  a31      a31      baftl    sqtl     pw
-pw       pw       sqtr     bafb     baftr    a31      a31ba6t  a31      a31ba6t  a31      a31ba6t  a31      baftl    bafb     sqtl     pw       pw
-pw       pw       pw       pw       sqtr     bafb     bafb     bafb     bafb     bafb     bafb     bafb     sqtl     pw       pw       pw       pw
+% Rows below are listed bottom (minimum y) first: Serpent reads the first Nx
+% entries as the lowest row (input manual, lat card) - the picture upside down.
+lat core 1 0.0 0.0 19 19 21.50364
+pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw
+pw       pw       pw       pw       pw       sqtr     bafb     bafb     bafb     bafb     bafb     bafb     bafb     sqtl     pw       pw       pw       pw       pw
+pw       pw       pw       sqtr     bafb     baftr    a31      a31ba6t  a31      a31ba6t  a31      a31ba6t  a31      baftl    bafb     sqtl     pw       pw       pw
+pw       pw       sqtr     baftr    a31      a31      a31ba16  a16      a31ba20  a16      a31ba20  a16      a31ba16  a31      a31      baftl    sqtl     pw       pw
+pw       pw       bafl     a31      a31b15bl a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a31b15br a31      bafr     pw       pw
+pw       sqtr     baftr    a31      a24ba16  a24      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba16  a24      a24ba16  a31      baftl    sqtl     pw
+pw       bafl     a31      a31ba16  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba16  a31      bafr     pw
+pw       bafl     a31ba6r  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba6l  bafr     pw
+pw       bafl     a31      a31ba20  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a31ba20  a31      bafr     pw
+pw       bafl     a31ba6r  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba6l  bafr     pw
+pw       bafl     a31      a31ba20  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a31ba20  a31      bafr     pw
+pw       bafl     a31ba6r  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba6l  bafr     pw
+pw       bafl     a31      a31ba16  a16      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba12  a16      a24ba16  a16      a31ba16  a31      bafr     pw
+pw       sqbr     bafbr    a31      a24ba16  a24      a24ba16  a16      a24ba12  a16      a24ba12  a16      a24ba16  a24      a24ba16  a31      bafbl    sqbl     pw
+pw       pw       bafl     a31      a31b15tl a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a16      a24ba16  a31b15tr a31      bafr     pw       pw
+pw       pw       sqbr     bafbr    a31      a31      a31ba16  a16      a31ba20  a16      a31ba20  a16      a31ba16  a31      a31      bafbl    sqbl     pw       pw
+pw       pw       pw       sqbr     baft     bafbr    a31      a31ba6b  a31      a31ba6b  a31      a31ba6b  a31      bafbl    baft     sqbl     pw       pw       pw
+pw       pw       pw       pw       pw       sqbr     baft     baft     baft     baft     baft     baft     baft     sqbl     pw       pw       pw       pw       pw
+pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw       pw
 
 % ===================== GEOMETRY CELLS =====================
 surf sCB1  cyl 0.0 0.0 187.96     % core barrel inner

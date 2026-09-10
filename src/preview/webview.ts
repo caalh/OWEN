@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
+import { deckSourceOf } from '../util/deckSource';
+import { vendorUri } from '../util/vendor';
 import { buildScene, CylinderSpec } from './extractor';
 import { GeometryScene, FidelityOptions } from './types';
 import { distance3, deltas, angleDeg, diameter, fmtLen } from './measure';
@@ -14,6 +16,7 @@ import {
     SliceAxis, SliceJob, SliceRequest,
 } from './slice';
 import { mcnpMaterialLookup } from './codes/mcnp';
+import { OPENMC_PLACEHOLDER_WARNING } from './codes/openmc';
 import { componentColor, materialColor } from './palette';
 
 /**
@@ -49,6 +52,8 @@ let sliceCache: { text: string; language: string; model: McnpGeometryModel | nul
 let lastOpenmcModel: McnpGeometryModel | null = null;
 let lastOpenmcXml = '';
 let openmcExportGen = 0;
+/** Stand-in scene parked while the live export runs (see holdPlaceholderPendingExport). */
+let openmcPlaceholder: GeometryScene | null = null;
 
 function sliceModelFor(text: string, language: string): McnpGeometryModel | null {
     if (language === 'openmc' && lastOpenmcModel && text === lastText) {
@@ -341,7 +346,34 @@ function rebuildScene(): void {
         return;
     }
     lastScene = buildScene(lastText, lastLanguage, withConfig(fidelity));
+    holdPlaceholderPendingExport();
     postScene();
+}
+
+/**
+ * A deck whose geometry only exists once the Python runs gets a stand-in pin
+ * from the text parser. When the live export is already on its way, that pin
+ * is worse than an empty stage: it looks like OWEN read the deck and drew the
+ * wrong thing. Park it instead, and put it back if the export fails.
+ */
+function holdPlaceholderPendingExport(): void {
+    if (!lastScene || lastLanguage !== 'openmc') return;
+    if (looksLikeOpenmcXml(lastText) || !lastDeckPath || !vscode.workspace.isTrusted) return;
+    if (!lastScene.warnings.includes(OPENMC_PLACEHOLDER_WARNING)) return;
+    openmcPlaceholder = lastScene;
+    lastScene = {
+        ...lastScene,
+        cylinders: [],
+        components: [],
+        materials: [],
+        axialLayers: [],
+        primitiveCount: 0,
+        warnings: lastScene.warnings.filter((w) => w !== OPENMC_PLACEHOLDER_WARNING),
+        notes: [
+            'This deck builds its geometry in Python. Reading the real model from OpenMC…',
+            ...lastScene.notes,
+        ],
+    };
 }
 
 /**
@@ -377,6 +409,7 @@ async function refreshOpenmcExact(): Promise<void> {
         lastOpenmcModel = parseOpenmcGeometryXml(lastOpenmcXml);
         sliceCache = { text, language: 'openmc', model: lastOpenmcModel };
         const hasLattice = /RectLattice|HexLattice|\.universes\b/.test(text);
+        openmcPlaceholder = null;
         if (!hasLattice) {
             lastScene = buildScene(lastOpenmcXml, 'openmc', withConfig(fidelity));
             lastScene.notes = [
@@ -398,6 +431,12 @@ async function refreshOpenmcExact(): Promise<void> {
     } catch (err) {
         if (gen !== openmcExportGen) return;
         const msg = err instanceof Error ? err.message : String(err);
+        // No live model means the stand-in pin is all there is; show it again
+        // with its own warning rather than leaving an empty stage.
+        if (openmcPlaceholder) {
+            lastScene = openmcPlaceholder;
+            openmcPlaceholder = null;
+        }
         if (lastScene) {
             lastScene.notes = [
                 `Live OpenMC model was not loaded (${msg.split('\n')[0]}). 3D is the text reconstruction; use Render with OpenMC for the native plot.`,
@@ -415,15 +454,19 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
             vscode.window.showWarningMessage('OWEN: open an input file before launching the geometry preview.');
             return;
         }
-        const language = detectMonteCarloLanguage(editor.document) ?? 'mcnp';
-        lastText = editor.document.getText();
+        // A notebook cell previews the whole notebook's model (all code cells).
+        const src = deckSourceOf(editor.document);
+        const language = src?.language ?? detectMonteCarloLanguage(editor.document) ?? 'mcnp';
+        lastText = src?.text ?? editor.document.getText();
         lastLanguage = language;
-        lastDeckPath = editor.document.uri.scheme === 'file' ? editor.document.uri.fsPath : '';
+        lastDeckPath = !src?.fromNotebook && editor.document.uri.scheme === 'file' ? editor.document.uri.fsPath : '';
         lastOpenmcModel = null;
         lastOpenmcXml = '';
         openmcExportGen++;
+        openmcPlaceholder = null;
         fidelity = { detail: 'auto', axial: false };
         lastScene = buildScene(lastText, language, withConfig(fidelity));
+        holdPlaceholderPendingExport();
 
         if (currentPanel) {
             currentPanel.reveal(vscode.ViewColumn.Beside);
@@ -459,7 +502,10 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
                     void handleSliceSavePng(msg);
                 }
             }, null, context.subscriptions);
-            currentPanel.webview.html = buildHtml(currentPanel.webview);
+            currentPanel.webview.html = buildHtml(
+                currentPanel.webview,
+                vendorUri(currentPanel.webview, context.extensionUri, 'three'),
+            );
         }
 
         // When the panel already exists the webview listener is live, so send now;
@@ -469,7 +515,9 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
         void refreshOpenmcExact();
 
         const n = lastScene.primitiveCount;
-        if (n === 0) {
+        if (n === 0 && openmcPlaceholder) {
+            vscode.window.setStatusBarMessage('OWEN: reading this deck\'s geometry from OpenMC…', 6000);
+        } else if (n === 0) {
             const why = lastScene.warnings[0] ?? `No geometry could be extracted from this ${language} deck.`;
             vscode.window.showWarningMessage(`OWEN: ${why}`);
         } else {
@@ -482,18 +530,23 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
 }
 
 /** Exported for the test that parses the injected script (see webviewHtml.test.ts). */
-export function buildPreviewHtml(webview: vscode.Webview): string {
-    return buildHtml(webview);
+export function buildPreviewHtml(webview: vscode.Webview, threeBase = 'vscode-resource:/media/vendor/three'): string {
+    return buildHtml(webview, threeBase);
 }
 
-function buildHtml(webview: vscode.Webview): string {
+/**
+ * @param threeBase webview URI of `media/vendor/three` — three.js and its
+ *   addons ship inside the VSIX (see `scripts/vendor-webview-libs.mjs`), so the
+ *   preview needs no network. The import map below points there.
+ */
+function buildHtml(webview: vscode.Webview, threeBase: string): string {
     const cspSource = webview.cspSource;
     const nonce = makeNonce();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' https://unpkg.com; connect-src https://unpkg.com;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${cspSource}; connect-src ${cspSource};">
 <title>OWEN: 3D Geometry Preview</title>
 <style nonce="${nonce}">
   :root { --panel-bg: rgba(17, 24, 38, 0.92); --accent: #89b4fa; }
@@ -675,6 +728,12 @@ function buildHtml(webview: vscode.Webview): string {
         <div id="materials" style="display:none"></div>
       </div>
 
+      <div class="section" id="overlaySection" style="display:none">
+        <div class="title"><span>Sources &amp; Tallies</span><span id="ovCount"></span></div>
+        <div id="overlays"></div>
+        <div id="overlayList" style="font-size:11px;opacity:.75;margin-top:4px"></div>
+      </div>
+
       <div class="section" id="axialSection" style="display:none">
         <div class="title"><span>Axial Layers</span><span id="axCount"></span></div>
         <div class="btnrow">
@@ -743,8 +802,8 @@ function buildHtml(webview: vscode.Webview): string {
 
   <script type="importmap" nonce="${nonce}">
   { "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      "three": "${threeBase}/three.module.min.js",
+      "three/addons/": "${threeBase}/addons/"
   } }
   </script>
   <script type="module" nonce="${nonce}">
@@ -804,6 +863,38 @@ function buildHtml(webview: vscode.Webview): string {
 
     function bucket(o) { return Math.round(Math.min(o, 0.85) * 20) / 20; }
 
+    // innerRadius used to only flip CylinderGeometry to openEnded — a paper-
+    // thin outer tube, so IFE salt blankets rendered as end-cap disks plus a
+    // wireframe cage. Extrude a real ring; Lathe a real spherical shell.
+    function annularCylinderGeometry(outerR, innerR, h, segs) {
+      const ri = innerR > 0.0001 ? Math.max(0.01, Math.min(innerR, outerR - 0.01)) : 0;
+      if (ri <= 0) return new THREE.CylinderGeometry(outerR, outerR, h, segs, 1, false);
+      const s = new THREE.Shape();
+      s.absarc(0, 0, outerR, 0, Math.PI * 2, false);
+      const hole = new THREE.Path();
+      hole.absarc(0, 0, ri, 0, Math.PI * 2, true);
+      s.holes.push(hole);
+      const geo = new THREE.ExtrudeGeometry(s, { depth: h, bevelEnabled: false, curveSegments: Math.max(24, segs) });
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(0, -h / 2, 0);
+      return geo;
+    }
+    function sphericalShellGeometry(outerR, innerR, segsW, segsH) {
+      const ri = innerR > 0.0001 ? Math.max(0.01, Math.min(innerR, outerR - 0.01)) : 0;
+      if (ri <= 0) return new THREE.SphereGeometry(outerR, segsW, segsH);
+      const pts = [];
+      const n = Math.max(12, segsH);
+      for (let i = 0; i <= n; i++) {
+        const th = Math.PI * i / n;
+        pts.push(new THREE.Vector2(Math.max(1e-6, outerR * Math.sin(th)), outerR * Math.cos(th)));
+      }
+      for (let i = n; i >= 0; i--) {
+        const th = Math.PI * i / n;
+        pts.push(new THREE.Vector2(Math.max(1e-6, ri * Math.sin(th)), ri * Math.cos(th)));
+      }
+      return new THREE.LatheGeometry(pts, segsW);
+    }
+
     function render(sc) {
       disposeAll();
       const cyls = (sc && Array.isArray(sc.cylinders)) ? sc.cylinders : [];
@@ -829,8 +920,11 @@ function buildHtml(webview: vscode.Webview): string {
         const op = (typeof c.opacity === 'number') ? c.opacity : 1;
         const known = ['box', 'arc', 'sphere', 'cone', 'torus', 'ellipsoid', 'ellcyl', 'polyhedron'];
         const shape = known.indexOf(c.shape) >= 0 ? c.shape : 'cyl';
-        // A hollow shell has to be see-through or it hides whatever it contains.
-        const solid = (shape === 'cyl' || shape === 'sphere') ? (inner <= 0.0001 && op >= 0.9) : op >= 0.9;
+        // Thick annular volumes (IFE salt, vessels) are solids. Thin tubes
+        // (PWR clad) stay translucent so the shell-opacity slider still works.
+        const wall = Math.max(0, r - inner);
+        const volume = inner > 0.0001 && wall >= 2;
+        const solid = (inner <= 0.0001 && op >= 0.9) || volume;
         const segs = r > 8 ? 64 : 18;
         const axis = c.axis === 'x' || c.axis === 'y' ? c.axis : 'z';
         // Rectangular boxes (baffle plates) carry their own half-sizes; square
@@ -847,7 +941,7 @@ function buildHtml(webview: vscode.Webview): string {
         } else if (shape === 'arc') {
           key = 'arc|' + (solid ? 'S' : 'T') + '|' + inner.toFixed(3) + '|' + r.toFixed(3) + '|' + arcLen.toFixed(2) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op));
         } else if (shape === 'sphere') {
-          key = 'sph|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + (solid ? '1' : bucket(op));
+          key = 'sph|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + inner.toFixed(4) + '|' + (solid ? '1' : bucket(op));
         } else if (shape === 'cone') {
           key = 'cone|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + topR.toFixed(4) + '|' + h.toFixed(3) + '|' + axis + '|' + (solid ? '1' : bucket(op));
         } else if (shape === 'torus') {
@@ -859,7 +953,7 @@ function buildHtml(webview: vscode.Webview): string {
         } else if (shape === 'polyhedron') {
           key = 'poly|' + (polySeq++); // unique: arbitrary vertex data can't instance
         } else {
-          key = 'cyl|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op)) + '|' + segs;
+          key = 'cyl|' + (solid ? 'S' : 'T') + '|' + r.toFixed(4) + '|' + inner.toFixed(4) + '|' + h.toFixed(3) + '|' + (solid ? '1' : bucket(op)) + '|' + segs;
         }
         if (!byKey.has(key)) byKey.set(key, { solid, r, h, shape, segs, op, hx, hy, hz, inner, arcLen, topR, tube, axis, items: [] });
         byKey.get(key).items.push(c);
@@ -906,7 +1000,7 @@ function buildHtml(webview: vscode.Webview): string {
           geo.rotateX(Math.PI / 2);
           geo.translate(0, grp.h / 2, 0);
         } else if (grp.shape === 'sphere') {
-          geo = new THREE.SphereGeometry(grp.r, grp.r > 8 ? 48 : 28, grp.r > 8 ? 32 : 18);
+          geo = sphericalShellGeometry(grp.r, grp.inner, grp.r > 8 ? 48 : 28, grp.r > 8 ? 32 : 18);
         } else if (grp.shape === 'cone') {
           // three.js CylinderGeometry(top, bottom, h): top at +Y. Our deck
           // convention: base radius at the low end of the axis.
@@ -943,7 +1037,7 @@ function buildHtml(webview: vscode.Webview): string {
           geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
           geo.computeVertexNormals();
         } else {
-          geo = new THREE.CylinderGeometry(grp.r, grp.r, grp.h, grp.segs, 1, !grp.solid);
+          geo = bakeAxialRot(annularCylinderGeometry(grp.r, grp.inner, grp.h, grp.segs));
         }
         const mat = new THREE.MeshStandardMaterial({
           color: 0xffffff, roughness: 0.55, metalness: 0.05,
@@ -951,7 +1045,7 @@ function buildHtml(webview: vscode.Webview): string {
           opacity: grp.solid ? 1 : Math.min(grp.op, shellOpacity),
           // Polyhedron winding is not guaranteed by the CSG clipper — render
           // both sides so no face can vanish.
-          side: (grp.solid && grp.shape !== 'polyhedron') ? THREE.FrontSide : THREE.DoubleSide,
+          side: (grp.solid && grp.shape !== 'polyhedron' && !(grp.inner > 0.0001)) ? THREE.FrontSide : THREE.DoubleSide,
           depthWrite: grp.solid,
           clippingPlanes: [],
         });
@@ -1005,10 +1099,89 @@ function buildHtml(webview: vscode.Webview): string {
       totalInstances = groups.reduce((n, g) => n + g.instances.length, 0);
       clearMeasurements();   // stale geometry — drop any prior measurements/labels
       setHover(null);
-      applyVisibility();
-      applyClipping();
       buildPanel(sc);
       resetView();
+      buildDeckOverlays(sc);
+      applyVisibility();
+      applyClipping();
+    }
+
+    // --- Source / tally overlays (ksrc, sdef pos, fmesh, stats.Point, det …) ---
+    // Drawn unclipped so a slice never hides where the source is; sized from
+    // the scene so a point reads as a marker on a pin cell and on a full core.
+    const deckOverlay = new THREE.Group();
+    scene.add(deckOverlay);
+    let ovEnabled = {};
+    const OV_COLOR = { source: 0xf2a33c, tally: 0x38bdf8 };
+    const OV_LABEL = { source: 'Source points / boxes', tally: 'Tally meshes' };
+    function toWorld(x, y, z) { return new THREE.Vector3(x, z, y); }
+    function fmtPt(x, y, z) { return '(' + [x, y, z].map((v) => Number(v.toPrecision(5))).join(', ') + ')'; }
+    function boxLines(o, color) {
+      const lo = [Math.min(o.x, o.x2), Math.min(o.y, o.y2), Math.min(o.z, o.z2)];
+      const hi = [Math.max(o.x, o.x2), Math.max(o.y, o.y2), Math.max(o.z, o.z2)];
+      const pts = [];
+      const P = (x, y, z) => toWorld(x, y, z);
+      const edge = (a, b) => { pts.push(a, b); };
+      const c = (i, j, k) => P(i ? hi[0] : lo[0], j ? hi[1] : lo[1], k ? hi[2] : lo[2]);
+      for (const j of [0, 1]) for (const k of [0, 1]) edge(c(0, j, k), c(1, j, k));
+      for (const i of [0, 1]) for (const k of [0, 1]) edge(c(i, 0, k), c(i, 1, k));
+      for (const i of [0, 1]) for (const j of [0, 1]) edge(c(i, j, 0), c(i, j, 1));
+      // Mesh divisions on the bottom and top faces when there are few enough to read.
+      const nx = o.nx || 1, ny = o.ny || 1;
+      if (o.group === 'tally' && nx <= 60 && ny <= 60) {
+        for (const zf of [lo[2], hi[2]]) {
+          for (let i = 1; i < nx; i++) { const x = lo[0] + (hi[0] - lo[0]) * i / nx; edge(P(x, lo[1], zf), P(x, hi[1], zf)); }
+          for (let j = 1; j < ny; j++) { const y = lo[1] + (hi[1] - lo[1]) * j / ny; edge(P(lo[0], y, zf), P(hi[0], y, zf)); }
+        }
+      }
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      const m = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false }));
+      m.renderOrder = 997;
+      return m;
+    }
+    function buildDeckOverlays(sc) {
+      while (deckOverlay.children.length) {
+        const ch = deckOverlay.children.pop();
+        if (ch.geometry) ch.geometry.dispose();
+        if (ch.material) ch.material.dispose();
+      }
+      const items = Array.isArray(sc.overlays) ? sc.overlays : [];
+      const section = document.getElementById('overlaySection');
+      section.style.display = items.length ? 'block' : 'none';
+      document.getElementById('ovCount').textContent = items.length ? String(items.length) : '';
+      const counts = { source: 0, tally: 0 };
+      const listEl = document.getElementById('overlayList');
+      listEl.innerHTML = '';
+      for (const o of items) {
+        counts[o.group] = (counts[o.group] || 0) + 1;
+        const color = OV_COLOR[o.group] || 0xffffff;
+        let obj;
+        if (o.kind === 'point') {
+          obj = new THREE.Mesh(
+            new THREE.SphereGeometry(Math.max(markerRadius() * 1.4, 0.05), 14, 14),
+            new THREE.MeshBasicMaterial({ color, depthTest: false }));
+          obj.position.copy(toWorld(o.x, o.y, o.z));
+          obj.renderOrder = 1001;
+        } else {
+          obj = boxLines(o, color);
+        }
+        obj.userData.ovGroup = o.group;
+        deckOverlay.add(obj);
+        const row = document.createElement('div');
+        row.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#' + color.toString(16).padStart(6, '0') + ';margin-right:6px"></span>' +
+          escHtml(o.label) + ' ' + (o.kind === 'point'
+            ? fmtPt(o.x, o.y, o.z)
+            : fmtPt(o.x, o.y, o.z) + ' → ' + fmtPt(o.x2, o.y2, o.z2) + (o.nx ? ' · ' + [o.nx, o.ny, o.nz].join('×') : ''));
+        listEl.appendChild(row);
+      }
+      ovEnabled = {};
+      const rows = [];
+      for (const g of ['source', 'tally']) {
+        if (!counts[g]) continue;
+        ovEnabled[g] = true;
+        rows.push({ id: g, label: OV_LABEL[g], color: '#' + OV_COLOR[g].toString(16).padStart(6, '0'), count: counts[g] });
+      }
+      renderRows('overlays', rows, (it) => it.id, ovEnabled, false);
     }
 
     // Single source of truth for "is this instance currently shown" — used by
@@ -1035,6 +1208,7 @@ function buildHtml(webview: vscode.Webview): string {
         });
         if (changed) g.mesh.instanceMatrix.needsUpdate = true;
       }
+      for (const ch of deckOverlay.children) ch.visible = ovEnabled[ch.userData.ovGroup] !== false;
     }
 
     function applyOpacity() {

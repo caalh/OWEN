@@ -5,8 +5,13 @@ import { parseOpenmcFile, parseOpenmcStatepoint } from './parsers/openmc';
 import { parseSerpentResults } from './parsers/serpent';
 import { parseSconeOutput } from './parsers/scone';
 import { identifyOutput } from './detectOutputs';
+import { attachConvergence } from './convergence';
 
 export async function parseOutput(detected: DetectedOutput): Promise<RunResults> {
+    return attachConvergence(await parseOutputRaw(detected));
+}
+
+async function parseOutputRaw(detected: DetectedOutput): Promise<RunResults> {
     if (detected.kind === 'statepoint') return parseOpenmcStatepoint(detected.path);
     switch (detected.code) {
         case 'openmc':
@@ -31,15 +36,17 @@ export async function parseOutputFile(filePath: string): Promise<RunResults> {
     if (id) {
         return parseOutput({ path: filePath, code: id.code, kind: id.kind, label: id.label });
     }
-    if (/\.h5$/i.test(filePath)) return parseOpenmcStatepoint(filePath);
+    if (/\.h5$/i.test(filePath)) return attachConvergence(await parseOpenmcStatepoint(filePath));
     const text = fs.readFileSync(filePath, 'utf8');
     const res = parseMcnpText(text, filePath);
     res.notes = [
         'OWEN could not identify this file as MCNP, OpenMC, Serpent or SCONE output.',
         ...(res.notes ?? []),
     ];
-    return res;
+    return attachConvergence(res);
 }
+
+export { assessConvergence, attachConvergence } from './convergence';
 
 export { parseMcnpText, parseMctalFile, parseMcnpOutp, parseMctalAscii } from './parsers/mcnp';
 export { parseOpenmcFile, parseOpenmcStdout, parseOpenmcTalliesOut, parseOpenmcStatepoint } from './parsers/openmc';

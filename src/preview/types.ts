@@ -128,6 +128,31 @@ export interface AxialLayerSummary {
  * legend summaries and any parser warnings (so the UI can say *why* a deck only
  * partially rendered instead of silently drawing one pin).
  */
+/**
+ * Something drawn over the geometry that is not geometry: where the source
+ * starts particles and where tallies score. Deck coordinates (x, y, z; z is
+ * axial). A `ksrc` point sitting on a surface or outside the fuel, or an
+ * `fmesh` that misses the core, is obvious the moment it is drawn and
+ * invisible in the text.
+ */
+export interface SceneOverlay {
+    kind: 'point' | 'box';
+    group: 'source' | 'tally';
+    /** `ksrc`, `sdef pos`, `fmesh4`, `IndependentSource`, `det d1`, … */
+    label: string;
+    x: number;
+    y: number;
+    z: number;
+    /** Opposite corner, for boxes. */
+    x2?: number;
+    y2?: number;
+    z2?: number;
+    /** Mesh divisions for a tally box. */
+    nx?: number;
+    ny?: number;
+    nz?: number;
+}
+
 export interface GeometryScene {
     language: string;
     cylinders: CylinderSpec[];
@@ -136,6 +161,8 @@ export interface GeometryScene {
     /** Axial layers (z-bands) for the per-layer toggle + slice slider. Empty
      * unless the scene was expanded with axial detail. */
     axialLayers: AxialLayerSummary[];
+    /** Source points/boxes and tally meshes read from the deck's data cards. */
+    overlays: SceneOverlay[];
     warnings: string[];
     notes: string[];
     primitiveCount: number;
@@ -211,6 +238,7 @@ export const Component = {
     EndPlug: 'end_plug',
     Reflector: 'reflector',
     Vessel: 'vessel',
+    Void: 'void',
     Other: 'other',
 } as const;
 
@@ -232,5 +260,6 @@ export const COMPONENT_LABELS: Readonly<Record<string, string>> = {
     end_plug: 'End Plugs / Nozzles',
     reflector: 'Reflector',
     vessel: 'Vessel / Barrel',
+    void: 'Void / Cavity',
     other: 'Other',
 };

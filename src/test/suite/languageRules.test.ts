@@ -22,6 +22,45 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
             `expected mcnp.sab-no-target diagnostic, got: ${JSON.stringify(diags.map((d) => d.code))}`);
     });
 
+    // §5.5.5: element (1,0,0) is beyond the FIRST listed surface. A lattice
+    // cell written "20 -21" with 20 the −x plane runs +i toward −x and reads
+    // its fill map mirrored. This is how the bundled BEAVRS MCNP deck shipped.
+    test('MCNP: flags a lattice cell whose first listed plane is the low one', () => {
+        const text = [
+            'title',
+            '100 0  20 -21 22 -23  lat=1 u=10 imp:n=1',
+            '     fill=-1:1 -1:1 0:0 1 1 1 1 2 1 1 1 1',
+            '',
+            '20 px -0.63',
+            '21 px 0.63',
+            '22 py -0.63',
+            '23 py 0.63',
+            '',
+            'mode n',
+        ].join('\n');
+        const diags = runLanguageRules('mcnp', text).filter((d) => d.code === 'mcnp.lattice-index-direction');
+        assert.strictEqual(diags.length, 1);
+        assert.ok(/i and j/.test(diags[0].message), diags[0].message);
+        assert.ok(/-21 20 -23 22/.test(diags[0].message), 'suggests listing the high planes first');
+        assert.strictEqual(diags[0].severity, 'warning');
+    });
+
+    test('MCNP: a lattice cell listing the high planes first is quiet', () => {
+        const text = [
+            'title',
+            '100 0  -21 20 -23 22  lat=1 u=10 imp:n=1',
+            '     fill=-1:1 -1:1 0:0 1 1 1 1 2 1 1 1 1',
+            '',
+            '20 px -0.63',
+            '21 px 0.63',
+            '22 py -0.63',
+            '23 py 0.63',
+            '',
+            'mode n',
+        ].join('\n');
+        assert.strictEqual(runLanguageRules('mcnp', text).filter((d) => d.code === 'mcnp.lattice-index-direction').length, 0);
+    });
+
     test('MCNP: accepts S(α,β) on water', () => {
         const text = [
             'm3   1001.80c 2.0  8016.80c 1.0',
@@ -79,6 +118,30 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
     test('MCNP: flags mixed fraction signs in a material', () => {
         const diags = runLanguageRules('mcnp', 'm1 92235.80c 0.04 92238.80c -0.96');
         assert.ok(diags.some((d) => d.code === 'mcnp.material-sign'));
+    });
+
+    test('MCNP: m0 NLIB= plus bare ZAID weight fractions is not mixed-sign', () => {
+        // MCNP §5.6.1: M0 sets default library identifiers; fully specified
+        // ZAIDs on Mm override. Bare 5010 with all-negative fractions is a
+        // weight-fraction B4C card, not a mix of atom and weight.
+        const text = [
+            'm0      NLIB=.81c',
+            'm1      5010 -0.144221 B-10',
+            '        5011 -0.638271 B-11',
+            '        6012 -0.214917 C-12',
+            '        6013 -0.00241235 C-13',
+        ].join('\n');
+        const diags = runLanguageRules('mcnp', text);
+        assert.ok(!diags.some((d) => d.code === 'mcnp.material-sign'),
+            `false mixed-sign: ${JSON.stringify(diags.map((d) => ({ code: d.code, msg: d.message })))}`);
+        assert.ok(!diags.some((d) => d.code === 'mcnp.zaid'),
+            `bare ZAID must not be flagged when NLIB supplies the suffix: ${JSON.stringify(diags.map((d) => d.code))}`);
+    });
+
+    test('MCNP: nlib= on the material card itself is not a positive fraction', () => {
+        const diags = runLanguageRules('mcnp', 'm201 40090 -0.505239 40091 -0.110180 nlib=80c');
+        assert.ok(!diags.some((d) => d.code === 'mcnp.material-sign'),
+            `nlib= was read as a fraction: ${JSON.stringify(diags.map((d) => d.code))}`);
     });
 
     test('MCNP: flags card images past the column limit (tab-aware)', () => {
@@ -234,6 +297,20 @@ suite('MCNP cross-reference diagnostics', () => {
         assert.ok(unusedMat && unusedMat.message.includes('Material 7'));
         assert.ok(unusedSurf!.unnecessary && unusedMat!.unnecessary);
         assert.strictEqual(unusedSurf!.severity, 'hint');
+    });
+
+    test('M0 default-library card is not an unused-material hint', () => {
+        const diags = mcnpCrossReferenceDiagnostics([
+            '1 1 -10.4 -1 imp:n=1',
+            '2 0 1 imp:n=0',
+            '',
+            '1 cz 0.475',
+            '',
+            'm0 nlib=.81c',
+            'm1 5010 -0.2 5011 -0.8',
+        ].join('\n'));
+        assert.ok(!diags.some((d) => d.code === 'mcnp.unused-material' && /Material 0/.test(d.message)),
+            JSON.stringify(diags.filter((d) => d.code === 'mcnp.unused-material')));
     });
 
     test('undefined surface referenced by a cell is an error', () => {

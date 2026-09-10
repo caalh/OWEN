@@ -110,7 +110,7 @@ async function keffForRun(
     return { keff: scraped, keffStd: null, keffSource: scraped === null ? undefined : 'stdout' };
 }
 
-export async function runSweepFromConfig(configUri: vscode.Uri): Promise<void> {
+export async function runSweepFromConfig(configUri: vscode.Uri, extensionUri: vscode.Uri): Promise<void> {
     const cfg = vscode.workspace.getConfiguration('owen');
     let configText: string;
     try {
@@ -245,11 +245,11 @@ export async function runSweepFromConfig(configUri: vscode.Uri): Promise<void> {
     );
     if (choice === 'View Sweep Dashboard') {
         const { SweepDashboardPanel } = await import('./sweepDashboard');
-        await SweepDashboardPanel.createOrShow(outDir);
+        await SweepDashboardPanel.createOrShow(outDir, extensionUri);
     }
 }
 
-export function registerRunSweep(_context: vscode.ExtensionContext): vscode.Disposable {
+export function registerRunSweep(context: vscode.ExtensionContext): vscode.Disposable {
     return vscode.commands.registerCommand('owen.runSweep', async () => {
         const editor = vscode.window.activeTextEditor;
         const defaultUri = editor && editor.document.uri.scheme === 'file'
@@ -264,6 +264,6 @@ export function registerRunSweep(_context: vscode.ExtensionContext): vscode.Disp
         });
         if (!picks || picks.length === 0) return;
         if (!(await requireTrustedWorkspace('run a parameter sweep'))) return;
-        await runSweepFromConfig(picks[0]);
+        await runSweepFromConfig(picks[0], context.extensionUri);
     });
 }

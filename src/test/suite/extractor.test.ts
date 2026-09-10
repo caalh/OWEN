@@ -301,12 +301,16 @@ geometry {
             'mode n',
         ].join('\n');
         const scene = buildScene(deck, 'mcnp');
-        assert.strictEqual(scene.cylinders.length, 0, 'nothing renderable in this deck');
-        const all = scene.warnings.join(' | ');
-        for (const mnemonic of ['so', 'kz', 'tx', 'gq']) {
-            assert.ok(new RegExp(`\\b${mnemonic}\\b`).test(all),
-                `warning must name skipped surface '${mnemonic}' — got: ${all}`);
+        // The exact engine draws the void cell as a translucent stand-in (a
+        // cavity, never solid geometry) and says which surface it could not
+        // resolve. Nothing here may pose as real material.
+        for (const c of scene.cylinders) {
+            assert.strictEqual(c.component, 'void', `only void stand-ins may be drawn, got ${c.label} (${c.component})`);
+            assert.ok((c.opacity ?? 1) < 0.5, 'a stand-in must be translucent');
         }
+        const all = scene.warnings.join(' | ');
+        assert.ok(/cell 1/i.test(all), `warning must name the affected cell — got: ${all}`);
+        assert.ok(/cone|surface 2|kz/i.test(all), `warning must name the surface it gave up on — got: ${all}`);
     });
 
     test('partial MCNP coverage is reported through the CSG census, never silently', () => {

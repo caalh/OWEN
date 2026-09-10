@@ -18,7 +18,7 @@
 // the index columns depends on the detector card, and guessing it would invent
 // geometry.
 import * as fs from 'fs';
-import type { RunResults, KeffHistory, TallyEntry, FluxSpectrum } from '../types';
+import type { RunResults, KeffHistory, KeffEstimator, TallyEntry, FluxSpectrum } from '../types';
 
 /** One `NAME = [...]` / `NAME (idx, …) = …` assignment. */
 interface Assignment {
@@ -139,6 +139,7 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
 
     // k-eff: prefer the implicit estimate, which Serpent recommends.
     let keff: KeffHistory | undefined;
+    const estimators: KeffEstimator[] = [];
     for (const varName of KEFF_VARS) {
         const list = byName.get(varName);
         if (!list?.length) continue;
@@ -176,6 +177,13 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
                 : undefined,
             checks: 'unknown',
         });
+        if (/_KEFF$/.test(varName)) {
+            estimators.push({
+                name: varName.replace('_KEFF', '').toLowerCase(),
+                mean: mean[mean.length - 1],
+                std: std[std.length - 1],
+            });
+        }
     }
 
     // Cycle-wise history from a _his file, when that is what we were handed.
@@ -230,6 +238,10 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
     spectra.push(...det.spectra);
     notes.push(...det.notes);
 
+    // Serpent counts lost particles in _res.m as LOST_PARTICLES (older) / TOT_LOST (newer).
+    const lostVar = byName.get('LOST_PARTICLES') ?? byName.get('TOT_LOST');
+    const lostParticles = lostVar?.length ? lostVar[lostVar.length - 1].numbers[0] : undefined;
+
     return {
         code: 'serpent',
         sourceFile,
@@ -239,6 +251,14 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
         meshTallies: [],
         metadata,
         notes: notes.length ? notes : undefined,
+        convergence: estimators.length || lostParticles !== undefined
+            ? {
+                estimators: estimators.length ? estimators : undefined,
+                lostParticles: Number.isFinite(lostParticles) ? lostParticles : undefined,
+                verdict: 'unknown',
+                reasons: [],
+            }
+            : undefined,
     };
 }
 

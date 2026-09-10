@@ -18,6 +18,9 @@ import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, Fid
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import { BaffleNeighborhood, bafflePlates, emitSerpentRadialStructure } from '../radialStructure';
+import { pickRootId } from '../rootUniverse';
+import { parseSerpentGeometry } from '../serpentGeometry';
+import { buildCsgScene } from '../csgScene';
 
 /** Grid-size ceiling shared with the MCNP fill guard (5M cells ≈ full core ×20). */
 const MAX_LAT_CELLS = 5_000_000;
@@ -222,9 +225,24 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         const fp = lat.nx * lat.ny * lat.pitch * lat.pitch;
         if (fp > bestFootprint) { bestFootprint = fp; coreLat = name; }
     }
-    // If a cell in universe 0 fills a lattice, prefer that as the explicit root.
-    for (const c of cells) {
-        if (c.universe === '0' && c.fill) {
+    // If a cell in the root universe fills a lattice, prefer that as the
+    // explicit root. Root = unfilled populated universe (prefer "0"), not
+    // only the literal Serpent universe named 0.
+    const filledUnis = new Set<string>();
+    for (const c of cells) if (c.fill) filledUnis.add(c.fill);
+    for (const lat of lats.values()) {
+        for (const row of lat.grid) for (const e of row) filledUnis.add(e);
+    }
+    const populatedUnis = [...cellsByUniverse.keys()];
+    const rootUni = pickRootId(
+        populatedUnis,
+        filledUnis,
+        (id) => cellsByUniverse.get(id)?.length ?? 0,
+        '0',
+    );
+    if (rootUni) {
+        for (const c of cellsByUniverse.get(rootUni) ?? []) {
+            if (!c.fill) continue;
             const r = resolveFill(c.fill);
             if (isLat(r)) { coreLat = r; break; }
         }
@@ -259,9 +277,12 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     const cylinders: CylinderSpec[] = [];
     let capped = false;
 
-    const classifyKind = (name: string, comps: ComponentId[], mats: string[]): 'fuel' | 'guide' | 'instrument' | 'other' => {
+    const classifyKind = (name: string, comps: ComponentId[], mats: string[]): 'fuel' | 'guide' | 'instrument' | 'absorber' | 'other' => {
         const low = name.toLowerCase();
         if (comps.includes(Component.Fuel)) return 'fuel';
+        // Burnable-absorber / control rods sit in a guide tube with their own
+        // gas gap; without this test they read as instrument tubes.
+        if (comps.includes(Component.Absorber)) return 'absorber';
         const hasTube = comps.includes(Component.Clad) || comps.includes(Component.Structure);
         const innerIsAir = /air|void/i.test(mats[0] ?? '');
         if (/instr|thimble|detector/.test(low)) return 'instrument';
@@ -290,6 +311,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             let color = materialColor(matName);
             if (kind === 'guide') { comp = Component.GuideTube; color = componentColor(comp); }
             else if (kind === 'instrument') { comp = Component.InstrumentTube; color = componentColor(comp); }
+            else if (kind === 'absorber') { comp = Component.Absorber; color = componentColor(comp); }
             cylinders.push({
                 label,
                 radius: Math.min(subPitch * 0.47, Math.max(...positive.map((l) => l.r))),
@@ -348,7 +370,9 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             const hex = lat.type === 2 || lat.type === 3;
             const p = lat.pitch;
             const x0 = cx + lat.x0 - (lat.nx - 1) * lat.pitch / 2;
-            const yTop = cy + lat.y0 + (lat.ny - 1) * lat.pitch / 2;
+            // Serpent lists the bottom row first (input manual: the first Nx values
+            // are the minimum-y row), so row 0 sits at yBot and y grows with row.
+            const yBot = cy + lat.y0 - (lat.ny - 1) * lat.pitch / 2;
             const ox = cx + lat.x0;
             const oy = cy + lat.y0;
             // Assembly-like entries (nested lattices, directly or through an
@@ -367,12 +391,12 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                     if (!hex && (baffleUniverses.has(entry) || baffleUniverses.has(resolveFill(entry)))) {
                         const key = baffleUniverses.has(entry) ? entry : resolveFill(entry);
                         const bx = x0 + col * lat.pitch;
-                        const by = yTop - row * lat.pitch;
+                        const by = yBot + row * lat.pitch;
                         const nb: BaffleNeighborhood = {
                             east: isAsm(row, col + 1), west: isAsm(row, col - 1),
-                            north: isAsm(row - 1, col), south: isAsm(row + 1, col),
-                            ne: isAsm(row - 1, col + 1), nw: isAsm(row - 1, col - 1),
-                            se: isAsm(row + 1, col + 1), sw: isAsm(row + 1, col - 1),
+                            north: isAsm(row + 1, col), south: isAsm(row - 1, col),
+                            ne: isAsm(row + 1, col + 1), nw: isAsm(row + 1, col - 1),
+                            se: isAsm(row - 1, col + 1), sw: isAsm(row - 1, col - 1),
                         };
                         cylinders.push(...bafflePlates(
                             `${label}_r${row}c${col}_baffle`, bx, by,
@@ -387,7 +411,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                         // Real hex coordinates. Serpent type 2 = X-type, 3 = Y-type;
                         // both use a 60° basis, transposed between the two types.
                         const ic = col - (lat.nx - 1) / 2;
-                        const jc = (lat.ny - 1) / 2 - row;
+                        const jc = row - (lat.ny - 1) / 2;
                         if (lat.type === 2) {
                             px = ox + (ic + jc * 0.5) * p;
                             py = oy + jc * (Math.sqrt(3) / 2) * p;
@@ -397,7 +421,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                         }
                     } else {
                         px = x0 + col * lat.pitch;
-                        py = yTop - row * lat.pitch;
+                        py = yBot + row * lat.pitch;
                     }
                     placeEntry(entry, px, py, `${label}_r${row}c${col}`, depth, nextAncestors);
                 }
@@ -451,6 +475,8 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         notes.push('This deck defines axial structure (pz-bounded cell stacks). Enable "Axial segments" to expand it; the Axial slice control then cuts the stack by height.');
     }
     if (cylinders.length === 0) {
+        const csg = trySerpentCsg(text, warnings, notes);
+        if (csg) return csg;
         if (/\bsurf\b/.test(text) || /\bcell\b/.test(text)) {
             warnings.push('Could not expand any `pin`, `lat`, or `cell`/`surf` geometry into drawable cylinders. Check that pins reference `cyl` surfaces and lattices reference defined universes.');
         } else {
@@ -460,6 +486,23 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
 
     const fidelity: FidelityState = { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial };
     return { cylinders, warnings, notes, fidelity, capped };
+}
+
+function trySerpentCsg(text: string, warnings: string[], notes: string[]): ParseResult | null {
+    try {
+        const model = parseSerpentGeometry(text);
+        if (model.cells.size === 0) return null;
+        const scene = buildCsgScene(model, new Map());
+        if (scene.cylinders.length === 0) return null;
+        for (const w of model.warnings) warnings.push(w);
+        for (const w of scene.warnings) warnings.push(w);
+        for (const n of scene.notes) notes.push(n);
+        notes.push(`Exact-geometry engine: ${scene.cylinders.length} primitive(s) from ${model.cells.size} cell(s).`);
+        return { cylinders: scene.cylinders, warnings, notes };
+    } catch (err) {
+        warnings.push(`Exact-geometry engine failed (${err instanceof Error ? err.message : String(err)}).`);
+        return null;
+    }
 }
 
 /** Average positive-radius layer count across `pin` blocks (≥1), for budgeting. */
@@ -622,6 +665,11 @@ function countPins(
     let total = 0;
     for (const row of lat.grid) {
         for (const entry of row) {
+            // Test the entry itself first: an axial-stack column universe is a
+            // pin, but resolveFill would follow it to its bottom segment's
+            // fill (a water pin on BEAVRS) and lose it — which is how a
+            // 55 000-pin core counted as 193 and picked concentric layers.
+            if (isPin(entry)) { total += 1; continue; }
             const r = resolveFill(entry);
             if (lats.has(r)) total += countPins(r, lats, resolveFill, isPin, depth + 1, nextAncestors);
             else if (isPin(r)) total += 1;
