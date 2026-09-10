@@ -23,7 +23,7 @@
 //   - anything else                  → translucent bounding box (failed)
 
 import { CylinderSpec, Component, ComponentId } from './types';
-import { materialColor } from './palette';
+import { componentColor, materialColor } from './palette';
 import { csgSegmentBudget, DEFAULT_MAX_CSG_TRIANGLES } from './budget';
 import {
     McnpGeometryModel,
@@ -34,7 +34,7 @@ import {
     Transform,
     Vec3,
 } from './mcnpGeometry';
-import { Bounds, cellContains, worldBounds } from './mcnpEvaluate';
+import { Bounds, cellContains, rootUniverseId, worldBounds } from './mcnpEvaluate';
 
 export interface MaterialLookup {
     name: string;
@@ -60,6 +60,32 @@ const MAX_DNF_TERMS = 64;
 const MAX_TERM_LITERALS = 96;
 /** How many nested `#cell` substitutions to follow before giving up. */
 const MAX_COMPLEMENT_DEPTH = 8;
+/** Interior cavities are glass, not a solid fill that hides the rest. */
+const VOID_OPACITY = 0.2;
+/**
+ * A void primitive bigger than this multiple of the material envelope is the
+ * exterior (bounding sphere, world box) — drawing it zooms the camera out
+ * until the real geometry is a speck.
+ */
+const VOID_EXTERIOR_RATIO = 1.5;
+
+/** Conservative size of a drawn primitive, for void-vs-exterior filtering. */
+function specSize(s: CylinderSpec): number {
+    if (s.verts && s.verts.length >= 3) {
+        let m = 0;
+        for (let i = 0; i + 2 < s.verts.length; i += 3) {
+            m = Math.max(m, Math.hypot(s.verts[i], s.verts[i + 1], s.verts[i + 2]));
+        }
+        return m;
+    }
+    return Math.max(
+        s.radius ?? 0,
+        (s.height ?? 0) / 2,
+        s.halfX ?? 0,
+        s.halfY ?? 0,
+        s.halfZ ?? 0,
+    );
+}
 
 // ---------------------------------------------------------------------------
 // DNF conversion
@@ -938,9 +964,40 @@ export interface BuildCsgOptions {
 }
 
 /**
+ * Material cells the CSG path should mesh. Start at the unfilled root
+ * (any id — MCNP 0, OpenMC XML 1+, Serpent named universes, SCONE remapped
+ * 0) and walk uniform `fill=` / `fill="N"` / SCONE `rootUniverse fill u<N>`.
+ * Lattice fills stay on the pin fast path. Without this walk, a world that
+ * is only a fill wrapper draws zero primitives even though the nested cells
+ * parsed.
+ */
+function csgDrawableCellIds(model: McnpGeometryModel): number[] {
+    const out: number[] = [];
+    const seenUni = new Set<number>();
+    const walk = (uid: number, depth: number): void => {
+        if (depth > 16 || seenUni.has(uid)) return;
+        seenUni.add(uid);
+        for (const cellId of model.universes.get(uid) ?? []) {
+            const cell = model.cells.get(cellId);
+            if (!cell) continue;
+            if (cell.lat !== 0 || cell.fill?.grid) continue;
+            if (cell.fill && cell.fill.universe !== null) {
+                walk(cell.fill.universe, depth + 1);
+                continue;
+            }
+            out.push(cellId);
+        }
+    };
+    walk(rootUniverseId(model), 0);
+    return out;
+}
+
+/**
  * Build render primitives for material cells the fast path cannot draw.
- * Universe-0 cells only: filled/lattice cells belong to the fast path, and
- * the exterior (graveyard) is detected and never meshed.
+ * Walks from the unfilled root through uniform fills (any code). Lattice
+ * cells stay on the fast path. The exterior (graveyard / bounding sphere) is
+ * never meshed. Interior void cells are drawn as translucent cavities so the
+ * chamber outline is visible.
  */
 export function buildCsgScene(
     model: McnpGeometryModel,
@@ -975,95 +1032,113 @@ export function buildCsgScene(
         bounds.max[2] + 13 * Math.max(1, bounds.max[2] - bounds.min[2]),
     ];
 
-    const rootCells = model.universes.get(0) ?? [];
-    for (const cellId of rootCells) {
+    const drawable = csgDrawableCellIds(model).filter((id) => {
+        const cell = model.cells.get(id);
+        return !!(cell && cell.region && !opts.skipCells?.has(id) && !cell.fill && cell.lat === 0);
+    });
+    const materialIds = drawable.filter((id) => (model.cells.get(id)?.material ?? 0) !== 0);
+    const voidIds = drawable.filter((id) => (model.cells.get(id)?.material ?? 0) === 0);
+    let materialExtent = 0;
+    let budgetWarned = false;
+
+    const emitCell = (cellId: number, asVoid: boolean): void => {
         if (out.length >= maxPrims) {
-            warnings.push(`CSG primitive budget (${maxPrims}) reached; remaining cells were not drawn.`);
-            break;
+            if (!budgetWarned) {
+                warnings.push(`CSG primitive budget (${maxPrims}) reached; remaining cells were not drawn.`);
+                budgetWarned = true;
+            }
+            return;
         }
         const cell = model.cells.get(cellId);
-        if (!cell || !cell.region) continue;
-        if (opts.skipCells?.has(cellId)) continue;
-        if (cell.fill || cell.lat !== 0) continue; // fast-path territory
+        if (!cell || !cell.region) return;
         if (cellContains(model, cellId, far)) {
             notes.push(`Cell ${cellId} is the exterior/graveyard — not drawn.`);
-            continue;
+            return;
         }
 
         const matInfo = materials.get(cell.material) ?? {
-            name: cell.material === 0 ? 'void' : `m${cell.material}`,
-            component: cell.material === 0 ? Component.Other : Component.Structure,
+            name: asVoid ? 'void' : `m${cell.material}`,
+            component: asVoid ? Component.Void : Component.Structure,
         };
         const ctx: EmitCtx = {
             bounds,
-            color: materialColor(matInfo.name),
-            materialName: matInfo.name,
-            component: matInfo.component,
+            color: asVoid ? componentColor(Component.Void) : materialColor(matInfo.name),
+            materialName: asVoid ? 'void' : matInfo.name,
+            component: asVoid ? Component.Void : matInfo.component,
             label: `cell ${cellId}`,
             triCounter,
             maxTriangles,
         };
-        // Void cells are omitted from solid rendering like the fast path does
-        // with moderator-less regions — but count them, don't hide the fact.
-        if (cell.material === 0) {
-            notes.push(`Cell ${cellId} is void — not drawn (enable slices to inspect it).`);
-            continue;
-        }
 
         const dnfCtx: DnfCtx = { model, stack: new Set([cellId]) };
         const dnf = cell.region ? toDnf(cell.region, false, dnfCtx) : null;
-        if (!dnf) {
-            const em = emitFallback(newBuckets(), ctx, dnfCtx.reason ?? 'region is too complex to expand');
-            applyCellTransformToSpecs(em.spec, cell.trcl);
-            out.push(...em.spec);
-            census.failed++;
-            census.details.push(`cell ${cellId}: failed (${em.detail})`);
-            warnings.push(`Cell ${cellId}: drew a translucent bounding box — ${em.detail}.`);
-            continue;
-        }
-
         let worst: EmitStatus = 'exact';
         let worstDetail: string | undefined;
         const cellSpecs: CylinderSpec[] = [];
-        for (const term of dnf) {
-            const bk = newBuckets();
-            for (const lit of term) {
-                const surf = resolveSurface(model, lit.surface);
-                if (!surf) {
-                    bk.unsupported.push({ msg: `surface ${lit.surface} undefined`, blocking: true });
-                    continue;
-                }
-                let shape: Shape = surf.surface.shape;
-                if (lit.facet > 0) {
-                    if (shape.kind === 'body' && shape.facets[lit.facet - 1]) {
-                        shape = shape.facets[lit.facet - 1];
-                    } else {
-                        bk.unsupported.push({ msg: `facet ${lit.surface}.${lit.facet} not found`, blocking: true });
+        if (!dnf) {
+            const em = emitFallback(newBuckets(), ctx, dnfCtx.reason ?? 'region is too complex to expand');
+            applyCellTransformToSpecs(em.spec, cell.trcl);
+            cellSpecs.push(...em.spec);
+            worst = 'failed';
+            worstDetail = em.detail;
+        } else {
+            for (const term of dnf) {
+                const bk = newBuckets();
+                for (const lit of term) {
+                    const surf = resolveSurface(model, lit.surface);
+                    if (!surf) {
+                        bk.unsupported.push({ msg: `surface ${lit.surface} undefined`, blocking: true });
                         continue;
                     }
+                    let shape: Shape = surf.surface.shape;
+                    if (lit.facet > 0) {
+                        if (shape.kind === 'body' && shape.facets[lit.facet - 1]) {
+                            shape = shape.facets[lit.facet - 1];
+                        } else {
+                            bk.unsupported.push({ msg: `facet ${lit.surface}.${lit.facet} not found`, blocking: true });
+                            continue;
+                        }
+                    }
+                    bucketShape(bk, shape, lit.sense, surf.tr, `surface ${lit.surface}`);
                 }
-                bucketShape(bk, shape, lit.sense, surf.tr, `surface ${lit.surface}`);
+
+                const em =
+                    emitCylinderTerm(bk, ctx) ??
+                    emitSphereTerm(bk, ctx) ??
+                    emitConeTerm(bk, ctx) ??
+                    emitEllipsoidTerm(bk, ctx) ??
+                    emitEllCylTerm(bk, ctx) ??
+                    emitTorusTerm(bk, ctx) ??
+                    emitPolyhedronTerm(bk, ctx) ??
+                    emitFallback(bk, ctx, firstNote(bk) ?? 'mixed quadric constraints');
+                cellSpecs.push(...em.spec);
+                if (em.status === 'failed' && worst !== 'failed') { worst = 'failed'; worstDetail = em.detail; }
+                else if (em.status === 'approximated' && worst === 'exact') { worst = 'approximated'; worstDetail = em.detail; }
             }
-
-            const em =
-                emitCylinderTerm(bk, ctx) ??
-                emitSphereTerm(bk, ctx) ??
-                emitConeTerm(bk, ctx) ??
-                emitEllipsoidTerm(bk, ctx) ??
-                emitEllCylTerm(bk, ctx) ??
-                emitTorusTerm(bk, ctx) ??
-                emitPolyhedronTerm(bk, ctx) ??
-                emitFallback(bk, ctx, firstNote(bk) ?? 'mixed quadric constraints');
-            cellSpecs.push(...em.spec);
-            if (em.status === 'failed' && worst !== 'failed') { worst = 'failed'; worstDetail = em.detail; }
-            else if (em.status === 'approximated' && worst === 'exact') { worst = 'approximated'; worstDetail = em.detail; }
+            applyCellTransformToSpecs(cellSpecs, cell.trcl);
+            if (cell.trcl && cell.trcl.m && worst === 'exact') {
+                worst = 'approximated';
+                worstDetail = 'trcl rotation applied to positions only';
+            }
         }
 
-        applyCellTransformToSpecs(cellSpecs, cell.trcl);
-        if (cell.trcl && cell.trcl.m && worst === 'exact') {
-            worst = 'approximated';
-            worstDetail = 'trcl rotation applied to positions only';
+        if (asVoid) {
+            const biggest = cellSpecs.reduce((m, s) => Math.max(m, specSize(s)), 0);
+            if (materialExtent > 0 && biggest > VOID_EXTERIOR_RATIO * materialExtent) {
+                notes.push(`Cell ${cellId} is void — exterior, not drawn.`);
+                return;
+            }
+            for (const s of cellSpecs) {
+                s.opacity = VOID_OPACITY;
+                s.component = Component.Void;
+                s.material = 'void';
+                s.color = componentColor(Component.Void);
+            }
+            notes.push(`Cell ${cellId} is void — drawn as a translucent cavity.`);
+        } else {
+            for (const s of cellSpecs) materialExtent = Math.max(materialExtent, specSize(s));
         }
+
         out.push(...cellSpecs);
         if (worst === 'exact') census.exact++;
         else if (worst === 'approximated') {
@@ -1074,7 +1149,10 @@ export function buildCsgScene(
             census.details.push(`cell ${cellId}: failed (${worstDetail ?? 'unresolved constraints'})`);
             warnings.push(`Cell ${cellId}: drew a translucent bounding box — ${worstDetail ?? 'unresolved constraints'}.`);
         }
-    }
+    };
+
+    for (const id of materialIds) emitCell(id, false);
+    for (const id of voidIds) emitCell(id, true);
 
     const total = census.exact + census.approximated + census.failed;
     if (total > 0) {

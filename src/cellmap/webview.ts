@@ -4,9 +4,16 @@
 // alongside the other webview HTML tests (CSP shape, no stray CDN, script
 // nonce). Everything is self-contained: no CDN, no bundler, no images.
 //
+// Three panes. The Structure tree on the left is the fill hierarchy read top
+// down — root, what it fills, what that fills — with placement counts, which
+// is the "flow" of a deck that a flat list of 331 cells hides. The canvas in
+// the middle draws universes as boxes in depth columns with the cell cards
+// inside; edges are one SVG layer underneath. The detail pane on the right
+// shows one cell or one universe, including the path back to the root.
+//
 // Nodes are absolutely-positioned HTML so a cell card can carry real surface
-// chips you can click; edges are one SVG layer underneath. Both live in the
-// same transformed wrapper, so pan and zoom is a single CSS transform.
+// chips you can click; the canvas and its SVG share one transformed wrapper,
+// so pan and zoom is a single CSS transform.
 
 export function buildCellMapHtml(cspSource: string, nonce: string): string {
     const csp = [
@@ -31,6 +38,8 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     --role-graveyard: #e05561;
   }
   html, body { height: 100%; margin: 0; }
+  /* Chrome (toolbar, tree, detail) stays at editor size; only the cards on
+     the canvas are set larger, because those are what you read at a glance. */
   body {
     font-family: var(--vscode-font-family);
     font-size: 12px;
@@ -43,7 +52,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   /* ---- toolbar ---- */
   #bar {
     display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px; flex: 0 0 auto;
+    padding: 5px 10px; flex: 0 0 auto;
     border-bottom: 1px solid var(--vscode-panel-border);
     background: var(--vscode-editorWidget-background);
   }
@@ -60,6 +69,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
   }
   button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground)); }
+  button.on { outline: 1px solid var(--vscode-focusBorder); }
   #stats { margin-left: auto; opacity: .7; white-space: nowrap; }
 
   /* ---- legend ---- */
@@ -69,7 +79,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
 
   /* ---- warnings ---- */
   #warn {
-    flex: 0 0 auto; display: none; padding: 6px 10px; max-height: 116px; overflow: auto;
+    flex: 0 0 auto; display: none; padding: 6px 10px; max-height: 96px; overflow: auto;
     border-bottom: 1px solid var(--vscode-panel-border);
     background: var(--vscode-inputValidation-warningBackground, rgba(255,190,60,.12));
     color: var(--vscode-inputValidation-warningForeground, inherit);
@@ -83,6 +93,29 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
   #edges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
 
+  /* ---- structure tree ---- */
+  #tree {
+    flex: 0 0 272px; overflow: auto; padding: 6px 4px 12px 6px;
+    border-right: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
+    user-select: none;
+  }
+  #tree.hidden { display: none; }
+  #tree h3 { margin: 4px 6px 6px; font-size: 11px; text-transform: uppercase; opacity: .6; letter-spacing: .04em; }
+  .tn { display: flex; align-items: baseline; gap: 4px; padding: 2px 4px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+  .tn:hover { background: var(--vscode-list-hoverBackground); }
+  .tn.cur { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  .tn .tw { width: 12px; flex: 0 0 auto; opacity: .6; text-align: center; }
+  .tn .tw.leaf { opacity: 0; }
+  .tn .tu { font-weight: 600; }
+  .tn .tk { opacity: .6; font-size: 11px; }
+  .tn .tx { opacity: .8; }
+  .tn .tx b { font-weight: 600; color: var(--role-lattice); }
+  .tn .tref { opacity: .55; font-style: italic; }
+  .tn .tbar { display: inline-block; width: 3px; height: 10px; border-radius: 1px; flex: 0 0 auto; align-self: center; }
+  .tkids { margin-left: 14px; border-left: 1px dotted var(--vscode-panel-border); padding-left: 2px; }
+  .tn.orphan .tu { color: var(--role-graveyard); }
+
   /* ---- universe container ---- */
   .uni {
     position: absolute; box-sizing: border-box;
@@ -92,37 +125,47 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   }
   .uni.root { border-style: solid; border-width: 2px; }
   .uni.orphan { border-color: var(--role-graveyard); border-style: dashed; }
+  .uni.focus { box-shadow: 0 0 0 2px var(--vscode-focusBorder); }
   .uni > header {
-    display: flex; align-items: baseline; gap: 6px;
+    display: flex; align-items: baseline; gap: 6px; overflow: hidden;
     padding: 4px 8px; cursor: pointer; user-select: none;
-    font-weight: 600; border-radius: 7px 7px 0 0;
+    font-size: 13px; font-weight: 600; border-radius: 7px 7px 0 0;
     background: color-mix(in srgb, var(--vscode-editor-foreground) 7%, transparent);
   }
-  .uni > header .sub { font-weight: 400; opacity: .65; }
-  .uni > header .chev { margin-left: auto; opacity: .6; }
+  .uni > header .sub { font-weight: 400; opacity: .75; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .uni > header .sub b { font-weight: 600; opacity: 1; }
+  .uni > header .chev { margin-left: auto; opacity: .6; flex: 0 0 auto; }
 
   /* ---- cell card ---- */
   .cell {
     position: absolute; box-sizing: border-box; overflow: hidden;
     border: 1px solid var(--vscode-panel-border); border-left-width: 3px;
-    border-radius: 5px; padding: 4px 6px; cursor: pointer;
+    border-radius: 5px; padding: 5px 8px; cursor: pointer;
+    font-size: 14px; line-height: 1.3;
     background: var(--vscode-editor-background);
   }
   .cell:hover { border-color: var(--vscode-focusBorder); }
   .cell.sel { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
   .cell.dim { opacity: .25; }
   .cell.hit { box-shadow: 0 0 0 2px var(--vscode-editor-findMatchHighlightBackground, #ffd90055); }
-  .cell .id { font-weight: 700; }
-  .cell .tags { float: right; opacity: .7; font-size: 10px; }
-  .cell .mat { opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .hd { display: flex; align-items: baseline; gap: 6px; }
+  .cell .id { font-weight: 700; font-size: 15px; }
+  .cell .nm { opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .cell .badge {
+    margin-left: auto; flex: 0 0 auto; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+    padding: 0 6px; border-radius: 9px; color: #fff;
+  }
+  .cell .kind { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .kind .dens { opacity: .7; }
+  .cell .kind .tag { opacity: .7; font-size: 12px; margin-left: 6px; }
   .cell .rgn {
-    font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .7;
+    font-family: var(--vscode-editor-font-family); font-size: 12.5px; opacity: .8;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .chip {
-    font-family: var(--vscode-editor-font-family); font-size: 10px;
-    padding: 0 4px; border-radius: 3px; cursor: pointer;
+    font-family: var(--vscode-editor-font-family); font-size: 12px;
+    padding: 0 5px; border-radius: 3px; cursor: pointer;
     background: color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent);
   }
   .chip:hover { background: var(--vscode-editor-findMatchHighlightBackground, #ffd90055); }
@@ -151,6 +194,13 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   #detail dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
   #detail dt { opacity: .6; }
   #detail dd { margin: 0; }
+  #detail .crumbs { line-height: 1.7; }
+  #detail .crumbs .sep { opacity: .45; margin: 0 3px; }
+  #detail .crumbs .x { opacity: .7; }
+  #detail ul.cells { margin: 0; padding-left: 0; list-style: none; }
+  #detail ul.cells li { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; }
+  #detail ul.cells .sw { width: 3px; height: 10px; flex: 0 0 auto; border-radius: 1px; }
+  #detail ul.cells .m { opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .link { color: var(--vscode-textLink-foreground); cursor: pointer; }
   .link:hover { text-decoration: underline; }
 </style>
@@ -158,6 +208,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
 <body>
 <div id="shell">
   <div id="bar">
+    <button id="treeToggle" class="on" title="Show or hide the structure tree">Structure</button>
     <input type="search" id="q" placeholder="Find cell, material or surface…" />
     <button id="fit">Fit</button>
     <button id="expand">Expand all</button>
@@ -167,6 +218,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   </div>
   <div id="warn"></div>
   <div id="main">
+    <div id="tree"></div>
     <div id="viewport">
       <div id="canvas"><svg id="edges"></svg></div>
     </div>
@@ -179,33 +231,44 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   const SVGNS = 'http://www.w3.org/2000/svg';
 
   const ROLES = {
+    lattice:   { color: 'var(--role-lattice)',   label: 'lattice' },
+    container: { color: 'var(--role-container)', label: 'fill' },
     material:  { color: 'var(--role-material)',  label: 'material' },
     void:      { color: 'var(--role-void)',      label: 'void' },
-    container: { color: 'var(--role-container)', label: 'fill' },
-    lattice:   { color: 'var(--role-lattice)',   label: 'lattice' },
     graveyard: { color: 'var(--role-graveyard)', label: 'outside' },
   };
+  const ROLE_ORDER = ['lattice', 'container', 'material', 'void', 'graveyard'];
 
   function roleLabel(role) {
     if (role === 'graveyard' && model && model.language === 'mcnp') return 'imp:n=0';
     return ROLES[role].label;
   }
 
-  const CELL_W = 208, PAD = 10, HEAD = 26, COL_GAP = 14, ROW_GAP = 10, UNI_GAP = 28, BAND_GAP = 72;
-  const AUTO_COLLAPSE_OVER = 300;
+  const CELL_W = 250, PAD = 10, HEAD = 26, COL_GAP = 14, ROW_GAP = 10, UNI_GAP = 28, BAND_GAP = 72;
+  const COLLAPSED_W = 330;
 
   let model = null;
   let collapsed = new Set();
-  let selected = null;
+  let treeClosed = new Set();
+  let selected = null;        // cell id
+  let focusedUni = null;      // universe id shown in the detail pane
   let query = '';
   let view = { x: 20, y: 20, k: 1 };
   const layout = { cells: new Map(), unis: new Map(), w: 0, h: 0 };
 
   const $ = (id) => document.getElementById(id);
-  const canvas = $('canvas'), edges = $('edges'), viewport = $('viewport');
+  const canvas = $('canvas'), edges = $('edges'), viewport = $('viewport'), tree = $('tree');
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function rootUni() {
+    if (!model) return 0;
+    const u = model.universes.find((x) => x.depth === 0 && !x.orphan);
+    return u ? u.id : 0;
+  }
+  const uniLabel = (u) => (u.name ? u.name : 'u=' + u.id);
+  const cellLabel = (c) => (c.name ? c.name : String(c.id));
 
   function densityText(c) {
     if (c.density == null) return '';
@@ -216,11 +279,163 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     return s + unit;
   }
 
+  // ---- derived structure ---------------------------------------------------
+  // Per universe: what it fills (aggregated over its cells, with placement
+  // counts), what materials it holds, and a one-line description. Computed
+  // once per model; the tree, the headers and the detail pane all read it.
+  function derive() {
+    model.byId = {};
+    for (const c of model.cells) model.byId[c.id] = c;
+    model.uniById = {};
+    for (const u of model.universes) model.uniById[u.id] = u;
+    for (const u of model.universes) {
+      const cells = u.cells.map((id) => model.byId[id]).filter(Boolean);
+      const roles = {};
+      for (const c of cells) roles[c.role] = (roles[c.role] || 0) + 1;
+      const fills = new Map();
+      let placements = 0;
+      for (const e of model.edges) {
+        if (e.kind !== 'fill') continue;
+        const from = model.byId[e.from];
+        if (!from || from.universe !== u.id) continue;
+        const n = e.count || 1;
+        fills.set(e.to, (fills.get(e.to) || 0) + n);
+        placements += n;
+      }
+      const mats = [];
+      for (const c of cells) {
+        if (c.role !== 'material' || !c.materialLabel) continue;
+        if (!mats.includes(c.materialLabel)) mats.push(c.materialLabel);
+      }
+      const kids = [...fills.entries()].sort((a, b) => b[1] - a[1]).map(([to, n]) => ({ to, n }));
+      let kind;
+      if (roles.lattice) kind = 'lattice';
+      else if (u.id === rootUni()) kind = 'root';
+      else if (kids.length && !roles.material && !roles.void) kind = 'stack';
+      else if (kids.length) kind = 'mixed';
+      else kind = 'pin';
+      u.$ = { cells, roles, kids, placements, mats, kind };
+      u.$.line = describe(u);
+    }
+  }
+
+  function describe(u) {
+    const d = u.$;
+    const bits = [];
+    const nc = u.cells.length;
+    bits.push(nc + ' cell' + (nc === 1 ? '' : 's'));
+    if (d.kind === 'lattice') {
+      bits.push('lattice \\u2192 ' + d.kids.length + ' universe' + (d.kids.length === 1 ? '' : 's') +
+        ', ' + d.placements + ' placement' + (d.placements === 1 ? '' : 's'));
+    } else if (d.kids.length) {
+      bits.push((d.kind === 'stack' ? 'stack' : 'fills') + ' \\u2192 ' +
+        d.kids.slice(0, 4).map((k) => uniLabel(model.uniById[k.to] || { id: k.to }) + (k.n > 1 ? '\\u00D7' + k.n : '')).join(', ') +
+        (d.kids.length > 4 ? ' +' + (d.kids.length - 4) : ''));
+    }
+    if (d.mats.length) bits.push(d.mats.slice(0, 4).join(' / ') + (d.mats.length > 4 ? ' +' + (d.mats.length - 4) : ''));
+    if (d.roles.graveyard) bits.push(roleLabel('graveyard'));
+    return bits.join(' \\u00B7 ');
+  }
+
+  /** Parent cells of a universe, i.e. the cells whose fill points here. */
+  function parentsOf(uid) {
+    const u = model.uniById[uid];
+    return u ? u.filledBy.map((id) => model.byId[id]).filter(Boolean) : [];
+  }
+
+  /** [u, cell, u, cell, ..., u] from the root down to uid, shallowest parents first. */
+  function pathToRoot(uid) {
+    const path = [uid];
+    const seen = new Set([uid]);
+    let cur = uid;
+    while (cur !== rootUni()) {
+      const parents = parentsOf(cur).filter((c) => !seen.has(c.universe));
+      if (!parents.length) break;
+      parents.sort((a, b) => (model.uniById[a.universe] || {}).depth - (model.uniById[b.universe] || {}).depth);
+      const p = parents[0];
+      path.unshift(p.id);
+      path.unshift(p.universe);
+      seen.add(p.universe);
+      cur = p.universe;
+    }
+    return path;
+  }
+
+  // ---- structure tree ------------------------------------------------------
+  // The fill hierarchy read top down. A universe placed from several places
+  // is expanded once, where it is first reached, and shown as a reference
+  // ("\\u2191 u=30") everywhere else so the tree stays a tree.
+  function renderTree() {
+    tree.innerHTML = '';
+    if (!model || !model.universes.length) return;
+    const h = document.createElement('h3');
+    h.textContent = 'Structure';
+    tree.appendChild(h);
+    const expandedAt = new Set();
+    const walk = (uid, n, parentEl) => {
+      const u = model.uniById[uid];
+      if (!u) return;
+      const first = !expandedAt.has(uid);
+      if (first) expandedAt.add(uid);
+      const row = document.createElement('div');
+      row.className = 'tn' + (u.orphan ? ' orphan' : '') + (focusedUni === uid ? ' cur' : '');
+      row.dataset.uni = String(uid);
+      const kids = first ? u.$.kids : [];
+      const open = !treeClosed.has(uid);
+      const roleColor = u.$.kind === 'lattice' ? 'var(--role-lattice)' :
+        (u.$.kids.length ? 'var(--role-container)' : (u.$.roles.material ? 'var(--role-material)' : 'var(--role-void)'));
+      row.innerHTML =
+        '<span class="tw' + (kids.length ? '' : ' leaf') + '" data-tog="' + uid + '">' + (open ? '\\u25BE' : '\\u25B8') + '</span>' +
+        '<span class="tbar" style="background:' + roleColor + '"></span>' +
+        (n > 1 ? '<span class="tx"><b>\\u00D7' + n + '</b></span>' : '') +
+        '<span class="tu">' + esc(uid === rootUni() ? 'Universe ' + uid : uniLabel(u)) + '</span>' +
+        (first
+          ? '<span class="tk">' + esc(u.summary || (u.$.kind === 'lattice' ? 'lattice' : u.$.kind === 'stack' ? 'stack' : '')) +
+            (u.$.kind === 'pin' && u.$.mats.length ? (u.summary ? ' \\u00B7 ' : '') + esc(u.$.mats.slice(0, 3).join('/')) : '') +
+            ' \\u00B7 ' + u.cells.length + '</span>'
+          : '<span class="tref">\\u2191 see above</span>');
+      parentEl.appendChild(row);
+      if (kids.length && open) {
+        const box = document.createElement('div');
+        box.className = 'tkids';
+        parentEl.appendChild(box);
+        for (const k of kids) walk(k.to, k.n, box);
+      }
+    };
+    walk(rootUni(), 1, tree);
+    const orphans = model.universes.filter((u) => u.orphan);
+    if (orphans.length) {
+      const h2 = document.createElement('h3');
+      h2.textContent = 'Not placed anywhere';
+      tree.appendChild(h2);
+      for (const u of orphans) walk(u.id, 1, tree);
+    }
+  }
+
+  tree.addEventListener('click', (ev) => {
+    const tog = ev.target.closest('[data-tog]');
+    if (tog) {
+      ev.stopPropagation();
+      const uid = Number(tog.dataset.tog);
+      if (treeClosed.has(uid)) treeClosed.delete(uid); else treeClosed.add(uid);
+      renderTree();
+      return;
+    }
+    const row = ev.target.closest('.tn');
+    if (row) focusUniverse(Number(row.dataset.uni), true);
+  });
+
   function cellHeight(c) {
-    const chipRows = c.surfaces.length
-      ? Math.ceil(c.surfaces.length / 5)
-      : 0;
-    return 20 + 16 + 15 + (chipRows ? chipRows * 15 + 3 : 0) + 8;
+    const chipRows = c.surfaces.length ? Math.ceil(c.surfaces.length / 5) : 0;
+    return 8 + 20 + 19 + 17 + (chipRows ? chipRows * 18 + 4 : 0) + 7;
+  }
+
+  function sortedCells(u) {
+    return u.cells.slice().sort((a, b) => {
+      const ca = model.byId[a], cb = model.byId[b];
+      const ra = ROLE_ORDER.indexOf(ca.role), rb = ROLE_ORDER.indexOf(cb.role);
+      return ra - rb || a - b;
+    });
   }
 
   // ---- layout -------------------------------------------------------------
@@ -245,12 +460,13 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
         const isCollapsed = collapsed.has(u.id);
         let w, h;
         if (isCollapsed || u.cells.length === 0) {
-          w = Math.max(180, CELL_W);
-          h = HEAD + 8;
+          w = COLLAPSED_W;
+          h = HEAD + 6;
         } else {
-          const cols = Math.max(1, Math.min(u.cells.length, Math.ceil(Math.sqrt(u.cells.length * 0.6))));
+          const order = sortedCells(u);
+          const cols = Math.max(1, Math.min(order.length, Math.ceil(Math.sqrt(order.length * 0.6))));
           const colH = new Array(cols).fill(0);
-          u.cells.forEach((cid, i) => {
+          order.forEach((cid, i) => {
             const cell = model.byId[cid];
             const col = i % cols;
             const ch = cellHeight(cell);
@@ -261,7 +477,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
             });
             colH[col] += ch + ROW_GAP;
           });
-          w = PAD * 2 + cols * CELL_W + (cols - 1) * COL_GAP;
+          w = Math.max(COLLAPSED_W, PAD * 2 + cols * CELL_W + (cols - 1) * COL_GAP);
           h = HEAD + PAD * 2 + Math.max(...colH) - ROW_GAP;
         }
         layout.unis.set(u.id, { x, y, w, h, collapsed: isCollapsed });
@@ -293,16 +509,18 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
       const box = layout.unis.get(u.id);
       if (!box) continue;
       const el = document.createElement('div');
-      el.className = 'uni' + (u.id === 0 ? ' root' : '') + (u.orphan ? ' orphan' : '');
+      el.className = 'uni' + (u.id === rootUni() ? ' root' : '') + (u.orphan ? ' orphan' : '') +
+        (focusedUni === u.id ? ' focus' : '');
+      el.dataset.uniBox = String(u.id);
       el.style.cssText = 'left:' + box.x + 'px;top:' + box.y + 'px;width:' + box.w + 'px;height:' + box.h + 'px';
       const filled = u.filledBy.length
-        ? 'filled by cell ' + u.filledBy.join(', ')
-        : (u.id === 0 ? 'root — the real world' : 'nothing fills this');
+        ? 'filled by cell ' + u.filledBy.slice(0, 3).join(', ') + (u.filledBy.length > 3 ? ' +' + (u.filledBy.length - 3) : '')
+        : (u.id === rootUni() ? 'root \\u2014 the real world' : 'nothing fills this');
+      const title = (u.summary ? u.summary + ' \\u00B7 ' : '') + u.$.line + ' \\u00B7 ' + filled;
       el.innerHTML =
-        '<header data-uni="' + u.id + '">' +
-          '<span>' + (u.id === 0 ? 'Universe 0' : 'u=' + u.id) + '</span>' +
-          '<span class="sub">' + esc(u.summary || '') + (u.summary ? ' \\u00B7 ' : '') +
-            u.cells.length + ' cell' + (u.cells.length === 1 ? '' : 's') + ' \\u00B7 ' + esc(filled) + '</span>' +
+        '<header data-uni="' + u.id + '" title="' + esc(title) + '">' +
+          '<span>' + esc(u.id === rootUni() ? 'Universe ' + u.id : uniLabel(u)) + '</span>' +
+          '<span class="sub">' + (u.summary ? '<b>' + esc(u.summary) + '</b> \\u00B7 ' : '') + esc(u.$.line) + '</span>' +
           '<span class="chev">' + (box.collapsed ? '\\u25B8' : '\\u25BE') + '</span>' +
         '</header>';
       canvas.appendChild(el);
@@ -314,6 +532,21 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     drawEdges();
     applyFilter();
     highlight();
+    renderTree();
+  }
+
+  function kindLine(c) {
+    if (c.role === 'graveyard') return roleLabel('graveyard') + ' \\u2014 outside world';
+    if (c.role === 'lattice' || c.role === 'container') {
+      const fills = model.edges.filter((e) => e.kind === 'fill' && e.from === c.id);
+      const parts = fills.slice(0, 3).map((e) => uniLabel(model.uniById[e.to] || { id: e.to }) + (e.count > 1 ? '\\u00D7' + e.count : ''));
+      let s = (c.role === 'lattice' ? 'lat=' + c.lattice + ' \\u2192 ' : 'fill \\u2192 ') + parts.join(', ') +
+        (fills.length > 3 ? ' +' + (fills.length - 3) : '');
+      if (c.material) s += '<span class="tag">' + esc(c.materialLabel) + '</span>';
+      return s;
+    }
+    if (c.role === 'void') return 'void';
+    return esc(c.materialLabel) + (c.density != null ? ' <span class="dens">' + densityText(c) + '</span>' : '');
   }
 
   function renderCell(c) {
@@ -326,25 +559,20 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
       'border-left-color:' + ROLES[c.role].color;
 
     const tags = [];
-    if (c.lattice) tags.push('lat=' + c.lattice);
     if (c.hasTrcl) tags.push('trcl');
     if (c.temperatureK != null) tags.push(Math.round(c.temperatureK) + 'K');
-    if (c.importanceZero) tags.push(model.language === 'mcnp' ? 'imp:n=0' : 'outside');
-
-    const mat = c.material === 0
-      ? 'void'
-      : 'm' + c.material + ' ' + (c.materialLabel || '') + ' ' + densityText(c);
+    const nm = c.name ? c.name : (c.summary || '');
 
     const chips = c.surfaces.map((s) =>
-      '<span class="chip' + (s.undefined ? ' bad' : '') + '" data-surf="' + s.id + '" title="' +
-      esc(s.summary || 'no surface card defines ' + s.id) + '">' +
-      (s.sense === '+/-' ? '\\u00B1' : s.sense) + s.id + '</span>').join('');
+      '<span class="chip' + (s.undefined ? ' bad' : '') + '" data-surf="' + s.id + '" data-sname="' + esc(s.name || '') + '" title="' +
+      esc(s.summary || 'no surface card defines ' + (s.name || s.id)) + '">' +
+      (s.sense === '+/-' ? '\\u00B1' : s.sense) + esc(s.name || s.id) + '</span>').join('');
 
     el.innerHTML =
-      '<div><span class="id">' + c.id + '</span>' +
-        (c.summary ? ' <span class="mat">' + esc(c.summary) + '</span>' : '') +
-        '<span class="tags">' + esc(tags.join(' ')) + '</span></div>' +
-      '<div class="mat">' + esc(mat.trim()) + '</div>' +
+      '<div class="hd"><span class="id">' + c.id + '</span>' +
+        (nm ? '<span class="nm" title="' + esc(nm) + '">' + esc(nm) + '</span>' : '') +
+        '<span class="badge" style="background:' + ROLES[c.role].color + '">' + roleLabel(c.role) + '</span></div>' +
+      '<div class="kind">' + kindLine(c) + (tags.length ? '<span class="tag">' + esc(tags.join(' ')) + '</span>' : '') + '</div>' +
       '<div class="rgn" title="' + esc(c.regionRaw) + '">' + esc(c.regionRaw || '\\u2014') + '</div>' +
       (chips ? '<div class="chips">' + chips + '</div>' : '');
     return el;
@@ -366,7 +594,7 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
       if (e.kind === 'fill') {
         const box = layout.unis.get(e.to);
         if (!box) continue;
-        to = { x: box.x, y: box.y + Math.min(28, box.h / 2) };
+        to = { x: box.x, y: box.y + Math.min(20, box.h / 2) };
       } else {
         const b = layout.cells.get(e.to);
         const uni = b && layout.unis.get(b.uni);
@@ -412,14 +640,35 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     applyTransform();
   }
 
+  /** Pan (and zoom in if needed) so one universe box is centred and legible. */
+  function panTo(uid) {
+    const box = layout.unis.get(uid);
+    if (!box) return;
+    const r = viewport.getBoundingClientRect();
+    const k = Math.max(view.k, Math.min(1, (r.width - 60) / box.w, (r.height - 60) / box.h, 0.9));
+    view.k = Math.min(1.4, Math.max(0.08, k));
+    view.x = (r.width - box.w * view.k) / 2 - box.x * view.k;
+    view.y = Math.min(20, (r.height - box.h * view.k) / 2) - box.y * view.k;
+    applyTransform();
+  }
+
+  function focusUniverse(uid, pan) {
+    focusedUni = uid;
+    selected = null;
+    if (collapsed.has(uid)) collapsed.delete(uid);
+    render();
+    if (pan) panTo(uid);
+    showUniverse(model.uniById[uid]);
+  }
+
   function applyFilter() {
     const q = query.trim().toLowerCase();
     for (const el of canvas.querySelectorAll('.cell')) {
       const c = model.byId[Number(el.dataset.cell)];
       const hit = !q || [
-        String(c.id), c.summary, c.materialLabel, c.regionRaw,
+        String(c.id), c.name || '', c.summary, c.materialLabel, c.regionRaw,
         'm' + c.material, 'u=' + c.universe,
-        ...c.surfaces.map((s) => String(s.id)),
+        ...c.surfaces.map((s) => String(s.name || s.id)),
       ].join(' ').toLowerCase().includes(q);
       el.classList.toggle('dim', !!q && !hit);
       el.classList.toggle('hit', !!q && hit);
@@ -440,40 +689,64 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     }
   }
 
+  const linkCell = (id) => {
+    const c = model.byId[id];
+    return '<span class="link" data-goto-cell="' + id + '">' + (c ? esc(cellLabel(c)) : id) + '</span>';
+  };
+  const linkUni = (id) => {
+    const u = model.uniById[id];
+    return '<span class="link" data-goto-uni="' + id + '">' + (u ? esc(id === rootUni() ? 'Universe ' + id : uniLabel(u)) : 'u=' + id) + '</span>';
+  };
+
+  function crumbs(uid) {
+    const path = pathToRoot(uid);
+    const out = [];
+    for (let i = 0; i < path.length; i++) {
+      if (i % 2 === 0) out.push(linkUni(path[i]));
+      else {
+        const c = model.byId[path[i]];
+        const e = model.edges.find((x) => x.kind === 'fill' && x.from === path[i] && x.to === path[i + 1]);
+        out.push('cell ' + linkCell(path[i]) + (e && e.count > 1 ? ' <span class="x">\\u00D7' + e.count + '</span>' : '') +
+          (c && c.role === 'lattice' ? ' <span class="x">lat</span>' : ''));
+      }
+    }
+    return '<div class="crumbs">' + out.join('<span class="sep">\\u203A</span>') + '</div>';
+  }
+
   function showDetail(c) {
     const d = $('detail');
-    if (!c) { d.innerHTML = '<p class="empty">Select a cell.</p>'; return; }
+    if (!c) { d.innerHTML = '<p class="empty">Select a cell, or a universe in the tree.</p>'; return; }
     const rows = [];
     rows.push(['Role', roleLabel(c.role)]);
-    rows.push(['Universe', c.universe === 0 ? '0 (root)' : String(c.universe)]);
-    rows.push(['Material', c.material === 0 ? 'void' : 'm' + c.material + ' \\u2014 ' + esc(c.materialLabel)]);
+    rows.push(['Universe', linkUni(c.universe) + (c.universe === rootUni() ? ' (root)' : '')]);
+    rows.push(['Material', c.material === 0 ? 'void' : esc(c.materialLabel) + (model.language === 'mcnp' ? ' (m' + c.material + ')' : '')]);
     if (c.density != null) {
       rows.push(['Density', densityText(c) + (c.density < 0 ? ' (mass)' : ' (atom)')]);
     }
     if (c.temperatureK != null) rows.push(['tmp', Math.round(c.temperatureK) + ' K']);
     if (c.lattice) rows.push(['Lattice', c.lattice === 2 ? 'hexagonal (lat=2)' : 'square (lat=1)']);
     if (c.hasTrcl) rows.push(['trcl', 'yes']);
-    rows.push(['Line', String(c.line + 1)]);
+    if (c.line != null) rows.push(['Line', String(c.line + 1)]);
 
     const fills = model.edges.filter((e) => e.kind === 'fill' && e.from === c.id);
-    const linkCell = (id) => '<span class="link" data-goto-cell="' + id + '">' + id + '</span>';
 
     d.innerHTML =
-      '<h2>Cell ' + c.id + (c.summary ? ' \\u2014 ' + esc(c.summary) : '') + '</h2>' +
+      '<h2>Cell ' + c.id + (c.name ? ' \\u2014 ' + esc(c.name) : (c.summary ? ' \\u2014 ' + esc(c.summary) : '')) + '</h2>' +
       '<dl>' + rows.map((r) => '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>').join('') + '</dl>' +
+      '<h3>Path from root</h3>' + crumbs(c.universe) +
       '<h3>Region</h3><pre>' + esc(c.regionRaw || '(empty)') + '</pre>' +
       (c.regionError ? '<p style="color:var(--role-graveyard)">' + esc(c.regionError) + '</p>' : '') +
       '<h3>Bounding surfaces</h3>' +
       (c.surfaces.length
         ? '<dl>' + c.surfaces.map((s) =>
-            '<dt><span class="link" data-goto-surf="' + s.id + '">' +
-            (s.sense === '+/-' ? '\\u00B1' : s.sense) + s.id + '</span></dt><dd>' +
+            '<dt><span class="link" data-goto-surf="' + s.id + '" data-sname="' + esc(s.name || '') + '">' +
+            (s.sense === '+/-' ? '\\u00B1' : s.sense) + esc(s.name || s.id) + '</span></dt><dd>' +
             (s.undefined ? '<em>no surface card</em>' : esc(s.summary)) + '</dd>').join('') + '</dl>'
         : '<p class="empty">none</p>') +
       (fills.length
         ? '<h3>Fills with</h3><dl>' + fills.map((e) => {
-            const u = model.universes.find((x) => x.id === e.to);
-            return '<dt>u=' + e.to + '</dt><dd>' + esc(u ? (u.summary || (u.cells.length + ' cells')) : 'undefined') +
+            const u = model.uniById[e.to];
+            return '<dt>' + linkUni(e.to) + '</dt><dd>' + esc(u ? (u.summary || u.$.line) : 'undefined') +
               (e.count && e.count > 1 ? ' \\u00D7' + e.count : '') + '</dd>';
           }).join('') + '</dl>'
         : '') +
@@ -485,25 +758,72 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
         : '');
   }
 
+  function showUniverse(u) {
+    const d = $('detail');
+    if (!u) { showDetail(null); return; }
+    const rows = [];
+    rows.push(['Depth', String(u.depth)]);
+    rows.push(['Cells', String(u.cells.length)]);
+    if (u.filledBy.length) {
+      rows.push(['Filled by', u.filledBy.slice(0, 12).map((id) => 'cell ' + linkCell(id)).join(', ') +
+        (u.filledBy.length > 12 ? ' +' + (u.filledBy.length - 12) : '')]);
+    } else {
+      rows.push(['Filled by', u.id === rootUni() ? 'nothing \\u2014 this is the root' : '<span style="color:var(--role-graveyard)">nothing (orphan)</span>']);
+    }
+    if (u.$.kids.length) {
+      rows.push(['Fills', u.$.kids.map((k) => linkUni(k.to) + (k.n > 1 ? ' \\u00D7' + k.n : '')).join(', ')]);
+    }
+    if (u.$.mats.length) rows.push(['Materials', esc(u.$.mats.join(', '))]);
+
+    const list = sortedCells(u).map((id) => {
+      const c = model.byId[id];
+      const what = c.role === 'material' ? c.materialLabel + (c.density != null ? ' ' + densityText(c) : '')
+        : c.role === 'void' ? 'void'
+        : c.role === 'graveyard' ? roleLabel('graveyard')
+        : (c.role === 'lattice' ? 'lat=' + c.lattice + ' ' : 'fill ') +
+          model.edges.filter((e) => e.kind === 'fill' && e.from === id).slice(0, 3)
+            .map((e) => uniLabel(model.uniById[e.to] || { id: e.to })).join(', ');
+      return '<li><span class="sw" style="background:' + ROLES[c.role].color + '"></span>' +
+        linkCell(id) + '<span class="m">' + esc(what) + '</span></li>';
+    }).join('');
+
+    d.innerHTML =
+      '<h2>' + esc(u.id === rootUni() ? 'Universe ' + u.id : uniLabel(u)) + (u.summary ? ' \\u2014 ' + esc(u.summary) : '') + '</h2>' +
+      '<p style="margin:2px 0 0;opacity:.75">' + esc(u.$.line) + '</p>' +
+      '<dl style="margin-top:8px">' + rows.map((r) => '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>').join('') + '</dl>' +
+      '<h3>Path from root</h3>' + crumbs(u.id) +
+      '<h3>Cells</h3><ul class="cells">' + list + '</ul>';
+  }
+
   function select(id, reveal) {
     selected = id;
-    showDetail(model.byId[id] || null);
+    const c = model.byId[id] || null;
+    if (c) focusedUni = c.universe;
+    showDetail(c);
     highlight();
-    if (reveal) vscode.postMessage({ command: 'revealCell', id });
+    renderTree();
+    canvas.querySelectorAll('.uni').forEach((el) => el.classList.toggle('focus', Number(el.dataset.uniBox) === focusedUni));
+    if (reveal && c) vscode.postMessage({ command: 'revealCell', id, name: c.name || '' });
+  }
+
+  function revealSurface(el) {
+    vscode.postMessage({ command: 'revealSurface', id: Number(el.dataset.surf || el.dataset.gotoSurf), name: el.dataset.sname || '' });
   }
 
   canvas.addEventListener('click', (ev) => {
     const chip = ev.target.closest('.chip');
     if (chip) {
       ev.stopPropagation();
-      vscode.postMessage({ command: 'revealSurface', id: Number(chip.dataset.surf) });
+      revealSurface(chip);
       return;
     }
     const head = ev.target.closest('header[data-uni]');
     if (head) {
       const uid = Number(head.dataset.uni);
       if (collapsed.has(uid)) collapsed.delete(uid); else collapsed.add(uid);
+      focusedUni = uid;
       render();
+      showUniverse(model.uniById[uid]);
       return;
     }
     const cell = ev.target.closest('.cell');
@@ -512,9 +832,24 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
 
   $('detail').addEventListener('click', (ev) => {
     const c = ev.target.closest('[data-goto-cell]');
-    if (c) { select(Number(c.dataset.gotoCell), true); return; }
+    if (c) {
+      const id = Number(c.dataset.gotoCell);
+      const cell = model.byId[id];
+      if (cell && collapsed.has(cell.universe)) { collapsed.delete(cell.universe); render(); }
+      select(id, true);
+      const b = layout.cells.get(id);
+      if (b) {
+        const r = viewport.getBoundingClientRect();
+        view.x = r.width / 2 - (b.ax + b.w / 2) * view.k;
+        view.y = r.height / 2 - (b.ay + b.h / 2) * view.k;
+        applyTransform();
+      }
+      return;
+    }
+    const u = ev.target.closest('[data-goto-uni]');
+    if (u) { focusUniverse(Number(u.dataset.gotoUni), true); return; }
     const s = ev.target.closest('[data-goto-surf]');
-    if (s) vscode.postMessage({ command: 'revealSurface', id: Number(s.dataset.gotoSurf) });
+    if (s) revealSurface(s);
   });
 
   // pan + zoom
@@ -545,8 +880,12 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   $('fit').addEventListener('click', fit);
   $('expand').addEventListener('click', () => { collapsed.clear(); render(); fit(); });
   $('collapse').addEventListener('click', () => {
-    collapsed = new Set(model.universes.filter((u) => u.id !== 0).map((u) => u.id));
+    collapsed = new Set(model.universes.filter((u) => u.id !== rootUni()).map((u) => u.id));
     render(); fit();
+  });
+  $('treeToggle').addEventListener('click', () => {
+    tree.classList.toggle('hidden');
+    $('treeToggle').classList.toggle('on', !tree.classList.contains('hidden'));
   });
   $('q').addEventListener('input', (ev) => { query = ev.target.value; applyFilter(); });
 
@@ -557,6 +896,15 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
   }
   paintLegend();
 
+  // Big decks start folded past the first levels: on a full core that leaves
+  // the world and the core lattice open and 60 pin universes as one-line
+  // summaries, which is the readable default; the tree opens the rest.
+  function defaultCollapse() {
+    const n = model.cells.length;
+    const minDepth = n > 300 ? 2 : n > 120 ? 3 : Infinity;
+    collapsed = new Set(model.universes.filter((u) => u.id !== rootUni() && u.depth >= minDepth).map((u) => u.id));
+  }
+
   // ---- host messages ------------------------------------------------------
   window.addEventListener('message', (ev) => {
     const msg = ev.data;
@@ -564,14 +912,12 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
     const first = model === null;
     const prevSelected = selected;
     model = msg.model;
-    model.byId = {};
-    for (const c of model.cells) model.byId[c.id] = c;
+    derive();
     paintLegend();
 
-    if (first && model.cells.length > AUTO_COLLAPSE_OVER) {
-      collapsed = new Set(model.universes.filter((u) => u.id !== 0).map((u) => u.id));
-    }
-    collapsed = new Set([...collapsed].filter((u) => model.universes.some((x) => x.id === u)));
+    if (first) defaultCollapse();
+    collapsed = new Set([...collapsed].filter((u) => model.uniById[u]));
+    if (focusedUni != null && !model.uniById[focusedUni]) focusedUni = null;
 
     $('stats').textContent =
       model.stats.cells + ' cells \\u00B7 ' + model.stats.universes + ' universes \\u00B7 depth ' +
@@ -588,8 +934,14 @@ export function buildCellMapHtml(cspSource: string, nonce: string): string {
 
     render();
     if (prevSelected != null && model.byId[prevSelected]) select(prevSelected, false);
+    else if (focusedUni != null) showUniverse(model.uniById[focusedUni]);
     else { selected = null; showDetail(null); }
-    if (first) fit();
+    // A full core fitted to the viewport is a hairball; start on the root at
+    // a readable zoom and let the tree drive the rest. Small decks fit whole.
+    if (first) {
+      if (model.cells.length > 120) { focusedUni = rootUni(); panTo(rootUni()); showUniverse(model.uniById[rootUni()]); renderTree(); }
+      else fit();
+    }
   });
 
   vscode.postMessage({ command: 'ready' });

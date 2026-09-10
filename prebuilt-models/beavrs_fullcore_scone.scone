@@ -135,13 +135,21 @@ geometry {
     outerWater1    { type simpleCell; id 9;  surfaces (-3 4);   filltype mat; material Water; }
     outerWater2    { type simpleCell; id 15; surfaces (-5 6);   filltype mat; material Water; }
     coreBarrel     { type simpleCell; id 16; surfaces (-6 7);   filltype mat; material StainlessSteel304; }
-    core           { type simpleCell; id 17; surfaces (-5);     filltype uni; universe 9999; }
+    // Core lattice inside the inner core barrel (r = 187.96). Written as (-5)
+    // before, which overlapped coreBarrel/outerWater2; SCONE resolved it by
+    // list order, so the run was right but the region as written was not.
+    core           { type simpleCell; id 17; surfaces (-7);     filltype uni; universe 9999; }
     // --- Neutron shield panels (4 octant segments + water fill) ---
     NS1            { type simpleCell; id 10; surfaces (-4 5 -8 9);   filltype mat; material StainlessSteel304; }
     NS2            { type simpleCell; id 11; surfaces (-4 5 8 -9);   filltype mat; material StainlessSteel304; }
     NS3            { type simpleCell; id 12; surfaces (-4 5 -10 11); filltype mat; material StainlessSteel304; }
     NS4            { type simpleCell; id 13; surfaces (-4 5 10 -11); filltype mat; material StainlessSteel304; }
-    outerWaterSeg1 { type simpleCell; id 14; surfaces (-4 5);        filltype mat; material Water; }
+    // Water between the four shield panels: the complement of the panel
+    // sectors, as four explicit cells so nothing in this universe overlaps.
+    outerWaterNE   { type simpleCell; id 14; surfaces (-4 5 8 9 10 11);     filltype mat; material Water; }
+    outerWaterSW   { type simpleCell; id 18; surfaces (-4 5 -8 -9 -10 -11); filltype mat; material Water; }
+    outerWaterNW   { type simpleCell; id 19; surfaces (-4 5 8 9 -10 -11);   filltype mat; material Water; }
+    outerWaterSE   { type simpleCell; id 20; surfaces (-4 5 -8 -9 10 11);   filltype mat; material Water; }
     // --- Grid spacer cells ---
     thickGrid { type simpleCell; id 55; surfaces (90); filltype mat; material Inconel; }
     thinGrid  { type simpleCell; id 56; surfaces (92); filltype mat; material Inconel; }
@@ -891,7 +899,7 @@ geometry {
     // Core + Structural Shell (RPV, barrel, shields)
     // ===============================================================
     coreAndStructures { id 8888; type cellUniverse;
-      cells (7 8 9 10 11 12 13 14 15 16 17); }
+      cells (7 8 9 10 11 12 13 14 18 19 20 15 16 17); }
   }
 }
 

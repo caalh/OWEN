@@ -7,6 +7,246 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-09-09
+
+### Added
+
+- **`npm run verify:version` / `sync:version`** — one script that checks every
+  place the OWEN version is written (package.json, lock, CHANGELOG heading,
+  README, the monorepo README row and AGENTS "Current release" line, the
+  reactormc.net `owenVersion.ts`, the VSIX files) and rewrites the markdown
+  ones. Two listings said v1.0.3 while 1.4.4 was live. `--release` is the
+  gate. Inventory and procedure: `.cursor/rules/owen-semver.mdc`.
+- **`OWEN: Validate Workspace (files working together)`**, for every code.
+  A deck is rarely one file. OpenMC projects are `materials.xml` +
+  `geometry.xml` + `settings.xml` + `tallies.xml` and often a `model.xml`
+  beside them; the failures that cost hours live between those files, and
+  none of them was visible before — the old cross-file check covered exactly
+  one thing (geometry cell → sibling materials) and said nothing when a
+  project was fine. Now: tally filter bins are checked against the geometry's
+  cell/material/surface/mesh ids, tally `<nuclides>` against what the
+  materials actually contain, `fill`/lattice universes against declared
+  universes, `run_mode` against the presence of a source and of fissile
+  nuclides, and `model.xml` against the separate files — OpenMC runs
+  `model.xml` when both exist, so disagreement is an error and a newer
+  separate file is a warning. Serpent decks: `include` cards are followed,
+  `mat`/`mix`, `therm` and universe references are resolved across them, and
+  `set acelib` is checked to exist. SCONE: `aceLibrary`, and every material,
+  surface, cell and universe named in one block against the block that
+  defines it. MCNP: the root deck plus its `read`/`copy` includes through the
+  existing project validator, no `projectRoot` setting needed. OpenMC Python:
+  local imports resolve to files, and exported XML older than the script is
+  flagged. Every language gets a quick geometry sample. It runs on open and
+  save with a status-bar item (`✓ OWEN workspace: 5 files agree`), publishes
+  to Problems, and the report lists what it verified — a clean project shows
+  green, not silence.
+- **`OWEN: Check Geometry (overlaps & gaps)`.** Samples every universe of the
+  deck in its own frame — a fuel pin inside its own pin window, not lost in a
+  four-metre core box — and traces points through the full fill/lattice
+  descent. Reports which cells overlap (with an example point), which
+  universes have gaps no cell claims, and how many world points are lost; the
+  same findings are published as warnings on the cell cards in Problems. Works
+  for MCNP, OpenMC, Serpent and SCONE with no solver installed. It is the
+  lost-particle cause finder MCNP only reports hours into a run.
+- **`OWEN: Cell Volumes (vol / sd cards)`.** Stochastic per-instance cell
+  volumes with one-sigma errors, masses where the deck gives a mass density,
+  and — for MCNP — ready `vol` and `sd` cards with an Insert button. Cells
+  MCNP cannot compute (anything in a lattice or `fill=`, infinite cells) are
+  exactly the ones that make an F4/F7 tally a fatal error; a pin reused at
+  several axial heights is written as `j` rather than a made-up number.
+- **`OWEN: Compare Geometry with…`.** Same reactor, two decks in any codes:
+  random points are asked "what material is here?" in both models and the
+  boundaries are compared directly. Reports boundary agreement (label-free),
+  material pairing, composition by class, and where they disagree. This is the
+  test that tells you whether the MCNP, Serpent, SCONE and OpenMC BEAVRS decks
+  describe the same reactor — and shows that where the 3D previews differ, it
+  is the material classifiers, not the geometry.
+- **`OWEN: Semantic Diff with…`.** Two decks reduced to one canonical listing
+  (surfaces, cells per universe, fills, materials with normalised fractions)
+  and opened in VS Code's diff viewer. Renumbering, card order, comments and
+  `1.0E+00` vs `1` vanish; a changed radius is one line.
+- **Nuclide and library-suffix hover** in MCNP, Serpent and SCONE decks (and
+  OpenMC `'U235'` strings). `92238.80c` is ENDF/B-VII.1 at 293.6 K — not
+  VIII.0, which is `.00c`; `.71c` is VII.0 at 600 K and wants a `TMP` card;
+  `lwtr.20t` is H in light water from ENDF71SaB. Serpent and SCONE suffixes
+  are explained as the temperature indices they are. Class letters per
+  Table B.1 (there is no `j`).
+- **Source and tally overlays in the 3D preview.** `ksrc`, `sdef pos`,
+  OpenMC `stats.Point`/`stats.Box`, Serpent `src sp`/`sx sy sz` and SCONE
+  `pointSource` draw as markers; `fmesh`, `RegularMesh` and Serpent `det dx dy
+  dz` draw as wireframe boxes with their divisions. New "Sources & Tallies"
+  toggles. A source point on a surface, or a mesh that misses the fuel, is
+  visible at once.
+- **Convergence reading in the Results Viewer.** Under the k-eff banner: a
+  verdict (converged / check / not converged) from the halves test, a drift
+  test over the active cycles, the source-entropy plateau before the first
+  active cycle, and lost particles; the k-eff estimator table (collision,
+  absorption, track-length, combined) with spreads in sigma; a Shannon
+  entropy plot when the run wrote one (MCNP cycle table, OpenMC statepoint);
+  and MCNP's ten statistical checks row by row on each tally. The verdict
+  says it is heuristic and tells you to look at the plot.
+- **Converter: every code to every other.** Serpent and SCONE → MCNP go
+  through the exact-geometry model (surfaces, CSG regions, universes,
+  lattices, materials from the source `mat`/composition cards; densities
+  Serpent left as `sum` and the library suffix are TODO-marked). The other
+  pairs (OpenMC → Serpent/SCONE, Serpent ↔ SCONE, Serpent/SCONE → OpenMC)
+  pivot through MCNP and keep both hops' TODOs. Serpent and SCONE decks are
+  now recognised as conversion sources. MCNP ↔ OpenMC remains the stable pair;
+  everything touching Serpent or SCONE is experimental and says so.
+- **Notebooks.** Every deck-reading command (3D preview, Cell Map, Validate,
+  Convert, Check Geometry, Cell Volumes, Compare, Semantic Diff) accepts a
+  Jupyter cell and treats all code cells of that notebook, joined in order, as
+  the deck; diagnostics and click-to-reveal map back to the owning cell.
+- **Works offline.** Three.js (3D preview) and uPlot (Results, ALLEN, Sweep
+  Dashboard) now ship inside the VSIX (`media/vendor/`) instead of loading
+  from unpkg.com, which an air-gapped workstation cannot reach.
+
+### Changed
+
+- **Geometry checks understand boundary surfaces and SCONE's list order.**
+  OpenMC has no graveyard cell — beyond a `boundary="vacuum"` sphere there is
+  simply nothing — so the checker now learns the problem domain from the
+  boundary surfaces and reports points beyond them as "outside", not lost
+  (the IFE spherical-shell chamber went from 710 false losses to zero). And a
+  SCONE `cellUniverse` takes the first listed cell that contains a point, so
+  two overlapping cells there are legal; they are reported as information
+  ("shadowed by list order"), not as lost particles. The bundled SCONE BEAVRS
+  deck used to have six such pairs (`core (-5)` over `coreBarrel`, the
+  neutron-shield panels over `outerWaterSeg1`); those regions are written
+  disjoint now (see Fixed).
+- **Cell Volumes are exact for spherical shells and coaxial annuli**, which is
+  most cells in most decks: a 0.02 cm fusion target inside a 14 m chamber got
+  zero hits from uniform sampling; it now reads 3.2515e-5 cm³ with no error
+  bar. Only cells that are not a pure shell (a box minus a cylinder, unions)
+  are still sampled.
+- **Material classification knows fusion decks.** `DT_50_50`, `FLiNaK_liquid`,
+  `Burn_ash_He4`, lithium, lead, tungsten, Eurofer, concrete and their
+  relatives now land in fuel / coolant / gap / structure instead of "Other",
+  so the 3D preview of an IFE chamber is no longer one colour. Names are
+  split on underscores first, so `DT_vapor` is fuel, not gap.
+- **3D preview overlays read OpenMC XML too**: `<source><space>` point, box,
+  spherical/cylindrical origins and `<mesh>` blocks draw like their Python
+  counterparts.
+- **Cell Map restructured for reading a deck, not just listing it.** A
+  Structure tree on the left shows the fill hierarchy top down — root → core
+  lattice → assembly lattices → pin universes — with placement counts (`×264
+  u=116`), each shared universe expanded once and referenced afterwards.
+  Universe headers carry a one-line summary (lattice → 8 universes, 361
+  placements · UO2 1.6% / Helium / Zircaloy) so a collapsed map is still
+  informative; big decks start folded past the core lattice and open on the
+  root at readable zoom. Cells show a role badge and are ordered lattice →
+  fill → material → void → outside. Selecting a cell or universe shows a
+  "Path from root" breadcrumb. Serpent, SCONE and OpenMC decks keep their own
+  names — `cell cCore`, universe `a16`, material `fuel16`, surface `sCB1` —
+  where the map used to show `cell 247`, `u=46`, `m1`; synthesized pin rings
+  are labelled by radius (`r0.4096`). Click-to-reveal searches by those
+  names, so it now finds SCONE and Serpent cards too.
+- **Cell Map asks where to open** (new window or tab) every time, unless you
+  pin the choice in the prompt or in `owen.cellMap.openIn` (default `ask`).
+  Clicking a cell reveals the deck's *existing* tab — wherever it is — and
+  never opens a second copy in the map's window.
+- **Cell Map side text is back at editor size.** Only the cell cards are
+  larger (14px); the toolbar, tree and detail pane are 12px again.
+- **PHITS is a syntax-only tier, by decision** (grammar, snippets, reference
+  links). The README says so; nothing implies a physics check has been done.
+- **Marketplace / README lead-in** names the new tools (workspace validation,
+  geometry checker and volumes, Compare Geometry, semantic diff, all-pairs
+  converters, convergence, hover, notebooks, offline). The top screenshot is
+  the Cell Map of a lattice, not the Lattice Builder GIF.
+
+### Fixed
+
+- **Serpent lattices are read the right way up.** Serpent lists a `lat` map
+  bottom row first ("the first Nx values create the bottommost, minimum-y
+  row" — Serpent input manual), the opposite of OpenMC and SCONE. The preview,
+  the Cell Map, Check Geometry and Compare Geometry assumed top row first and
+  drew every Serpent core mirrored in y — which also hid that the bundled
+  BEAVRS Serpent deck was written upside down. The Lattice Builder now emits
+  Serpent (and MCNP) maps bottom row first, and the MCNP→Serpent converter no
+  longer flips rows.
+- **`mcnp.lattice-index-direction`** (new warning). MCNP puts lattice element
+  (1,0,0) beyond the *first* listed surface of a `lat=1` cell (manual
+  §5.5.5). A cell written `60 -61 62 -63` with 60 the −x plane runs +i toward
+  −x and reads its fill array rotated 180°: baffle plates on the wrong faces,
+  asymmetric burnable-absorber patterns flipped. The bundled BEAVRS MCNP deck
+  shipped that way; Compare Geometry against the SCONE twin (98 % instead of
+  100 %) found it. The rule suggests the corrected surface order.
+- **Bundled BEAVRS decks are now one geometry in all four codes.** MCNP:
+  all 16 lattice cells list the +x/+y planes first, and every card image is
+  ≤ 80 columns (304 fill rows were 81–82). Serpent: all 16 lattice maps
+  reversed to bottom-first, and the core and every assembly carry a ring of
+  water pins so the 0.043 cm strip between a 17-pin array and the
+  21.50364 cm assembly pitch is defined (it was undefined — lost particles).
+  SCONE: `core` is `(-7)` instead of `(-5)`, and the water under the four
+  shield panels is four explicit sectors instead of one annulus the panels
+  shadowed by list order — zero overlaps now. SCONE↔MCNP and SCONE↔Serpent
+  agree at 100.000 % of 60 000 sampled points; a test keeps them there.
+- **MCNP material classification decides by dominant element.** Zircaloy-4's
+  trace Fe/Cr made every BEAVRS clad "Steel"/structure, and SS304, carbon
+  steel and Inconel all collapsed to one "Steel". Names are now Zircaloy,
+  SS304, Carbon steel, Inconel, Borated water, Gadolinia, Graphite, …, and a
+  cross-code comparison pairs one MCNP material with one Serpent/SCONE one.
+- **Burnable-absorber and control rods classify as absorbers** in the MCNP
+  and Serpent fast paths (they read as instrument tubes because of their gas
+  gap), so the four BEAVRS renders show the same 1 252 BA rods.
+- **Serpent full cores no longer default to concentric-layer detail.** The
+  pin count followed an axial-stack column to its bottom segment (a water
+  pin) before testing it as a pin, so a 55 777-pin core counted as 193 and
+  chose layers (170 000 primitives) while MCNP/OpenMC/SCONE chose discs.
+- **Check Geometry: a filled universe only has to cover its container.** A
+  SCONE cylinder stack inside a root cylinder reported 646 "gap" points at
+  the corners of its own bounding box that no particle can reach; and
+  universes nothing places (withdrawn control-rod stacks) are skipped as
+  unused instead of reported as gaps.
+- `SupportPlateBW` (BEAVRS borated water in the support plate) classifies as
+  moderator, not structure.
+- **Cell Map is no longer blank in its own window.** Moving the map to a
+  floating window leaves VS Code with no active text editor, and the map read
+  the active editor to decide what to draw — so it opened on "0 cells ·
+  0 universes · open a Monte Carlo deck" for every deck. The panel now
+  remembers the deck it was opened on and falls back to a visible or open one,
+  and it re-reads after the move (the webview reloads and drops whatever was
+  posted before).
+- **The stand-in pin no longer poses as your model.** An OpenMC deck that
+  builds its geometry inside Python got a 0.4 cm placeholder pin for the few
+  seconds before the live export landed, which looked like OWEN had read a
+  2 m chamber and drawn it wrong. The stage now waits ("Reading the real model
+  from OpenMC…") and the pin comes back only if the export fails.
+- **3D preview now draws the chamber, not just end-cap disks.** Annular
+  cells (FLiNaK blankets, steel first walls, clad) carried `innerRadius`
+  but the mesh was an open-ended outer tube — a wireframe cage — so an IFE
+  cylindrical chamber looked like two pink lids. Rings are extruded with a
+  real hole; spherical shells are lathed. Thick walls (≥ 2 cm) stay opaque.
+- **Interior void cells are drawn as translucent cavities** (toggle
+  "Void / Cavity"). The graveyard and a bounding-sphere exterior are still
+  skipped so the camera does not zoom out to empty space.
+
+### Changed
+
+- **Cell Map opens in a new editor window**, not a split tab beside the
+  deck. VS Code 1.86+ `workbench.action.moveEditorToNewWindow`; older
+  builds still fall back to a side group. Where it opens is now
+  `owen.cellMap.openIn` (`newWindow` / `beside` / `activeGroup`). VS Code owns
+  the position and size of floating windows — an extension cannot pass bounds —
+  so move or maximize the window once and it reopens there, or switch to
+  `beside` to keep the map inside the main window.
+### Fixed
+
+- **OpenMC / all-code 3D preview of non-zero roots and fill wrappers.** The
+  CSG path used to draw only universe 0, so live OpenMC `Geometry.export_to_xml()`
+  (root id 1) showed "0 primitives from N cell(s)". The first patch special-cased
+  id 1. That was not general: an OpenMC root at 5, a busy world next to an
+  orphan universe 1, MCNP `u=1` with no universe 0, Serpent cells in a named
+  universe, and SCONE `rootUniverse fill u<N>` (material cells live in the
+  filled universe) still failed. `pickRootId` now picks the unfilled populated
+  universe (prefer 0 when it is a root, else the unique root, else the busiest).
+  CSG walks uniform fills from that root. Lattice fast paths use the same
+  picker. Serpent/SCONE 3D fall through to CSG when there is no pin/lattice.
+- **`m0 NLIB=.81c` plus bare ZAIDs with weight fractions** is no longer flagged
+  as mixed atom/weight (`mcnp.material-sign`). The integer ZAID was being read
+  as a positive fraction. `NLIB=` / `PLIB=` / `GAS=` on `Mn` are skipped the
+  same way. `M0` is not reported unused.
+
 ## [1.4.4] - 2026-08-29
 
 ### Added

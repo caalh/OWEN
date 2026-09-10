@@ -20,6 +20,7 @@ import { registerMcnpIndexCache } from './references/providers';
 import { registerMcnpReferencesView } from './references/referencesView';
 import { startLanguageClient, stopLanguageClient } from './lsp/client';
 import { registerOpenmcXmlDiagnostics } from './language/openmcXmlHost';
+import { registerOpenmcHover } from './language/openmcHover';
 import { registerConvertDeckAdapter } from './converter/adapterCommand';
 import { openAllenCrossSections } from './allen/panel';
 import { openResultsViewer } from './results/panel';
@@ -27,6 +28,9 @@ import { setMcnpProjectRoot } from './commands/setMcnpProjectRoot';
 import { registerReportProblem } from './commands/reportProblem';
 import { registerOpenReference } from './commands/openReference';
 import { registerCellMap } from './cellmap/panel';
+import { registerGeometryTools } from './geomcheck/panel';
+import { registerCompareTools } from './compare/panel';
+import { registerWorkspaceValidation } from './workspace/panel';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('OWEN extension activated');
@@ -46,6 +50,8 @@ export function activate(context: vscode.ExtensionContext) {
     // OpenMC XML (materials/geometry/settings/tallies/model.xml) carries
     // languageId "xml", so it bypasses the LSP; the host validates it directly.
     registerOpenmcXmlDiagnostics(context);
+    // Nuclide hover for OpenMC Python decks (the LSP covers mcnp/serpent/scone).
+    registerOpenmcHover(context);
 
     context.subscriptions.push(
         vscode.commands.registerCommand('owen.openLatticeBuilder', () => {
@@ -84,6 +90,9 @@ export function activate(context: vscode.ExtensionContext) {
         registerReportProblem(context),
         registerOpenReference(context),
         registerCellMap(context),
+        ...registerGeometryTools(),
+        ...registerCompareTools(),
+        ...registerWorkspaceValidation(context),
 
         registerGeometryPreview(context),
         registerOpenmcNativeRender(context),

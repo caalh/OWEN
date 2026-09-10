@@ -58,6 +58,8 @@ export function mcnpCrossReferenceDiagnostics(
     if (warnUnused) {
         for (const def of index.definitions.values()) {
             if (!UNUSED_HINT_KINDS.includes(def.kind)) continue;
+            // M0 is the default-library card (§5.6.1), never a cell fill.
+            if (def.kind === 'material' && def.id === 0) continue;
             if (referenced.has(`${def.kind}:${def.id}`)) continue;
             diags.push({
                 line: def.line,

@@ -14,6 +14,7 @@
 // rootUniverse. Anything else warns and is skipped — never silently dropped.
 
 import {
+    emptyGeometryNames,
     McnpCell,
     McnpGeometryModel,
     McnpSurface,
@@ -129,12 +130,13 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
     const surfaces = new Map<number, McnpSurface>();
     const cells = new Map<number, McnpCell>();
 
+    const names = emptyGeometryNames();
     const materialIds = new Map<string, number>();
     let nextMaterial = 1;
     const materialId = (name: string): number => {
         if (!name || name.toLowerCase() === 'void' || name.toLowerCase() === 'outside') return 0;
         let id = materialIds.get(name);
-        if (id === undefined) { id = nextMaterial++; materialIds.set(name, id); }
+        if (id === undefined) { id = nextMaterial++; materialIds.set(name, id); names.materials.set(id, name); }
         return id;
     };
 
@@ -206,6 +208,7 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
     /** Instantiate one SCONE cell into a model cell within `universe`. */
     const placeCell = (sc: SconeCell, universe: number): void => {
         const { region, order } = parseRegionExpression(sc.surfs);
+        names.cells.set(nextSynthCell, String(sc.id));
         cells.set(nextSynthCell, {
             id: nextSynthCell,
             material: sc.material,
@@ -284,6 +287,7 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
                             id: outerSurf, mnemonic: 'zcylinder',
                             shape: cylShape('z', 0, 0, r), tr: null, boundary: 'none',
                         });
+                        names.surfaces.set(outerSurf, `r${r}`);
                     }
                     const tokens: string[] = [];
                     if (outerSurf !== null) tokens.push(`-${outerSurf}`);
@@ -292,6 +296,7 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
                     const { region, order } = parseRegionExpression(tokens);
                     const fillRaw = fills[k] ?? '';
                     const um = fillRaw.match(/u<\s*(\d+)\s*>/);
+                    names.cells.set(nextSynthCell, `pinUniverse ${id}`);
                     cells.set(nextSynthCell, {
                         id: nextSynthCell++,
                         material: um ? 0 : materialId(fillRaw),
@@ -358,6 +363,7 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
                     Math.abs(cx) > 1e-12 || Math.abs(cy) > 1e-12
                         ? { o: [cx, cy, 0], m: null, origin: 1 }
                         : null;
+                names.cells.set(nextSynthCell, `latUniverse ${id}`);
                 cells.set(nextSynthCell, {
                     id: nextSynthCell++,
                     material: padMat ? materialId(padMat) : 0,
@@ -385,6 +391,7 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
     if (rootFill !== null) {
         const borderTokens = rootBorder !== null ? [`-${rootBorder}`] : [`-${infSurface()}`];
         const { region, order } = parseRegionExpression(borderTokens);
+        names.cells.set(nextSynthCell, 'rootUniverse');
         cells.set(nextSynthCell, {
             id: nextSynthCell++,
             material: 0,
@@ -430,6 +437,7 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
         transforms: new Map(),
         generatedSurfaces: new Map(),
         warnings,
+        names,
     };
 }
 

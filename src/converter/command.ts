@@ -5,10 +5,11 @@
 
 import * as vscode from 'vscode';
 import {
-    convert, detectConversionSource, CONVERSION_TARGETS,
+    convert, detectConversionSource, isDirectConversion, CONVERSION_TARGETS,
     SourceLanguage, TargetLanguage, ConversionResult,
 } from './index';
 import { showRosettaDiff } from './rosettaView';
+import { deckSourceOf } from '../util/deckSource';
 
 const TARGET_LABELS: Record<TargetLanguage, string> = {
     mcnp: 'MCNP input deck',
@@ -24,24 +25,29 @@ export function registerConvertDeck(context: vscode.ExtensionContext): vscode.Di
             vscode.window.showWarningMessage('OWEN: open the deck you want to convert first.');
             return;
         }
-        const text = editor.document.getText();
+        // A notebook cell converts the whole notebook's model.
+        const nbSrc = deckSourceOf(editor.document);
+        const text = nbSrc?.fromNotebook ? nbSrc.text : editor.document.getText();
 
         let source: SourceLanguage | null = null;
         const langId = editor.document.languageId;
-        if (langId === 'mcnp') source = 'mcnp';
+        if (langId === 'mcnp' || langId === 'serpent' || langId === 'scone') source = langId;
         else if (langId === 'python') source = detectConversionSource(text) === 'openmc' ? 'openmc' : null;
         else source = detectConversionSource(text);
 
         if (!source) {
             vscode.window.showWarningMessage(
-                'OWEN: cannot convert this file — supported sources are MCNP decks and OpenMC Python scripts.',
+                'OWEN: cannot convert this file — supported sources are MCNP, Serpent and SCONE decks and OpenMC Python scripts.',
             );
             return;
         }
 
         const targets = CONVERSION_TARGETS[source];
-        const maturity = (t: TargetLanguage) =>
-            (t === 'openmc' || t === 'mcnp') ? 'stable' : 'experimental';
+        const maturity = (t: TargetLanguage) => {
+            const stable = (source === 'mcnp' && t === 'openmc') || (source === 'openmc' && t === 'mcnp');
+            if (stable) return 'stable';
+            return isDirectConversion(source!, t) ? 'experimental' : 'experimental · via MCNP';
+        };
         const pick = await vscode.window.showQuickPick(
             targets.map((t) => ({
                 label: `${source!.toUpperCase()} → ${TARGET_LABELS[t]}`,

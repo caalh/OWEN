@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { vendorUri } from '../util/vendor';
 import { detectNuclides } from './detectNuclides';
 import {
     allenDataBaseUrl,
@@ -15,6 +16,7 @@ export class AllenPanel {
     private static readonly viewType = 'owen.allen';
 
     private readonly _panel: vscode.WebviewPanel;
+    private readonly _uplotBase: string;
     private _disposables: vscode.Disposable[] = [];
     private _index: AllenIndex | undefined;
 
@@ -44,10 +46,11 @@ export class AllenPanel {
 
     private constructor(
         panel: vscode.WebviewPanel,
-        _extensionUri: vscode.Uri,
+        extensionUri: vscode.Uri,
         initial?: { nuclides?: string[]; reactions?: string[]; temperature?: number },
     ) {
         this._panel = panel;
+        this._uplotBase = vendorUri(panel.webview, extensionUri, 'uplot');
         this._panel.webview.html = this._placeholderHtml();
 
         this._panel.webview.onDidReceiveMessage(
@@ -155,11 +158,12 @@ export class AllenPanel {
     }
 
     private _getHtml(baseUrl: string): string {
+        const uplotBase = this._uplotBase;
         const csp = [
             "default-src 'none'",
             `img-src ${this._panel.webview.cspSource} https: data:`,
-            `style-src ${this._panel.webview.cspSource} 'unsafe-inline' https://unpkg.com`,
-            `script-src ${this._panel.webview.cspSource} 'unsafe-inline' https://unpkg.com`,
+            `style-src ${this._panel.webview.cspSource} 'unsafe-inline'`,
+            `script-src ${this._panel.webview.cspSource} 'unsafe-inline'`,
             `connect-src ${this._panel.webview.cspSource} https://reactormc.net https://*.reactormc.net ${baseUrl}`,
         ].join('; ');
 
@@ -169,7 +173,7 @@ export class AllenPanel {
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css" />
+  <link rel="stylesheet" href="${uplotBase}/uPlot.min.css" />
   <style>
     :root { --bg: #0b1020; --card: #121a2e; --text: #e2e8f0; --muted: #94a3b8; --accent: #f87171; --border: rgba(255,255,255,0.08); }
     * { box-sizing: border-box; }
@@ -231,7 +235,7 @@ export class AllenPanel {
       <div id="legend" class="legend"></div>
     </main>
   </div>
-  <script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+  <script src="${uplotBase}/uPlot.iife.min.js"></script>
   <script>
     const vscode = acquireVsCodeApi();
     const state = { nuclides: ['U235','U238'], reactions: ['fission','capture'], temperature: 294, index: null, allNuclides: [], reactionsMeta: [], plot: null, curves: [] };

@@ -25,6 +25,8 @@ import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, Fid
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import { BaffleNeighborhood, bafflePlates, emitSconeRadialStructure } from '../radialStructure';
+import { parseSconeGeometry } from '../sconeGeometry';
+import { buildCsgScene } from '../csgScene';
 
 interface LeafBlock {
     name: string;
@@ -149,6 +151,8 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     }
 
     if (pinDefs.size === 0 && latDefs.size === 0) {
+        const csg = trySconeCsg(rawText, warnings, notes);
+        if (csg) return csg;
         warnings.push('No pinUniverse or latUniverse blocks were found — nothing to render. Check that the deck contains a geometry { universes { … } } section.');
         return { cylinders: [], warnings, notes };
     }
@@ -606,4 +610,21 @@ function collectVessel(surfaces: Map<number, SurfaceDef>): { shells: SurfaceDef[
     }
     shells.sort((a, b) => (b.radius ?? 0) - (a.radius ?? 0));
     return { shells, height };
+}
+
+function trySconeCsg(text: string, warnings: string[], notes: string[]): ParseResult | null {
+    try {
+        const model = parseSconeGeometry(text);
+        if (model.cells.size === 0) return null;
+        const scene = buildCsgScene(model, new Map());
+        if (scene.cylinders.length === 0) return null;
+        for (const w of model.warnings) warnings.push(w);
+        for (const w of scene.warnings) warnings.push(w);
+        for (const n of scene.notes) notes.push(n);
+        notes.push(`Exact-geometry engine: ${scene.cylinders.length} primitive(s) from ${model.cells.size} cell(s).`);
+        return { cylinders: scene.cylinders, warnings, notes };
+    } catch (err) {
+        warnings.push(`Exact-geometry engine failed (${err instanceof Error ? err.message : String(err)}).`);
+        return null;
+    }
 }

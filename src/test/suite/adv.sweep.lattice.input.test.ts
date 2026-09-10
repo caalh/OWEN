@@ -128,7 +128,7 @@ suite('ADV lattice codegen', () => {
         const rows = mcnp.split('\n').filter((l) => /^ {4}[\d ]+$/.test(l));
         assert.strictEqual(rows.length, 50, `MCNP rows: ${rows.length}`);
         const serpent = genSerpent(spec);
-        const sRows = serpent.split('\n').slice(2);
+        const sRows = serpent.split('\n').filter((l) => l.trim() && !/^%|^lat /.test(l));
         assert.strictEqual(sRows.length, 50);
         assert.ok(sRows.every((r) => r.trim().split(/\s+/).length === 50));
         const scone = genSCONE(spec);

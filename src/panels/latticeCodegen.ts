@@ -78,7 +78,11 @@ export function genMCNP(spec: LatticeSpec): string {
         st.mcnpCell + ' 0  -' + s[0] + ' ' + s[1] + ' -' + s[2] + ' ' + s[3] +
             '  lat=1 u=' + st.mcnpLatticeUniverse + ' imp:n=1 fill=' + range,
     ];
-    spec.grid.forEach((row) => lines.push('    ' + row.map((v) => uni[v] !== undefined ? uni[v] : v).join(' ')));
+    // The editor grid is drawn top row first. MCNP's fill array runs from the
+    // lowest j index (the bottom row, since the +y plane is listed first
+    // above and +j therefore points +y), so the rows go out reversed.
+    [...spec.grid].reverse().forEach((row) => lines.push('    ' + row.map((v) => uni[v] !== undefined ? uni[v] : v).join(' ')));
+    lines.push('c  (rows listed bottom to top: MCNP fills from the lowest j index, manual 5.5.5)');
     lines.push('c');
     lines.push('c  Lattice cell surfaces (half-pitch = ' + half.toFixed(4) + ' cm)');
     lines.push(s[0] + '  px  ' + half.toFixed(4));
@@ -115,9 +119,11 @@ export function genSerpent(spec: LatticeSpec): string {
     spec.pins.forEach((p) => { names[p.id] = p.serpentName; });
     const lines = [
         '% --- ' + gridSize + 'x' + gridSize + ' Lattice ---',
+        '% Serpent reads the FIRST row as the bottom (minimum y) row, so the rows',
+        '% below are the picture upside down (input manual, lat card).',
         'lat ' + latId + ' 1  0.0 0.0  ' + gridSize + ' ' + gridSize + '  ' + pitch.toFixed(4),
     ];
-    spec.grid.forEach((row) => lines.push(row.map((v) => names[v] !== undefined ? names[v] : ('U' + v)).join(' ')));
+    [...spec.grid].reverse().forEach((row) => lines.push(row.map((v) => names[v] !== undefined ? names[v] : ('U' + v)).join(' ')));
     return lines.join('\n');
 }
 

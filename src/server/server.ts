@@ -34,6 +34,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 
 import { mcnpCrossReferenceDiagnostics } from '../language/crossReference';
 import { runLanguageRules } from '../language/rules';
+import { tokenAt, zaidHoverMarkdown } from '../language/zaidHover';
 import { PlainDiagnostic, RulesLanguage, RulesOptions } from '../language/types';
 import {
     buildMcnpReferenceIndex,
@@ -74,6 +75,23 @@ function rulesLanguage(languageId: string): RulesLanguage | null {
         return languageId;
     }
     return null;
+}
+
+/**
+ * Is `line` in the MCNP data block (after the second blank-line delimiter)?
+ * Cell and surface cards hold ids that look like short ZAIDs (`1001`), and
+ * only material/MT cards carry real ones.
+ */
+function isMcnpDataLine(doc: TextDocument, line: number): boolean {
+    const lines = doc.getText().split(/\r?\n/);
+    let blanks = 0;
+    for (let i = 1; i < Math.min(line, lines.length); i++) {
+        if (lines[i].trim() === '') blanks++;
+    }
+    if (blanks >= 2) return true;
+    // A `read`/`m`-card-only fragment (include file) has no delimiters; treat a
+    // line that starts with an m/mt card as data.
+    return /^\s*m[t]?\d+\b/i.test(lines[line] ?? '');
 }
 
 function toLspDiagnostic(d: PlainDiagnostic): Diagnostic {
@@ -301,9 +319,31 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
 
     connection.onHover((params): Hover | null => {
         const doc = documents.get(params.textDocument.uri);
-        if (!doc || doc.languageId !== 'mcnp') return null;
+        if (!doc) return null;
+        const lang = rulesLanguage(doc.languageId);
+        if (!lang) return null;
+        const { line, character } = params.position;
+
+        // Nuclide identifiers and library suffixes first, for every language:
+        // `92238.80c` is a number to the reference index, and the suffix is
+        // the part people misread. Only the data block has ZAIDs in MCNP, so
+        // an id like `1001` on a cell card stays an entity hover.
+        const lineText = doc.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } })
+            .replace(/\r?\n$/, '');
+        const tok = tokenAt(lineText, character);
+        if (tok && !(lang === 'mcnp' && !isMcnpDataLine(doc, line))) {
+            const md = zaidHoverMarkdown(tok.text, lang);
+            if (md) {
+                return {
+                    contents: { kind: MarkupKind.Markdown, value: md },
+                    range: { start: { line, character: tok.start }, end: { line, character: tok.end } },
+                };
+            }
+        }
+
+        if (lang !== 'mcnp') return null;
         const index = indexFor(doc);
-        const occ = resolveAt(index, params.position.line, params.position.character);
+        const occ = resolveAt(index, line, character);
         if (!occ) return null;
         return {
             contents: { kind: MarkupKind.Markdown, value: describeEntity(index, occ) },

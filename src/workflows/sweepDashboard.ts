@@ -9,6 +9,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { vendorUri } from '../util/vendor';
 import type { SweepManifest } from './sweepCore';
 import type { RunResults } from '../results/types';
 import { detectOutputsInDir, pickPrimaryOutput } from '../results/detectOutputs';
@@ -41,7 +42,7 @@ export class SweepDashboardPanel {
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
 
-    public static async createOrShow(sweepDir: string) {
+    public static async createOrShow(sweepDir: string, extensionUri: vscode.Uri) {
         const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.Beside;
 
         let data: SweepDashboardData;
@@ -66,12 +67,12 @@ export class SweepDashboardPanel {
             column,
             { enableScripts: true, retainContextWhenHidden: true },
         );
-        SweepDashboardPanel.currentPanel = new SweepDashboardPanel(panel, data, sweepDir);
+        SweepDashboardPanel.currentPanel = new SweepDashboardPanel(panel, data, sweepDir, extensionUri);
     }
 
-    private constructor(panel: vscode.WebviewPanel, data: SweepDashboardData, sweepDir: string) {
+    private constructor(panel: vscode.WebviewPanel, data: SweepDashboardData, sweepDir: string, extensionUri: vscode.Uri) {
         this._panel = panel;
-        this._panel.webview.html = this._getHtml();
+        this._panel.webview.html = this._getHtml(vendorUri(panel.webview, extensionUri, 'uplot'));
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._panel.webview.onDidReceiveMessage(
             async (msg) => {
@@ -98,11 +99,11 @@ export class SweepDashboardPanel {
         }
     }
 
-    private _getHtml(): string {
+    private _getHtml(uplotBase: string): string {
         const csp = [
             "default-src 'none'",
-            `style-src ${this._panel.webview.cspSource} 'unsafe-inline' https://unpkg.com`,
-            `script-src ${this._panel.webview.cspSource} 'unsafe-inline' https://unpkg.com`,
+            `style-src ${this._panel.webview.cspSource} 'unsafe-inline'`,
+            `script-src ${this._panel.webview.cspSource} 'unsafe-inline'`,
         ].join('; ');
 
         return `<!DOCTYPE html>
@@ -110,7 +111,7 @@ export class SweepDashboardPanel {
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
-  <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css" />
+  <link rel="stylesheet" href="${uplotBase}/uPlot.min.css" />
   <style>
     :root { --bg: #0b1020; --card: #121a2e; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --border: rgba(255,255,255,0.08); }
     body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 13px; }
@@ -149,7 +150,7 @@ export class SweepDashboardPanel {
       <tbody id="runBody"></tbody>
     </table>
   </main>
-  <script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+  <script src="${uplotBase}/uPlot.iife.min.js"></script>
   <script>
     const vscode = acquireVsCodeApi();
     let mainPlot = null;
@@ -285,7 +286,7 @@ export class SweepDashboardPanel {
     }
 }
 
-export function registerViewSweepResults(_context: vscode.ExtensionContext): vscode.Disposable {
+export function registerViewSweepResults(context: vscode.ExtensionContext): vscode.Disposable {
     return vscode.commands.registerCommand('owen.viewSweepResults', async () => {
         const editor = vscode.window.activeTextEditor;
         const defaultUri = editor && editor.document.uri.scheme === 'file'
@@ -306,6 +307,6 @@ export function registerViewSweepResults(_context: vscode.ExtensionContext): vsc
             );
             return;
         }
-        await SweepDashboardPanel.createOrShow(dir);
+        await SweepDashboardPanel.createOrShow(dir, context.extensionUri);
     });
 }

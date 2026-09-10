@@ -28,3 +28,8 @@ owen-*.vsix
 .vsixmanifest
 assets/belvoirdynamics-b.png
 media/**
+# Browser libraries the webviews load offline (three.js, uPlot) — see
+# scripts/vendor-webview-libs.mjs. Demo GIFs stay out; these must ship.
+!media/vendor/**
+# Marketplace README lead screenshot (Cell Map).
+!media/demo-cell-map.png

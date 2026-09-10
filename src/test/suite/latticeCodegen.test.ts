@@ -33,6 +33,48 @@ function fuelWithCenterGuide(): number[][] {
     ];
 }
 
+suite('OWEN lattice codegen — row order per code', () => {
+    // Editor grid: top row first. Guide tube (2) in the TOP-LEFT corner.
+    const grid = [
+        [2, 1, 1],
+        [1, 1, 1],
+        [1, 1, 1],
+    ];
+    const rowsOf = (out: string, re: RegExp) => out.split('\n').filter((l) => re.test(l)).map((l) => l.trim());
+
+    test('MCNP lists the bottom row first and the +x/+y planes first', () => {
+        const out = genMCNP(makeSpec(grid));
+        const rows = rowsOf(out, /^\s+\d+( \d+)+\s*$/);
+        assert.strictEqual(rows.length, 3);
+        // The guide tube's universe id sits in the LAST data row (top of the picture).
+        const spec = makeSpec(grid);
+        const guideU = String(spec.pins.find((p) => p.id === 2)!.mcnpUniverse);
+        assert.ok(rows[2].startsWith(guideU + ' '), `top-left guide tube must be first entry of the last row: ${rows[2]}`);
+        assert.ok(!rows[0].includes(guideU), 'and absent from the first (bottom) row');
+        assert.ok(/ 0 {2}-\d+ \d+ -\d+ \d+\s+lat=1/.test(out), 'high plane of each pair listed first');
+    });
+
+    test('Serpent lists the bottom row first', () => {
+        const spec = makeSpec(grid);
+        const out = genSerpent(spec);
+        const guide = spec.pins.find((p) => p.id === 2)!.serpentName;
+        const rows = out.split('\n').filter((l) => !/^%|^lat /.test(l) && l.trim());
+        assert.strictEqual(rows.length, 3);
+        assert.ok(rows[2].startsWith(guide + ' '), `guide tube in the last (top) row: ${rows[2]}`);
+        assert.ok(!rows[0].includes(guide));
+    });
+
+    test('OpenMC and SCONE list the top row first (WYSIWYG)', () => {
+        const spec = makeSpec(grid);
+        const guideO = spec.pins.find((p) => p.id === 2)!.openmcName;
+        const oRows = genOpenMC(spec).split('\n').filter((l) => /^\s+\[/.test(l));
+        assert.ok(oRows[0].includes(guideO) && !oRows[2].includes(guideO), 'OpenMC: first row is the top');
+        const guideS = String(spec.pins.find((p) => p.id === 2)!.sconeId);
+        const sRows = genSCONE(spec).split('\n').filter((l) => /^\s+\d+( \d+)*$/.test(l));
+        assert.ok(sRows[0].trim().startsWith(guideS + ' ') && !sRows[2].includes(guideS), 'SCONE: first row is the top');
+    });
+});
+
 suite('OWEN lattice codegen — editable identifiers', () => {
     test('MCNP: custom universe numbers + structural ids appear in output', () => {
         const spec = makeSpec(fuelWithCenterGuide(), {

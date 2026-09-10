@@ -39,7 +39,9 @@
       "end": "$",
       "patterns": [
         { "include": "#comment" },
+        { "include": "#materialKeyword" },
         { "include": "#zaid" },
+        { "include": "#bareZaid" },
         { "include": "#thermalLib" },
         { "include": "#number" }
       ]
@@ -143,8 +145,16 @@
       "match": "\\b[a-zA-Z][\\w-]*\\.\\d{2,}[tcdmgpuyehorsaTCDMGPUYEHORSA]\\b",
       "name": "constant.other.library.mcnp"
     },
+    "materialKeyword": {
+      "match": "\\b(nlib|plib|pnlib|elib|hlib|alib|gas|estep|cond)\\s*=\\s*\\.?[\\w.]+",
+      "name": "keyword.other.library.mcnp"
+    },
     "zaid": {
       "match": "\\b\\d{4,6}\\.\\d{2,}[tcdmgpuyehorsaTCDMGPUYEHORSA]\\b",
+      "name": "constant.other.zaid.mcnp"
+    },
+    "bareZaid": {
+      "match": "\\b\\d{4,6}\\b(?!\\.\\d)",
       "name": "constant.other.zaid.mcnp"
     },
     "number": {

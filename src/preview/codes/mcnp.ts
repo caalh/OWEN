@@ -31,6 +31,7 @@ import {
 } from '../radialStructure';
 import { parseMcnpGeometry } from '../mcnpGeometry';
 import { buildCsgScene } from '../csgScene';
+import { pickRootId } from '../rootUniverse';
 
 type SurfaceType =
     | 'cz' | 'cx' | 'cy' | 'c/z' | 'c/x' | 'c/y'
@@ -88,7 +89,7 @@ interface PinLayer {
 interface PinUniverse {
     id: number;
     layers: PinLayer[];
-    kind: 'fuel' | 'guide' | 'instrument' | 'other';
+    kind: 'fuel' | 'guide' | 'instrument' | 'absorber' | 'other';
 }
 
 interface LatUniverse {
@@ -203,11 +204,27 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
     const hasAxial = axialStacks.size > 0;
     const requestedAxial = !!opts?.axial && hasAxial;
 
-    // Determine the top universe to place: a universe-0 cell with fill=,
+    // Determine the top universe to place: a root-universe cell with fill=,
     // preferring one that resolves to a lattice; else the largest lattice.
+    // Root = unfilled populated universe (prefer 0), not "whatever is u=0".
+    const filledUids = new Set<number>();
+    for (const group of byUniverse.values()) {
+        for (const c of group) {
+            if (!c.fill) continue;
+            if (c.fill.uniform !== null) filledUids.add(c.fill.uniform);
+            for (const row of c.fill.grid) for (const u of row) filledUids.add(u);
+        }
+    }
+    const populatedUids = [...byUniverse.keys()];
+    const rootUid = pickRootId(
+        populatedUids,
+        filledUids,
+        (id) => byUniverse.get(id)?.length ?? 0,
+        0,
+    ) ?? 0;
     let topUid: number | null = null;
     let rootTransform: CellTransform | null = null;
-    for (const c of byUniverse.get(0) ?? []) {
+    for (const c of byUniverse.get(rootUid) ?? []) {
         if (c.fill && c.fill.uniform !== null) {
             const f = c.fill.uniform;
             if (latUniverses.has(f) || pinUniverses.has(f) || axialStacks.has(f)) {
@@ -280,6 +297,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
             let color = solid.color;
             if (pin.kind === 'guide') { comp = Component.GuideTube; color = componentColor(comp); }
             else if (pin.kind === 'instrument') { comp = Component.InstrumentTube; color = componentColor(comp); }
+            else if (pin.kind === 'absorber') { comp = Component.Absorber; color = componentColor(comp); }
             cylinders.push({
                 label,
                 radius: Math.min(subPitch * 0.47, Math.max(...pin.layers.map((l) => l.radius))),
@@ -645,9 +663,28 @@ function uraniumEnrichment(fracByZaid: Map<number, number>): number | null {
     return (u5 / (u5 + u8)) * 100;
 }
 
+/**
+ * Name and component from the composition. Decided by which element
+ * *dominates*, not which elements are present: Zircaloy-4 carries Fe and Cr
+ * at a fraction of a percent and used to come out "Steel" because the
+ * Fe∧Cr test ran before the Zr test — which made every BEAVRS clad a
+ * structural material in the preview and in Compare Geometry. Alloys are also
+ * told apart (SS304 / carbon steel / Inconel) so that a cross-code comparison
+ * pairs one MCNP material with one Serpent or SCONE material.
+ */
 function classifyMaterial(zaids: number[], fracByZaid: Map<number, number>, id: number): MaterialInfo {
-    const elems = new Set(zaids.map((z) => Math.floor(z / 1000)));
-    const has = (z: number) => elems.has(z);
+    const elemFrac = new Map<number, number>();
+    let total = 0;
+    for (const z of zaids) {
+        const el = Math.floor(z / 1000);
+        const f = Math.abs(fracByZaid.get(z) ?? 0);
+        elemFrac.set(el, (elemFrac.get(el) ?? 0) + f);
+        total += f;
+    }
+    const share = (el: number): number => (total > 0 ? (elemFrac.get(el) ?? 0) / total : 0);
+    const has = (el: number) => elemFrac.has(el);
+    const dominant = [...elemFrac.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
     if (has(92) || has(94)) {
         if (has(94)) return { name: 'MOX', component: Component.Fuel };
         const enr = uraniumEnrichment(fracByZaid);
@@ -659,12 +696,30 @@ function classifyMaterial(zaids: number[], fracByZaid: Map<number, number>, id: 
     if (has(5) && has(6) && !has(26)) return { name: 'B4C', component: Component.Absorber };
     if (has(47) || has(49) || (has(48) && has(47))) return { name: 'Ag-In-Cd', component: Component.Absorber };
     if (has(5) && has(14) && has(8) && has(13)) return { name: 'Borosilicate', component: Component.Absorber };
-    if ((has(26) && has(24)) || (has(28) && has(24)) || has(25)) return { name: 'Steel', component: Component.Structure };
-    if (has(40)) return { name: 'Zircaloy', component: Component.Clad };
-    if (has(1) && has(8)) return { name: 'Water', component: Component.Moderator };
-    if (has(2)) return { name: 'Helium', component: Component.Gap };
+    if (has(64) && share(64) > 0.05) return { name: 'Gadolinia', component: Component.Absorber };
+    // Metals by dominant element.
+    if (dominant === 40) return { name: 'Zircaloy', component: Component.Clad };
+    if (dominant === 28 || (has(28) && share(28) > 0.4)) return { name: 'Inconel', component: Component.Structure };
+    if (dominant === 26) {
+        // Stainless has a real chromium fraction (18 %); carbon/low-alloy steel does not.
+        if (share(24) > 0.1) return { name: 'SS304', component: Component.Structure };
+        return { name: 'Carbon steel', component: Component.Structure };
+    }
+    if (has(1) && has(8)) {
+        // Boron in the water means borated coolant; a large boron share is a
+        // different thing (borated absorber) but both belong with the moderator.
+        return { name: has(5) ? 'Borated water' : 'Water', component: Component.Moderator };
+    }
+    if (dominant === 2) return { name: 'Helium', component: Component.Gap };
     if (has(7) && has(8)) return { name: 'Air', component: Component.Gap };
-    if (has(8) && elems.size === 1) return { name: 'Oxide', component: Component.Other };
+    if (dominant === 6 && !has(1)) return { name: 'Graphite', component: Component.Reflector };
+    if (dominant === 13) return { name: 'Aluminium', component: Component.Structure };
+    if (dominant === 74) return { name: 'Tungsten', component: Component.Structure };
+    if (dominant === 82) return { name: 'Lead', component: Component.Structure };
+    if (dominant === 3 || dominant === 9 || dominant === 11 || dominant === 19) return { name: 'Salt / coolant', component: Component.Moderator };
+    if ((has(26) && has(24)) || has(25)) return { name: 'Steel', component: Component.Structure };
+    if (has(40)) return { name: 'Zircaloy', component: Component.Clad };
+    if (has(8) && elemFrac.size === 1) return { name: 'Oxide', component: Component.Other };
     return { name: 'material', component: Component.Other };
 }
 
@@ -914,7 +969,12 @@ function buildPinUniverse(
         const innermost = layers[0];
         const innerIsAir = /air|void/i.test(innermost.material);
         const hasTube = layers.some((l) => l.component === Component.Clad || l.component === Component.Structure);
-        if (hasTube && innerIsAir) kind = 'instrument';
+        const hasAbsorber = layers.some((l) => l.component === Component.Absorber);
+        // A burnable-absorber or control rod sits inside a guide tube and has
+        // an air/helium gap of its own: test for the absorber first, or the
+        // BA rods read as instrument tubes.
+        if (hasAbsorber) kind = 'absorber';
+        else if (hasTube && innerIsAir) kind = 'instrument';
         else if (hasTube) kind = 'guide';
     }
 

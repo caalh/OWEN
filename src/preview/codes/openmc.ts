@@ -23,6 +23,17 @@ import { buildOpenmcShellScene } from './openmcShells';
 import { looksLikeOpenmcXml, openmcMaterialLookup, parseOpenmcGeometryXml } from '../openmcGeometry';
 import { buildCsgScene } from '../csgScene';
 
+/**
+ * Emitted when the text parser recovered nothing at all and fell back on a
+ * stand-in pin. The preview matches on this exact string so it can drop that
+ * pin while the live OpenMC export is on its way — a 0.4 cm pin standing in
+ * for a 2 m chamber reads as "OWEN got my geometry wrong", not as "waiting".
+ */
+export const OPENMC_PLACEHOLDER_WARNING =
+    'OWEN could not recognize this deck\'s geometry: no lattice, and no surfaces or cell regions it '
+    + 'could resolve without running the Python. The single pin shown is a placeholder, not your model '
+    + '— use "OWEN: Render with OpenMC (authoritative)" for this deck.';
+
 interface NamedValue {
     name: string;
     value: number;
@@ -133,7 +144,7 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         if (hasLattice) {
             warnings.push('A lattice was declared but its universe map could not be expanded (it is likely built by a function or comprehension OWEN does not execute). Showing a single representative pin.');
         } else {
-            warnings.push('OWEN could not recognize this deck\'s geometry: no lattice, and no surfaces or cell regions it could resolve without running the Python. The single pin shown is a placeholder, not your model — use "OWEN: Render with OpenMC (authoritative)" for this deck.');
+            warnings.push(OPENMC_PLACEHOLDER_WARNING);
         }
         return { cylinders: cyls, warnings, notes, fidelity };
     }

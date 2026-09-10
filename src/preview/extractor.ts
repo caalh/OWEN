@@ -19,6 +19,7 @@ import {
     FidelityState,
 } from './types';
 import { componentColor } from './palette';
+import { extractOverlays } from './overlays';
 import { DEFAULT_MAX_INSTANCES, simplificationNote, truncationWarning } from './budget';
 import { parseMcnp } from './codes/mcnp';
 import { parseOpenmc } from './codes/openmc';
@@ -114,6 +115,7 @@ export function buildScene(text: string, language: string, opts?: FidelityOption
         components,
         materials,
         axialLayers,
+        overlays: extractOverlays(text, language),
         warnings: result.warnings ?? [],
         notes: result.notes ?? [],
         primitiveCount: cylinders.length,

@@ -10,6 +10,7 @@
 // juxtaposition, `~(-s)` → `#(-s)`. Sense matches MCNP (`-s` = inside).
 
 import {
+    emptyGeometryNames,
     McnpCell,
     McnpGeometryModel,
     McnpSurface,
@@ -166,6 +167,10 @@ export function parseOpenmcGeometryXml(text: string): McnpGeometryModel {
     const universes = new Map<number, number[]>();
 
     const geom = /<geometry[\s>]/.test(text) ? innerXml(text, 'geometry') : text;
+    const names = emptyGeometryNames();
+    for (const [id, info] of openmcMaterialLookup(text)) {
+        if (info.name !== `m${id}`) names.materials.set(id, info.name);
+    }
 
     for (const tag of scanTags(geom, 'surface')) {
         const id = parseInt(attr(tag, 'id') ?? '', 10);
@@ -174,14 +179,21 @@ export function parseOpenmcGeometryXml(text: string): McnpGeometryModel {
         if (!Number.isFinite(id) || id <= 0) continue;
         const shape = shapeFromOpenmc(type, coeffs, warnings, id);
         if (!shape) continue;
+        const bc = (attr(tag, 'boundary') ?? 'transmission').toLowerCase();
+        const boundary: McnpSurface['boundary'] =
+            bc === 'vacuum' ? 'vacuum' : bc === 'reflective' ? 'reflecting' : bc === 'white' ? 'white' : bc === 'periodic' ? 'periodic' : 'none';
         surfaces.set(id, {
-            id, mnemonic: type, shape, tr: null, boundary: 'none',
+            id, mnemonic: type, shape, tr: null, boundary,
         });
+        const sname = attr(tag, 'name');
+        if (sname) names.surfaces.set(id, sname);
     }
 
     for (const tag of scanTags(geom, 'cell')) {
         const id = parseInt(attr(tag, 'id') ?? '', 10);
         if (!Number.isFinite(id) || id <= 0) continue;
+        const cname = attr(tag, 'name');
+        if (cname) names.cells.set(id, cname);
         const universe = parseInt(attr(tag, 'universe') ?? '0', 10) || 0;
         const matRaw = (attr(tag, 'material') ?? 'void').trim();
         const fillRaw = attr(tag, 'fill');
@@ -225,6 +237,7 @@ export function parseOpenmcGeometryXml(text: string): McnpGeometryModel {
         transforms: new Map(),
         generatedSurfaces: new Map(),
         warnings,
+        names,
     };
 }
 

@@ -48,6 +48,7 @@ export const COMPONENT_COLORS: Readonly<Record<string, string>> = {
     [Component.EndPlug]: '#8d99ae',
     [Component.Reflector]: '#9d8189',
     [Component.Vessel]: '#6c757d',
+    [Component.Void]: '#7dd3fc',
     [Component.Other]: '#577590',
 };
 
@@ -73,6 +74,8 @@ const MATERIAL_COLOR_MAP: Readonly<Record<string, string>> = {
     helium: '#ffe4b5',
     he: '#ffe4b5',
     air: '#f0f0f0',
+    void: '#7dd3fc',
+    vacuum: '#7dd3fc',
     gap: '#ffe4b5',
     ss304: '#b0b0b0',
     ss: '#b0b0b0',
@@ -142,16 +145,22 @@ export function materialColor(materialName: string): string {
  * supplied default (often a positional guess from the parser).
  */
 export function materialComponent(materialName: string, fallback: ComponentId = Component.Other): ComponentId {
-    const low = materialName.toLowerCase();
-    if (/(uo2|mox|fuel|pu239|u235|u238)/.test(low)) return Component.Fuel;
-    if (/(zirc|zr|clad)/.test(low)) return Component.Clad;
-    if (/(helium|\bhe\b|gap)/.test(low)) return Component.Gap;
-    if (/(water|h2o|coolant|moderat|borated)/.test(low)) return Component.Moderator;
-    if (/(b4c|boron|ag-?in-?cd|hafnium|absorb)/.test(low)) return Component.Absorber;
-    if (/(steel|inconel|ss304|\bss\b|nozzle|support|grid|spring)/.test(low)) return Component.Structure;
-    if (/(air|void)/.test(low)) return Component.Gap;
+    // Names arrive with underscores and digits (`DT_50_50`, `FLiNaK_liquid`,
+    // `Burn_ash_He4`); split them into words so \b matches the pieces.
+    const low = materialName.toLowerCase().replace(/[_\-.]+/g, ' ');
+    // Fusion fuel and targets before anything else: "DT_vapor" is fuel, not gap.
+    if (/(uo2|mox|fuel|pu239|u235|u238|\bdt\b|\bd t\b|deuter|triti|\bd2\b|hotspot|target|pellet)/.test(low)) return Component.Fuel;
+    if (/(zirc|\bzr\b|zry|clad)/.test(low)) return Component.Clad;
+    if (/(helium|\bhe\d?\b|\bgap\b|vapou?r|\bash\b|\bair\b|\bgas\b)/.test(low)) return Component.Gap;
+    // "SupportPlateBW" is BEAVRS' borated water inside the support plate: a
+    // BW suffix means water before "support" means structure.
+    if (/(water|h2o|d2o|coolant|moderat|borated|bw\b|flinak|flibe|\bsalt\b|lithium|\bli\b|\bpbli\b|blanket|sodium|\bna\b|\bpb\b|lead)/.test(low)) return Component.Moderator;
+    if (/(b4c|boron|ag ?in ?cd|hafnium|absorb|gadolin|cadmium|pyrex)/.test(low)) return Component.Absorber;
+    if (/(steel|inconel|ss ?\d{3}|\bss\b|nozzle|support|grid|spring|carbon steel|tungsten|\bw\b|vanadium|\bv4cr4ti\b|eurofer|f82h|liner|vessel|wall)/.test(low)) return Component.Structure;
+    if (/(^|\b)(void|vacuum)(\b|$)/.test(low)) return Component.Void;
     if (/(glass|borosilicate)/.test(low)) return Component.Absorber;
-    if (/(graphite|reflector)/.test(low)) return Component.Reflector;
+    if (/(graphite|reflector|beryll|\bbe\b|\bbeo\b)/.test(low)) return Component.Reflector;
+    if (/(concrete|shield|bioshield)/.test(low)) return Component.Structure;
     return fallback;
 }
 

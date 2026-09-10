@@ -1,5 +1,5 @@
 ---
-description: OWEN releases increment patch by exactly 1 — never skip, never bump minor/major, never 0.x.x
+description: OWEN releases increment patch by exactly 1 — never skip, never bump minor/major, never 0.x.x — and every version listing is updated together (npm run verify:version)
 alwaysApply: true
 ---
 
@@ -7,10 +7,39 @@ alwaysApply: true
 
 Every OWEN release going forward increments **patch by exactly 1**. Nothing larger.
 
-- Current line is `1.4.x`. Next numbers are `1.4.3`, `1.4.4`, … `1.4.9`, `1.4.10` (two-digit patch is required once you pass 9 — never write `1.4.01` or restart at `0.0.10`).
+- Current line is `1.4.x`. Next numbers are `1.4.6`, `1.4.7`, … `1.4.9`, `1.4.10` (two-digit patch is required once you pass 9 — never write `1.4.01` or restart at `0.0.10`).
 - **Never** bump minor (`1.5.0`) or major (`2.0.0`) unless the maintainer says so in the prompt.
 - **Never** skip a patch (`1.4.2` → `1.4.4`).
 - **Never** ship `0.x.x` or `0.0.x`. OWEN is past 1.0; do not rewind to a 0.0.xx scheme.
 - This cadence holds until a human explicitly changes it. Do not "save" 1.5.0 for a big feature.
+- Do not cut a version the maintainer has not asked for. Work accumulates under `## [Unreleased]` in `CHANGELOG.md` and ships as `owen-neutronics-<current>-local.vsix` for testing until they say "release".
 
-`package.json` `version` is the source of truth in this repo. User-facing release notes go in `CHANGELOG.md`. The public site (`reactormc.net`) still shows the last **downloadable** GitHub Release — do not advertise a version that has no VSIX.
+`package.json` `version` is the source of truth in this repo. User-facing release notes go in `CHANGELOG.md`. The public site (`reactormc.net`) shows the last **downloadable** GitHub Release — do not advertise a version that has no VSIX.
+
+# Every listing of the version (the inventory)
+
+The number is written in eight places. Two of them said **v1.0.3** while **1.4.4** was on the Marketplace, and reactormc.net/owen sat on **1.1.6** for three releases. `scripts/verify-version-listings.mjs` is the inventory and the guard; if you add a listing anywhere, add it to that script in the same change.
+
+| # | Listing | Guarded by |
+|---|---------|------------|
+| 1 | `package.json` `"version"` — the source of truth | — |
+| 2 | `package-lock.json` (top-level + `packages[""]`) | `verify:version` (npm updates it on `npm install`) |
+| 3 | `CHANGELOG.md` first `## [x.y.z]` heading | `verify:version` — must equal #1, so bump both together |
+| 4 | `README.md` — must contain **no** literal OWEN release number (the badges are live; release-asset URLs like `/releases/download/v0.2.2/...` are historical and fine) | `verify:version` |
+| 5 | Monorepo `BelvoirDynamics/README.md` product table, OWEN row `**vX.Y.Z**` | `verify:version`; `sync:version` rewrites it |
+| 6 | Monorepo `BelvoirDynamics/owen/AGENTS.md` "Current release: **vX.Y.Z**" | `verify:version`; `sync:version` rewrites it |
+| 7 | Site `reactor-monte-carlo-guide/src/lib/owenVersion.ts` (`OWEN_VERSION`, `OWEN_MARKETPLACE_VERSION`) — the only place the site holds the number; `/owen`, Home, BelvoirDynamics, GROVES import it, and the site's `npm run sync:owen-version` writes its `README.md` + `AGENTS.md` | site `npm run verify:owen-version` (fails if a page hardcodes a number); OWEN `verify:version` warns on mismatch, fails with `--release` |
+| 8 | `owen-<version>.vsix` in this folder **and** in `BelvoirDynamics/owen/` (Marketplace publish is manual from those files) | `verify:version --release` |
+
+Not listings, leave them alone: `## [1.4.4] - …` history in `CHANGELOG.md`, "shipped in v1.0.3" prose, `AI_CHANGELOG.md` entries, release-tag URLs.
+
+# Release procedure (all eight, in order)
+
+1. `package.json` version +1 patch; `npm install` (updates the lock). Move `[Unreleased]` in `CHANGELOG.md` under `## [x.y.z] - YYYY-MM-DD`.
+2. `npm run typecheck`, `npm run lint`, `npm test`, the `verify:*` scripts.
+3. `npm run sync:version` — rewrites the two monorepo markdown listings — then mirror `src/`, `package.json`, `package-lock.json`, `CHANGELOG.md`, `README.md`, `.vscodeignore`, `media/vendor`, `docs/` to `BelvoirDynamics/owen/` (never the four AI docs: see the monorepo's `owen-public-sync.mdc`).
+4. `npx @vscode/vsce package -o owen-<version>.vsix` in both folders; leak-check (no `AGENTS.md`, `AI_*`, `PROJECT_STRUCTURE.md`, `.cursor/` inside).
+5. GitHub Release `v<version>` on `caalh/owen` with the VSIX. `gh release list --repo caalh/owen` must show it before step 6.
+6. Site: edit **only** `src/lib/owenVersion.ts` (`OWEN_VERSION` = new; `OWEN_MARKETPLACE_VERSION` stays at the store's number until the maintainer publishes), then `npm run sync:owen-version` and `npm run verify:owen-version` there.
+7. `node scripts/verify-version-listings.mjs --release` here must exit 0. That is the definition of "the version is updated everywhere".
+8. Marketplace / Open VSX publish is the maintainer's manual step. When the stores catch up, set `OWEN_MARKETPLACE_VERSION` equal on the site and re-run its verify.

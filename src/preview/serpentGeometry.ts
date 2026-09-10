@@ -19,6 +19,7 @@
 // from 1, universes: "0" → 0, others from 1).
 
 import {
+    emptyGeometryNames,
     Fill,
     McnpCell,
     McnpGeometryModel,
@@ -105,20 +106,21 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
     let nextCell = 1;
     let nextSynthSurface = 1_000_000; // synthesized lattice windows live high
 
+    const names = emptyGeometryNames();
     const surfaceId = (name: string): number => {
         let id = surfaceIds.get(name);
-        if (id === undefined) { id = nextSurface++; surfaceIds.set(name, id); }
+        if (id === undefined) { id = nextSurface++; surfaceIds.set(name, id); names.surfaces.set(id, name); }
         return id;
     };
     const materialId = (name: string): number => {
         if (name === 'void') return 0;
         let id = materialIds.get(name);
-        if (id === undefined) { id = nextMaterial++; materialIds.set(name, id); }
+        if (id === undefined) { id = nextMaterial++; materialIds.set(name, id); names.materials.set(id, name); }
         return id;
     };
     const universeId = (name: string): number => {
         let id = universeIds.get(name);
-        if (id === undefined) { id = nextUniverse++; universeIds.set(name, id); }
+        if (id === undefined) { id = nextUniverse++; universeIds.set(name, id); names.universes.set(id, name); }
         return id;
     };
 
@@ -230,6 +232,7 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
             likeButOf: null,
         };
         cells.set(cell.id, cell);
+        names.cells.set(cell.id, name);
     }
 
     // Pass 3b: `pin` cards — Serpent's concentric-ring sugar. Synthesize a
@@ -259,6 +262,9 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
                     id: outerSurf, mnemonic: 'cyl',
                     shape: cylinderAlong('z', 0, 0, item.radius), tr: null, boundary: 'none',
                 });
+                // The ring boundary has no card of its own; the radius is
+                // the only name a reader would recognise.
+                names.surfaces.set(outerSurf, `r${item.radius}`);
             }
             const tokens: string[] = [];
             if (outerSurf !== null) tokens.push(`-${outerSurf}`);
@@ -274,6 +280,7 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
                 tokens.push(`-${infId}`);
             }
             const { region, order } = parseRegionExpression(tokens);
+            names.cells.set(nextCell, `pin ${name}`);
             cells.set(nextCell, {
                 id: nextCell++,
                 material: materialId(item.material),
@@ -320,7 +327,7 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
             nextSurfaceId: () => nextSynthSurface++,
             nextCellId: () => nextCell++,
         });
-        if (synth) cells.set(synth.id, synth);
+        if (synth) { cells.set(synth.id, synth); names.cells.set(synth.id, `lat ${uName}`); }
     }
 
     // Universe index.
@@ -329,8 +336,8 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
         if (!universes.has(cell.universe)) universes.set(cell.universe, []);
         universes.get(cell.universe)!.push(cell.id);
     }
-    if (!universes.has(0) || universes.get(0)!.length === 0) {
-        warnings.push('No cells in universe 0 — Serpent decks need at least one root-universe cell (and an outside cell).');
+    if (cells.size === 0) {
+        warnings.push('No cells were parsed from this Serpent deck.');
     }
 
     return {
@@ -341,6 +348,7 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
         transforms,
         generatedSurfaces: new Map(),
         warnings,
+        names,
     };
 }
 
@@ -483,8 +491,8 @@ interface SynthCtx {
  * Build a shared-model lattice cell for a Serpent `lat` card. The window
  * surfaces are synthesized so the shared lattice-basis math (first listed
  * plane pair = first index direction) reproduces Serpent's placement:
- * entries are listed row by row north→south, so the grid is flipped into a
- * j-increases-north fill array.
+ * entries are listed row by row south→north (bottom row first, per the
+ * Serpent input manual), which is already the shared model's j order.
  */
 function synthesizeLattice(def: LatDef, ctx: SynthCtx): McnpCell | null {
     const { nx, ny, pitch } = def;
@@ -531,15 +539,23 @@ function synthesizeLattice(def: LatDef, ctx: SynthCtx): McnpCell | null {
         }
     }
 
-    // Fill grid: Serpent lists rows north→south; the shared model's j runs
-    // south→north, so flip rows. Hex maps use the same row-major layout.
+    // Fill grid. Serpent lists the BOTTOM row first: "the first Nx values
+    // create the bottommost (minimum y) row from minimum x to maximum x, and
+    // the last Nx values the topmost" (serpent.vtt.fi/docs, lat card; the
+    // lattice-types page adds "the y-indexing is in the opposite direction
+    // compared to the order in which the values are entered"). That is the
+    // same south→north order the shared model's j uses, so rows are taken as
+    // written. This is the opposite of SCONE and OpenMC, whose maps are
+    // WYSIWYG (top row first) — a deck copied between codes without
+    // reversing its rows is mirrored, which is exactly what this parser used
+    // to hide by flipping here.
     const entries: { universe: number; tr: Transform | null }[] = [];
     const grid = def.entries;
     if (grid.length < nx * ny) {
         ctx.warnings.push(`lat universe: fill map has ${grid.length} entries, expected ${nx * ny}; missing entries read as empty.`);
     }
     for (let j = 0; j < ny; j++) {
-        const row = ny - 1 - j; // flip north→south listing into j-up
+        const row = j; // Serpent's first listed row is j = 0 (south)
         for (let i = 0; i < nx; i++) {
             const tok = grid[row * nx + i];
             entries.push({ universe: tok !== undefined ? ctx.universeId(tok) : 0, tr: null });

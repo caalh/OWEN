@@ -157,13 +157,15 @@ export function mcnpToSerpent(mcnpText: string): ConversionResult {
             if (pitch !== null && lf.nz === 1 && lf.universes.length === lf.nx * lf.ny) {
                 out.push(`% square lattice from MCNP cell ${c.id} (lat=1)`);
                 out.push(`lat ${latUni} 1 0.0 0.0 ${lf.nx} ${lf.ny} ${pitch}`);
-                for (let j = lf.ny - 1; j >= 0; j--) {
-                    // MCNP fill arrays list x fastest from the lowest index; Serpent reads
-                    // rows top-to-bottom, so flip the y order.
+                for (let j = 0; j < lf.ny; j++) {
+                    // MCNP fill arrays list x fastest from the lowest j; Serpent also
+                    // reads the first row as the minimum-y row (input manual, lat
+                    // card), so the rows keep their order. Both assume the MCNP
+                    // lattice cell listed its +x/+y planes first (+i = +x).
                     const row = lf.universes.slice(j * lf.nx, (j + 1) * lf.nx);
                     out.push(row.map((u) => `u${u}`).join(' '));
                 }
-                out.push(`% ${TODO_MARK}: verify lattice origin (assumed 0 0) and row order against the MCNP fill array`);
+                out.push(`% ${TODO_MARK}: verify lattice origin (assumed 0 0); rows assume the MCNP cell listed its +x/+y planes first (+i = +x, +j = +y)`);
                 issues.push({ sourceLine: c.line, message: `Cell ${c.id}: lattice converted — verify origin/row order` });
             } else {
                 issues.push({ sourceLine: c.line, message: `Cell ${c.id} lattice could not be converted (pitch underivable, 3-D fill, or ragged array)` });

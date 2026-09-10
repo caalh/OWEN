@@ -958,6 +958,7 @@ suite('MCNP geometry engine — CSG scene builder (Stages 2 & 4)', () => {
         assert.ok(annular, `inner hole was dropped: ${JSON.stringify(drawn.map((c) => [c.radius, c.innerRadius, c.height]))}`);
         assert.ok(Math.abs((annular!.innerRadius ?? 0) - 88) < 0.1, `inner radius ${annular!.innerRadius}`);
         assert.strictEqual(scene.census.failed, 0, JSON.stringify(scene.census));
+        assert.ok((annular!.height ?? 0) > 800, `annulus should run the overlapping height, got ${annular!.height}`);
     });
 
     test('graveyard is never meshed; unresolvable cells degrade with a census entry', () => {

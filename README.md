@@ -1,7 +1,7 @@
 <h1 align="center">OWEN</h1>
 <p align="center"><strong>Open Workspace for Engineered Neutronics</strong></p>
 <p align="center">Created by <strong>Aaron W. Calhoun</strong></p>
-<p align="center">The nuclear reactor modeling toolkit for VS Code &amp; Cursor — a Monte Carlo language server, visual lattice and input builders, full-core 3D geometry preview, native OpenMC rendering and verification, a cross-code results viewer, and workflow automation for <strong>MCNP</strong>, <strong>OpenMC</strong>, <strong>Serpent</strong>, and <strong>SCONE</strong>.</p>
+<p align="center">The nuclear reactor modeling toolkit for VS Code &amp; Cursor — a Monte Carlo language server with workspace validation, exact-geometry 3D preview with a geometry checker and volume calculator, cross-code Compare Geometry and semantic diff, converters between every pair of codes, a results viewer with convergence diagnostics, visual lattice and input builders, and workflow automation for <strong>MCNP</strong>, <strong>OpenMC</strong>, <strong>Serpent</strong>, and <strong>SCONE</strong> — fully offline.</p>
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics"><img alt="VS Code Marketplace Version" src="https://vsmarketplacebadges.dev/version-short/belvoirdynamics.owen-neutronics.svg?style=flat&label=VS%20Marketplace&color=0b1020"></a>
@@ -18,20 +18,25 @@
 
 OWEN brings first-class editor support for the four major Monte Carlo neutron-transport
 codes to VS Code and Cursor. Write decks faster with smart snippets, catch physics and
-cross-reference mistakes as you type with the MC Language Server, build lattices and full
-input decks visually, preview and verify geometry in 3D, convert decks between codes,
-launch solvers and parameter sweeps, and analyze the results — without leaving your editor.
+cross-reference mistakes as you type with the MC Language Server, hover any nuclide for its
+library and temperature, validate a whole project at once (OpenMC XML sets, Serpent includes,
+SCONE libraries, MCNP cross-references), build lattices and full input decks visually,
+preview geometry in 3D with source and tally overlays, check it for overlaps, gaps and lost
+particles, compute cell volumes and masses into `vol`/`sd` cards, compare the same model
+across codes or diff two revisions by meaning rather than text, convert decks between any
+two of the four codes, launch solvers and parameter sweeps, and read the results with
+convergence diagnostics — without leaving your editor, and without a network connection.
 
 ## See it in action
 
-**Visual Lattice Builder → MCNP 17×17 assembly, with live syntax highlighting.** Pick fuel,
-guide-tube, and instrument-tube positions on a grid and OWEN writes the lattice deck for you.
+**Cell Map of an MCNP lattice.** Root universe, the `lat=1` cell, and the three
+universes it places — fuel pin, guide tube, instrument tube — with surface
+senses, materials, and fill counts, so you can walk a deck the way the code
+will. Click a card to jump to the card in the original file.
 
 <p align="center">
-  <img alt="OWEN Lattice Builder generating an MCNP 17×17 PWR assembly deck with live syntax highlighting" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-lattice-builder.gif" width="900">
+  <img alt="OWEN Cell Map of an MCNP lattice: universe 0 fills a lattice that places 264 fuel pins, 24 guide tubes and an instrument tube" src="media/demo-cell-map.png" width="900">
 </p>
-
-<p align="center"><a href="https://github.com/caalh/owen/releases/download/v0.2.2/demo-lattice-builder.mp4">▶ Watch full-quality MP4</a></p>
 
 **A full BEAVRS core from a SCONE deck, at 1.2 million primitives, with the real axial stack.**
 OWEN resolves the nested lattice — 17×17 assemblies of 17×17 pins — and draws every one of the
@@ -81,8 +86,10 @@ in `owen.highlight.customColors` — set any of the ten token roles to a hex col
 | **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), SCONE (`.scone`), and PHITS (`.phits`, `phits.inp` — sections, `$`/`#`/`!`/`c` comments, `infl:`/`set:` directives, `MAT[n]`), plus an OpenMC injection grammar for Python. Line-context MCNP rules color cell/surface/material cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry operators. Five switchable palettes per language (Classic / Solarized / High Contrast / Pastel / Custom — your own colors via `owen.highlight.customColors`) via `OWEN: Choose Highlight Palette`, previewed side by side before you apply one; the OpenMC palettes each use a distinct hue family so the choice is visible at a glance. OpenMC decks are Python, so a language server such as Pylance owns their semantic tokens; OWEN draws the OpenMC palette on top of that layer, which is what makes it visible on a machine with Pylance installed (`owen.highlight.openmc.decorate` turns it off). |
 | **Snippets** | Ready-to-edit decks: PWR pin cell, 17×17 PWR assembly, criticality array, and shielding slab for MCNP; full OpenMC pin/assembly Python scripts plus depletion runs (`omc_deplete`, `omc_deplete_results`); SCONE fuel pin, 5×5 assembly, and shielding tutorials; PHITS starter deck, source, material, and T-Track tally blocks. |
 | **MC Language Server** | A real language server for MCNP, Serpent, and SCONE: **real-time diagnostics as you type** — density-sign and fraction-sign conventions, S(α,β) thermal scattering on non-hydrogenous materials, ZAID format, macrobody parameter counts, MCNP line length, and **cross-reference errors** (a cell referencing an undefined surface/material/universe/transform is flagged; defined-but-unused entities are faded hints) — plus hover, go-to-definition, find-references, and a grouped document outline (Cells / Surfaces / Materials / Universes / Transforms / Tallies). Ships as a self-contained `out/server.js`, reusable by other editors over stdio. OpenMC Python files keep Pylance plus `OWEN: Validate Input File`. |
+| **Nuclide & library hover** | Hover a ZAID and read the nuclide and what its suffix means: `92238.80c` is ENDF/B-VII.1 at 293.6 K (not VIII.0 — that is `.00c`), `.71c` is VII.0 at 600 K and wants a `TMP` card, `lwtr.20t` is H in light water from ENDF71SaB. Serpent and SCONE suffixes are explained as the temperature indices they are; OpenMC `'U235'` strings get the nuclide and the cell > material > settings temperature rule. Class letters follow Table B.1. |
 | **MCNP cross-reference tracker** | Role- and position-aware hover, Go-to-Definition, Find-All-References, occurrence highlight, and a **MCNP References** tree for MCNP decks. A number is resolved by *what it is and where it sits on the card* — cell id (1st field), material number (2nd field; `0` = void), geometry surface refs (signed entries), surface id (1st field of a surface card), `u=` universe, `fill`/`lat` (lattice fill arrays are decoded so universe references inside them resolve), `trcl`/`tr` transforms, and `mt`/`mx` material-data cards. Clicking surface `3` finds only the references to *surface 3* — never material 3, cell 3, or the digit `3` inside a `fill=` index. |
 | **MCNP workspace validation** | Cross-file diagnostics when `owen.mcnp.projectRoot` is set: undefined references and duplicate IDs across included MCNP decks (`OWEN: Set MCNP Project Root`). |
+| **Workspace validation (all codes)** | `OWEN: Validate Workspace` reads the files *next to* the deck and checks that they describe one model. OpenMC XML projects get the checks that matter between files — tally filter bins against the geometry's cell/material/surface/mesh ids, tally `<nuclides>` against the materials, `fill` and lattice universes, `run_mode` against source and fissile content, and `model.xml` against the separate files (OpenMC runs `model.xml` when both exist, so a stale one is an error, a newer separate file a warning). Serpent: `include` resolution, `mat`/`therm`/universe references, `set acelib`. SCONE: `aceLibrary`, materials, cells, universes. OpenMC Python: local imports and whether the exported XML is older than the script. Every language also gets a quick geometry sample (overlaps, lost points). Runs on open and save with a status-bar item; the report lists what was verified. |
 | **Deep validation** | On-demand language-aware diagnostics with codes — ZAID format, density/fraction sign conventions, `mt`/S(α,β) target-element checks, macrobody parameter counts (MCNP); `IndependentSource`/`RectangularPrism` API checks, MCNP-style S(α,β) names, density units (OpenMC); `cuboid` vs `rect`, `trcl`, CLI `omp` (Serpent); `aceNeutronDatabase`, temperature-suffix matching, `pinUniverse` radii/fills (SCONE). |
 | **OpenMC XML validation** | Live diagnostics on `materials.xml` / `geometry.xml` / `settings.xml` / `tallies.xml` / `model.xml` (detected by root element, so renamed exports work too): duplicate ids, GNDS nuclide-name format, density units, ao/wo conflicts, MCNP-style `sab` names, surface/boundary types, region → surface and cell → material cross-references (against a sibling `materials.xml`), `inactive < batches`, run modes, tally filter references. |
 
@@ -100,9 +107,11 @@ in `owen.highlight.customColors` — set any of the ten token roles to a hex col
 
 | Feature | Description |
 |---------|-------------|
-| **3D geometry preview** | Three.js webview rendering of MCNP / OpenMC / Serpent / SCONE geometry with component / material / axial-layer toggles, slice planes, and a Disc/Layers fidelity control. Renders a **full BEAVRS core** (all 193 assemblies) across every code — including OpenMC cores whose lattices are built programmatically (comprehension/dict-driven assembly maps are statically expanded, no Python executed) — without dropping pins, and shows the **full axial stack** for OpenMC too — each pin is reconstructed as its real z-column from the deck's `_SHELLS`/`STACKS`/`R[key]` tables, so grid spacers, plena, end plugs and SS nozzles render with their own per-band shells/materials over the complete 0→460 cm assembly height, matching MCNP/Serpent/SCONE. Geometry is instanced (so draw calls stay low) and a configurable instance budget (`owen.preview.maxInstances`, default 1.5M) auto-simplifies detail (shells→discs, then collapses axial) instead of hiding pins when a deck is huge. **Hover** any part to read its layer, material, axial index, radius/diameter and z-range; **solo** a layer to isolate it; and **measure** distances (with Δx Δy Δz), included angles, and pin/shell radii directly in the view. |
+| **3D geometry preview** | Three.js webview (bundled, works offline) rendering of MCNP / OpenMC / Serpent / SCONE geometry with component / material / axial-layer toggles, slice planes, and a Disc/Layers fidelity control. Renders a **full BEAVRS core** (all 193 assemblies) across every code — including OpenMC cores whose lattices are built programmatically (comprehension/dict-driven assembly maps are statically expanded, no Python executed) — without dropping pins, and shows the **full axial stack** for OpenMC too — each pin is reconstructed as its real z-column from the deck's `_SHELLS`/`STACKS`/`R[key]` tables, so grid spacers, plena, end plugs and SS nozzles render with their own per-band shells/materials over the complete 0→460 cm assembly height, matching MCNP/Serpent/SCONE. Geometry is instanced (so draw calls stay low) and a configurable instance budget (`owen.preview.maxInstances`, default 1.5M) auto-simplifies detail (shells→discs, then collapses axial) instead of hiding pins when a deck is huge. **Hover** any part to read its layer, material, axial index, radius/diameter and z-range; **solo** a layer to isolate it; and **measure** distances (with Δx Δy Δz), included angles, and pin/shell radii directly in the view. |
 | **Render with OpenMC** | `OWEN: Render with OpenMC (authoritative)` shells out to your actual OpenMC installation and shows OpenMC's own slice plots (xy/xz/yz, origin/width controls, material/cell coloring, optional 3D ray trace on OpenMC ≥ 0.15) in a panel — ground truth straight from OpenMC's geometry kernel, ideal for verifying OWEN's built-in preview or debugging geometry. Finds your interpreter automatically (settings → ms-python → PATH → WSL) and falls back to the built-in preview when OpenMC isn't installed. |
 | **Verify Geometry with OpenMC** | `OWEN: Verify Geometry with OpenMC` runs an OpenMC model through your local OpenMC installation and checks for **overlapping cells** (slice plots with overlap detection at several sampled planes) and **lost particles** (a short capped probe run). The results panel shows per-plane images with overlap highlights, the lost-particle report, or a green all-clear — with the honest caveat that sampled planes are evidence, not proof. |
+| **Check Geometry / Cell Volumes (built in)** | The same questions answered by OWEN's own exact-geometry engine, for all four codes and with no solver: `OWEN: Check Geometry` samples each universe in its own frame plus the full fill/lattice descent and names the overlapping cell pairs and the gaps (also published as Problems); `OWEN: Cell Volumes` gives stochastic per-instance volumes with errors, masses where a mass density is known, and — for MCNP — the `vol`/`sd` cards that keep an F4/F7 tally on a lattice or infinite cell from being a fatal error. |
+| **Source & tally overlays** | The 3D preview draws the deck's `ksrc`/`sdef pos`, OpenMC `stats.Point`/`stats.Box`, Serpent `src sp`/`sx sy sz` and SCONE `pointSource` as markers, and `fmesh` / `RegularMesh` / Serpent `det dx dy dz` as wireframe boxes with their divisions, toggleable. A source point on a surface or a mesh that misses the fuel is visible at once. |
 | **ALLEN σ(E) explorer + Doppler Studio** | Built-in cross-section webview: log-log σ(E) plots from ENDF/B-VIII.0, nuclide/reaction picker, multi-overlay, hover readout — with nuclides auto-detected from the active deck. **Doppler Studio** adds multi-temperature overlays (294/600/900/1200 K), a resonance-integral readout, and a Bondarenko σ₀ self-shielding slider. Cross-library comparison (e.g. ENDF/B-VIII.0 vs JEFF-3.3) lives on the companion <a href="https://reactormc.net">reactormc.net</a> ALLEN pages, one click away. |
 
 ### Run & analyze
@@ -147,15 +156,20 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **OWEN**:
 | `OWEN: Run Simulation` | Launch the appropriate solver in a dedicated terminal |
 | `OWEN: Run Parameter Sweep` | Generate and run a JSON-described sweep |
 | `OWEN: View Sweep Results (Dashboard)` | k-eff vs parameter, per-run convergence, run table |
-| `OWEN: View Results` | k-eff convergence, flux spectrum, tallies, mesh heatmaps for all four codes |
+| `OWEN: View Results` | k-eff convergence with a convergence reading (halves test, drift, source-entropy plateau, lost particles), the k-eff estimator table with spreads, Shannon-entropy plot when the run wrote one, MCNP's ten statistical checks row by row, flux spectrum, tallies, mesh heatmaps — all four codes |
 | `OWEN: Open 3D Geometry Preview` | Three.js webview — full-core BEAVRS, layer toggles, measurement tools |
 | `OWEN: Render with OpenMC (authoritative)` | Native OpenMC slice plots of the active OpenMC Python model (requires OpenMC installed) |
 | `OWEN: Verify Geometry with OpenMC` | Overlap + lost-particle checks through your local OpenMC |
-| `OWEN: Convert Deck… (MCNP↔OpenMC)` | MCNP ↔ OpenMC (stable), MCNP → Serpent / SCONE (experimental), with Rosetta diff view |
+| `OWEN: Convert Deck…` | Any of MCNP / OpenMC / Serpent / SCONE to any other. MCNP ↔ OpenMC is stable; Serpent and SCONE → MCNP go through the exact-geometry model (experimental); the remaining pairs pivot through MCNP and carry both hops' TODOs. Rosetta diff view. |
 | `OWEN: Convert to OpenMC XML (openmc adapters)` | Second-opinion MCNP/Serpent → OpenMC conversion via the OpenMC team's adapters in your Python (geometry + materials only) |
 | `OWEN: Open Prebuilt Model…` | Load a bundled BEAVRS full-core, assembly, or pin-cell deck |
 | `OWEN: Show MCNP References (Cross-Reference Tracker)` | Open the MCNP cross-reference tracker dock |
-| `OWEN: Show Cell Map` | Flowchart of the cells by universe — fill arrows with lattice counts, per-cell material/density and bounding surfaces, click to jump to the card. MCNP, OpenMC, Serpent, and SCONE. |
+| `OWEN: Show Cell Map` | Structure tree of the fill hierarchy (root → lattices → pins, with placement counts) beside a flowchart of the cells by universe, a path-from-root breadcrumb for any cell, per-cell material/density and bounding surfaces, click to jump to the card. Serpent/SCONE/OpenMC names are kept. MCNP, OpenMC, Serpent, and SCONE. Opens in a new window or a tab (asked each time; `owen.cellMap.openIn` pins it). |
+| `OWEN: Validate Workspace (files working together)` | Cross-file check of the whole model, for every code: OpenMC `materials`/`geometry`/`settings`/`tallies.xml` plus `model.xml` (tally filters → cells that exist, nuclides → materials that contain them, `model.xml` vs the separate files — OpenMC runs `model.xml` when both exist), MCNP root + `read`/`copy` includes, Serpent `include` cards / `mat` names / `therm` / `acelib`, SCONE `aceLibrary` / materials / universes / cells, OpenMC Python local imports and stale exports. Runs on open and save (status-bar item), publishes findings to Problems, and the report lists what it verified — so a healthy project shows green instead of silence. |
+| `OWEN: Check Geometry (overlaps & gaps)` | Samples every universe in its own frame and the full fill/lattice descent, and reports overlapping cells and points no cell claims — the lost-particle causes — as a report and as Problems on the cell cards. All four codes. |
+| `OWEN: Cell Volumes (vol / sd cards)` | Stochastic per-instance cell volumes (and masses where the deck gives a mass density) with one-sigma errors; for MCNP writes the `vol` and `sd` cards an F4/F6/F7 tally on a lattice or infinite cell needs, and inserts them. |
+| `OWEN: Compare Geometry with…` | Same model in two decks (any codes): point-sample agreement of the boundaries, material pairing, composition by class, and where they disagree. This is the test that shows whether an MCNP, Serpent, SCONE or OpenMC version of one reactor is really the same reactor. |
+| `OWEN: Semantic Diff with…` | Diff two decks by *model* rather than text: both are reduced to a canonical listing (surfaces, cells per universe, fills, materials with normalised fractions) and opened in VS Code's diff viewer, so renumbering and formatting vanish and a changed radius is one line. |
 | `OWEN: Set MCNP Project Root` | Root `.inp` for cross-file workspace validation |
 | `OWEN: Insert Material from Database` | NRDP + PNNL-15870 material picker, language-aware (auto-numbered `mN`) |
 | `OWEN: Search ReactorMC (Tutorials & NRDP)` | In-editor search over reactormc.net tutorials, NRDP, and site tools |
@@ -184,6 +198,7 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.highlight.openmc.decorate` | `true` | Draw the OpenMC palette as decorations so it survives Pylance's semantic tokens (see below) |
 | `owen.highlight.openmc.coverage` | `Full deck` | Whether the OpenMC palette also colors Python comments, strings, numbers, keywords and `def`/`class` names, or only OpenMC API names |
 | `owen.preview.maxInstances` | `1500000` | Max cylinder instances in the 3D preview; auto-simplifies detail (not pins) above this. Raise (e.g. 4000000) for full shell+axial detail on a full core |
+| `owen.cellMap.openIn` | `ask` | Where the Cell Map opens: ask each time, `newWindow`, `beside`, or `activeGroup`. Clicking a cell always reveals the deck's existing tab, never a copy |
 | `owen.simulation.workingDirectory` | `""` | Empty = the input file's directory |
 | `owen.mcnp.projectRoot` | `""` | MCNP root `.inp` for cross-file workspace validation |
 | `owen.mcnp.workspaceValidation.enabled` | `true` | Merge cross-file diagnostics into the language server |
@@ -228,6 +243,28 @@ any solver installed.
 | SCONE | Yes (4 palettes) | Yes | Real-time (LSP) + on-demand | `scone <file>` (WSL on Windows) |
 | OpenMC XML | VS Code's XML | — | Live (extension host) | — |
 | PHITS | Yes | Yes | — (highlighting + snippets only) | — |
+
+**PHITS is a syntax-only tier, by decision.** OWEN's diagnostics, 3D preview, Cell Map, geometry
+tools and converter are built on a shared exact-geometry engine for MCNP, OpenMC, Serpent and
+SCONE. PHITS gets the grammar and snippets (which are useful on their own) and the reference
+links, and nothing that would imply a physics check has been done. That is a deliberate scope
+line, not an oversight; it will move only if PHITS users ask for a specific tool.
+
+### Notebooks
+
+OpenMC models are often built in Jupyter. Every OWEN command that reads a deck — 3D preview,
+Cell Map, Validate, Convert, Check Geometry, Cell Volumes, Compare, Semantic Diff — accepts a
+notebook cell and treats **all code cells of that notebook, joined in order**, as the deck.
+Click-to-reveal and diagnostics map back to the owning cell. The live OpenMC export path needs a
+file, so for notebooks call `model.export_to_model_xml()` once and OWEN reads the sibling
+`model.xml`.
+
+### Offline
+
+OWEN works with no network. Three.js (3D preview) and uPlot (Results, ALLEN, Sweep dashboard)
+ship inside the VSIX under `media/vendor/`; nothing is fetched from a CDN. ALLEN's σ(E) curves
+and the live NRDP/Community data are the only network features, and each has an offline fallback
+or an off switch.
 
 ### Why OpenMC is highlighted twice
 

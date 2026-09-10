@@ -14,6 +14,7 @@
 // No `vscode` import: this is unit tested headlessly, and `panel.ts` is the
 // only part that talks to the editor.
 
+import { pickRootId } from '../preview/rootUniverse';
 import {
     parseMcnpDeck,
     regionCellRefs,
@@ -39,6 +40,8 @@ export type CellRole = 'graveyard' | 'lattice' | 'container' | 'void' | 'materia
 
 export interface SurfaceRef {
     id: number;
+    /** Source name when the deck named surfaces (Serpent); the chip shows it. */
+    name?: string;
     /** How the region uses it: inside, outside, or both (a `:` union spanning it). */
     sense: '-' | '+' | '+/-';
     /** `cz 0.4096` from the reference index, or empty when the card is missing. */
@@ -49,8 +52,14 @@ export interface SurfaceRef {
 
 export interface CellNode {
     id: number;
-    /** 0-based line of the cell card. */
-    line: number;
+    /**
+     * What the deck calls this cell when that is not `id`: a Serpent cell
+     * name, a SCONE cell id behind a synthesized engine id, an OpenMC `name=`.
+     * Click-to-reveal searches for this, and the card shows it.
+     */
+    name?: string;
+    /** 0-based line of the cell card; null when the parser did not keep it. */
+    line: number | null;
     role: CellRole;
     universe: number;
     /** Nesting depth of this cell's universe; 0 for the root universe. */
@@ -77,6 +86,8 @@ export interface CellNode {
 
 export interface UniverseNode {
     id: number;
+    /** Source name for a Serpent universe whose name is not a number. */
+    name?: string;
     depth: number;
     /** `fuel pin`, `lattice universe`, … from the reference index. */
     summary: string;
@@ -177,6 +188,21 @@ function fillTargets(cell: McnpCell): Map<number, number> {
     return out;
 }
 
+function pickMapRoot(cellsByUniverse: Map<number, McnpCell[]>): number {
+    const filled = new Set<number>();
+    for (const cells of cellsByUniverse.values()) {
+        for (const cell of cells) {
+            for (const uid of fillTargets(cell).keys()) filled.add(uid);
+        }
+    }
+    return pickRootId(
+        [...cellsByUniverse.keys()],
+        filled,
+        (id) => cellsByUniverse.get(id)?.length ?? 0,
+        ROOT_UNIVERSE,
+    ) ?? ROOT_UNIVERSE;
+}
+
 // ---------------------------------------------------------------------------
 // Depth
 // ---------------------------------------------------------------------------
@@ -189,8 +215,9 @@ function fillTargets(cell: McnpCell): Map<number, number> {
  */
 export function computeUniverseDepths(
     cellsByUniverse: Map<number, McnpCell[]>,
+    root = ROOT_UNIVERSE,
 ): { depths: Map<number, number>; cycle: number[] } {
-    const depths = new Map<number, number>([[ROOT_UNIVERSE, 0]]);
+    const depths = new Map<number, number>([[root, 0]]);
     const cycle: number[] = [];
     const onPath = new Set<number>();
 
@@ -214,7 +241,7 @@ export function computeUniverseDepths(
         onPath.delete(uid);
     };
 
-    walk(ROOT_UNIVERSE, 0);
+    walk(root, 0);
 
     // Universes never reached from the root still need a depth so they can be
     // drawn; park them one below the deepest thing that is reachable.
@@ -286,7 +313,8 @@ export function buildCellMap(text: string): CellMapModel {
         cellsByUniverse.set(uid, list);
     }
 
-    const { depths, cycle } = computeUniverseDepths(cellsByUniverse);
+    const root = pickMapRoot(cellsByUniverse);
+    const { depths, cycle } = computeUniverseDepths(cellsByUniverse, root);
     if (cycle.length) {
         warnings.push(
             `Universe fill cycle through ${cycle.map((u) => `u=${u}`).join(' → ')}. ` +
@@ -372,7 +400,7 @@ export function buildCellMap(text: string): CellMapModel {
                 summary: getDefinition(index, 'universe', id)?.summary ?? '',
                 cells: (cellsByUniverse.get(id) ?? []).map((c) => c.id),
                 filledBy: [...new Set(parents)].sort((a, b) => a - b),
-                orphan: id !== ROOT_UNIVERSE && parents.length === 0,
+                orphan: id !== root && parents.length === 0,
             };
         });
 

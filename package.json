@@ -1,8 +1,8 @@
 {
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
-  "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with real-time physics-aware diagnostics, OpenMC XML validation, full-core 3D geometry preview, native OpenMC rendering and geometry verification, cross-code deck converters (MCNP↔OpenMC stable, plus the official openmc_mcnp_adapter as an optional backend), results viewer (k-eff, spectra, mesh heatmaps), parametric sweep dashboard, lattice and input builders with the 411-material PNNL-15870 compendium, and the ALLEN σ(E) explorer with Doppler Studio.",
-  "version": "1.4.4",
+  "description": "Nuclear reactor modeling toolkit for MCNP, OpenMC, Serpent, SCONE, and PHITS: a Monte Carlo language server with physics-aware diagnostics and nuclide/library hover, workspace validation that checks a whole project (XML set, includes, libraries) together, exact-geometry 3D preview with source and tally overlays, a geometry checker (overlaps, gaps, lost particles) and cell volume/mass calculator that writes vol/sd cards, cross-code Compare Geometry and semantic deck diff, converters between all four codes, results viewer with k-eff convergence diagnostics, parametric sweeps, lattice and input builders with the 411-material PNNL compendium, the ALLEN cross-section explorer with Doppler Studio, OpenMC notebook support, and no network needed.",
+  "version": "1.4.5",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -63,7 +63,13 @@
     "cross-sections",
     "k-eff",
     "criticality",
-    "beavrs"
+    "beavrs",
+    "geometry",
+    "validation",
+    "converter",
+    "jupyter",
+    "openmc-notebook",
+    "offline"
   ],
   "activationEvents": [
     "onLanguage:mcnp",
@@ -96,6 +102,11 @@
     "onCommand:owen.reportProblem",
     "onCommand:owen.openReference",
     "onCommand:owen.showMcnpCellMap",
+    "onCommand:owen.checkGeometry",
+    "onCommand:owen.cellVolumes",
+    "onCommand:owen.compareGeometry",
+    "onCommand:owen.diffDecks",
+    "onCommand:owen.validateWorkspace",
     "onView:owenMcnpReferences",
     "onStartupFinished"
   ],
@@ -276,7 +287,7 @@
       },
       {
         "command": "owen.convertDeck",
-        "title": "OWEN: Convert Deck… (MCNP↔OpenMC)",
+        "title": "OWEN: Convert Deck… (MCNP / OpenMC / Serpent / SCONE)",
         "category": "OWEN",
         "icon": "$(arrow-swap)"
       },
@@ -329,6 +340,36 @@
         "title": "OWEN: Show Cell Map",
         "category": "OWEN",
         "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "owen.checkGeometry",
+        "title": "OWEN: Check Geometry (overlaps & gaps)",
+        "category": "OWEN",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "owen.cellVolumes",
+        "title": "OWEN: Cell Volumes (vol / sd cards)",
+        "category": "OWEN",
+        "icon": "$(symbol-ruler)"
+      },
+      {
+        "command": "owen.compareGeometry",
+        "title": "OWEN: Compare Geometry with…",
+        "category": "OWEN",
+        "icon": "$(compare-changes)"
+      },
+      {
+        "command": "owen.diffDecks",
+        "title": "OWEN: Semantic Diff with…",
+        "category": "OWEN",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "owen.validateWorkspace",
+        "title": "OWEN: Validate Workspace (files working together)",
+        "category": "OWEN",
+        "icon": "$(references)"
       }
     ],
     "keybindings": [
@@ -388,6 +429,11 @@
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
+          "command": "owen.validateWorkspace",
+          "group": "1_analyze@1",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
           "command": "owen.insertMaterial",
           "group": "1_analyze@2",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
@@ -404,6 +450,26 @@
         {
           "command": "owen.showMcnpCellMap",
           "group": "1_analyze@5",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.checkGeometry",
+          "group": "1_analyze@6",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.cellVolumes",
+          "group": "1_analyze@7",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.compareGeometry",
+          "group": "1_analyze@8",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.diffDecks",
+          "group": "1_analyze@9",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
@@ -471,6 +537,11 @@
           "when": "editorLangId == mcnp"
         },
         {
+          "command": "owen.setMcnpProjectRoot",
+          "group": "4_view@4",
+          "when": "editorLangId == mcnp"
+        },
+        {
           "command": "owen.openReference",
           "group": "5_help@0"
         },
@@ -509,6 +580,11 @@
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
+          "command": "owen.validateWorkspace",
+          "group": "1_analyze@1",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
           "command": "owen.insertMaterial",
           "group": "1_analyze@2",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
@@ -525,6 +601,26 @@
         {
           "command": "owen.showMcnpCellMap",
           "group": "1_analyze@5",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.checkGeometry",
+          "group": "1_analyze@6",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.cellVolumes",
+          "group": "1_analyze@7",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.compareGeometry",
+          "group": "1_analyze@8",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.diffDecks",
+          "group": "1_analyze@9",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
@@ -619,6 +715,26 @@
         },
         {
           "command": "owen.showMcnpCellMap",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.checkGeometry",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.cellVolumes",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.compareGeometry",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.diffDecks",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.validateWorkspace",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
@@ -757,6 +873,23 @@
           "type": "string",
           "default": "https://reactormc.net/data/allen",
           "description": "Base URL for ALLEN cross-section JSON (index.json and endfb80/ curves). Override for offline or local NRDP dev servers."
+        },
+        "owen.cellMap.openIn": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "newWindow",
+            "beside",
+            "activeGroup"
+          ],
+          "enumDescriptions": [
+            "Ask each time (new window or tab)",
+            "Floating window (VS Code centres it on the main window, then reopens it wherever you last dragged it)",
+            "Split editor next to the deck",
+            "Tab in the current editor group"
+          ],
+          "default": "ask",
+          "description": "Where 'OWEN: Show Cell Map' opens. By default OWEN asks (new window or tab) every time; pick a value here, or the 'Always…' item in that prompt, to stop asking. VS Code owns the position and size of floating windows — move or maximize it once and it reopens there. Clicking a cell in the map always jumps to the deck's existing tab, never a second copy."
         },
         "owen.preview.maxInstances": {
           "type": "integer",
@@ -935,6 +1068,8 @@
     "verify:h5-bundle": "node ./scripts/verify-h5-bundle.mjs",
     "verify:run": "tsc -p . && node ./scripts/verify-run.mjs",
     "verify:converter": "tsc -p . && node ./scripts/verify-converter.mjs",
+    "verify:version": "node ./scripts/verify-version-listings.mjs",
+    "sync:version": "node ./scripts/verify-version-listings.mjs --write",
     "package": "vsce package",
     "publish": "vsce publish",
     "export-nrdp": "node ./scripts/export-nrdp-snapshot.mjs",
@@ -955,7 +1090,9 @@
     "glob": "^10.3.10",
     "mocha": "^10.3.0",
     "pngjs": "^7.0.0",
-    "typescript": "^5.3.0"
+    "three": "^0.160.0",
+    "typescript": "^5.3.0",
+    "uplot": "^1.6.30"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",

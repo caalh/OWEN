@@ -7,6 +7,50 @@ export interface KeffHistory {
     final?: { mean: number; std: number };
     /** Number of discarded (inactive/settling) cycles, when the output says. */
     inactive?: number;
+    /** Shannon entropy of the fission source per cycle, aligned with `cycles`, when printed. */
+    entropy?: number[];
+}
+
+/** One k-eff estimator's final value (collision, absorption, track-length, combined). */
+export interface KeffEstimator {
+    name: string;
+    mean: number;
+    std: number;
+}
+
+/** One row of MCNP's ten statistical checks for a tally's TFC bin. */
+export interface StatisticalCheck {
+    name: string;
+    desired: string;
+    observed: string;
+    passed: boolean;
+}
+
+/**
+ * What the run itself says about convergence, plus OWEN's reading of the
+ * history. The verdict is heuristic and says so: it compares the first and
+ * second halves of the active cycles, looks for a drift, and checks that the
+ * source entropy had flattened before the active cycles began.
+ */
+export interface ConvergenceReport {
+    estimators?: KeffEstimator[];
+    lostParticles?: number;
+    /** Active cycles used for the verdict. */
+    activeCycles?: number;
+    /** Mean k over the first / second half of the active cycles. */
+    firstHalf?: number;
+    secondHalf?: number;
+    /** Standard deviation of the per-cycle k over the active cycles. */
+    cycleSigma?: number;
+    /** |first − second| in units of its own standard error. */
+    halvesZ?: number;
+    /** Linear drift over the active cycles, per cycle, in units of its standard error. */
+    driftZ?: number;
+    /** Entropy: last-inactive-cycles mean vs active mean, in sigma. Null when no entropy. */
+    entropyZ?: number | null;
+    /** 'converged' | 'suspect' | 'unconverged' | 'unknown' */
+    verdict: 'converged' | 'suspect' | 'unconverged' | 'unknown';
+    reasons: string[];
 }
 
 export interface FluxSpectrum {
@@ -46,6 +90,8 @@ export interface TallyEntry {
     note?: string;
     fom?: number;
     history?: TallyHistory;
+    /** MCNP: the ten checks row by row (desired / observed / passed). */
+    checkDetail?: StatisticalCheck[];
 }
 
 export interface MeshTally {
@@ -74,6 +120,8 @@ export interface RunResults {
     warnings?: string[];
     /** What OWEN could not read, so the panel can say so instead of showing nothing. */
     notes?: string[];
+    /** Convergence diagnostics; filled by `attachConvergence` for every code. */
+    convergence?: ConvergenceReport;
 }
 
 export type OutputKind =

@@ -73,8 +73,12 @@ export interface McnpSurface {
     shape: Shape;
     /** TR applied via the `n` field of the surface card (null = none). */
     tr: Transform | null;
-    /** `*j` reflecting / `+j` white boundary markers (informational). */
-    boundary: 'none' | 'reflecting' | 'white';
+    /**
+     * MCNP `*j` reflecting / `+j` white markers, or an OpenMC `boundary=`
+     * attribute. Any value but `none` means the problem ends at this surface:
+     * a point beyond it is outside the domain, not lost.
+     */
+    boundary: 'none' | 'reflecting' | 'white' | 'vacuum' | 'periodic';
 }
 
 export type RegionNode =
@@ -142,6 +146,25 @@ export interface McnpCell {
     likeButOf: number | null;
 }
 
+/**
+ * What the deck called things. The engine keys everything by number, and the
+ * Serpent/SCONE/OpenMC parsers invent those numbers, so without this table a
+ * Serpent `cell fuel_pin` shows up as "cell 7" and nothing in the source can be
+ * found again. Maps are sparse: an id with no entry was numeric in the source.
+ */
+export interface GeometryNames {
+    materials: Map<number, string>;
+    surfaces: Map<number, string>;
+    universes: Map<number, string>;
+    /** Source identifier of the card that produced this cell (a synthesized
+     *  ring or lattice cell names the `pin`/`lat`/universe it came from). */
+    cells: Map<number, string>;
+}
+
+export function emptyGeometryNames(): GeometryNames {
+    return { materials: new Map(), surfaces: new Map(), universes: new Map(), cells: new Map() };
+}
+
 export interface McnpGeometryModel {
     title: string;
     surfaces: Map<number, McnpSurface>;
@@ -152,6 +175,8 @@ export interface McnpGeometryModel {
     /** Generated surfaces (1000×cell + surface) from TRCL, §5.5.3 Reminder. */
     generatedSurfaces: Map<number, { surface: number; tr: Transform }>;
     warnings: string[];
+    /** Source names for non-MCNP decks; absent when ids are the deck's own. */
+    names?: GeometryNames;
 }
 
 export interface McnpParseOptions {

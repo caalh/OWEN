@@ -11,6 +11,9 @@ import * as path from 'path';
 import { parseDeckToModel, sliceSupportNote } from '../../preview/engineDispatch';
 import { findCell } from '../../preview/mcnpEvaluate';
 import { axisPlane, sliceModel } from '../../preview/slice';
+import { buildScene } from '../../preview/extractor';
+import { buildCsgScene } from '../../preview/csgScene';
+import { Component } from '../../preview/types';
 
 type V3 = [number, number, number];
 
@@ -135,6 +138,21 @@ suite('Exact engine — Serpent decks (Stage 6)', () => {
         assert.ok(nb.cell, 'hex neighbor resolves');
         assert.strictEqual(nb.cell!.material, center.cell!.material);
     });
+
+    test('cells in a named universe (not 0) still classify and draw in 3D', () => {
+        const deck = [
+            'surf s1 sph 0.0 0.0 0.0 10.0',
+            'cell fuel core steel -s1',
+            'cell out core outside s1',
+            'mat steel -8.0',
+        ].join('\n');
+        const model = parseDeckToModel(deck, 'serpent');
+        assert.ok(model);
+        assert.ok((model!.universes.get(0) ?? []).length === 0, 'no universe 0');
+        assert.strictEqual(findCell(model!, [0, 0, 0]).cell?.material, 1);
+        const scene = buildScene(deck, 'serpent');
+        assert.ok(scene.cylinders.length > 0, `named-universe CSG fallback must draw, got ${scene.cylinders.length}: ${scene.warnings.join(' | ')}`);
+    });
 });
 
 suite('Exact engine — SCONE decks (Stage 6)', () => {
@@ -222,11 +240,82 @@ suite('Exact engine — SCONE decks (Stage 6)', () => {
         const rpv = findCell(model!, [220, 0, 100]);
         assert.ok(rpv.cell, 'a point in the RPV wall resolves');
     });
+
+    test('cellUniverse sphere (no pin/lat) draws via CSG fill walk', () => {
+        const deck = [
+            'geometry {',
+            '  type geometryStd;',
+            '  boundary (0 0 0 0 0 0);',
+            '  surfaces {',
+            '    sph { id 1; type sphere; origin (0.0 0.0 0.0); radius 10.0; }',
+            '  }',
+            '  cells {',
+            '    fuel { id 10; type simpleCell; surfaces (-1); filltype mat; material steel; }',
+            '  }',
+            '  universes {',
+            '    root { id 1; type rootUniverse; border 1; fill u<2>; }',
+            '    world { id 2; type cellUniverse; cells (10); }',
+            '  }',
+            '}',
+        ].join('\n');
+        const model = parseDeckToModel(deck, 'scone');
+        assert.ok(model);
+        assert.ok(findCell(model!, [0, 0, 0]).cell, 'origin is inside the sphere');
+        const scene = buildScene(deck, 'scone');
+        assert.ok(scene.cylinders.length > 0, `SCONE CSG fallback must draw, got ${scene.cylinders.length}: ${scene.warnings.join(' | ')}`);
+        assert.ok(scene.cylinders.some((c) => c.shape === 'sphere' || Math.abs((c.radius ?? 0) - 10) < 0.1));
+    });
 });
 
 suite('Exact engine — dispatch notes', () => {
     test('openmc decks get the native-render pointer', () => {
         assert.ok(/Render with OpenMC/.test(sliceSupportNote('openmc')));
         assert.strictEqual(parseDeckToModel('import openmc', 'openmc'), null);
+    });
+});
+
+suite('Exact engine — MCNP non-zero root and fill wrappers', () => {
+    test('all cells in u=1 (no universe 0) still classify and draw', () => {
+        const deck = [
+            'mcnp universe 1 world',
+            '1 1 -10.4 -1 u=1 imp:n=1',
+            '2 0 1 u=1 imp:n=0',
+            '',
+            '1 so 5',
+            '',
+            'm1 92235.80c 1',
+        ].join('\n');
+        const model = parseDeckToModel(deck, 'mcnp');
+        assert.ok(model);
+        assert.ok((model!.universes.get(0) ?? []).length === 0);
+        assert.strictEqual(findCell(model!, [0, 0, 0]).cell?.id, 1);
+        const scene = buildScene(deck, 'mcnp');
+        assert.ok(scene.cylinders.length > 0, `u=1 world must draw, got ${scene.cylinders.length}`);
+    });
+
+    test('universe-0 fill wrapper around CSG in universe 2 draws the inner sphere', () => {
+        const deck = [
+            'fill wrapper',
+            '1 0 -99 fill=2 imp:n=1',
+            '2 0 99 imp:n=0',
+            '3 1 -10.4 -10 u=2 imp:n=1',
+            '4 0 10 u=2 imp:n=1',
+            '',
+            '10 so 5',
+            '99 so 100',
+            '',
+            'm1 92235.80c 1',
+        ].join('\n');
+        const model = parseDeckToModel(deck, 'mcnp');
+        assert.ok(model);
+        assert.strictEqual(findCell(model!, [0, 0, 0]).cell?.id, 3);
+        const scene = buildCsgScene(model!, new Map([
+            [1, { name: 'fuel', component: Component.Fuel }],
+        ]));
+        assert.ok(scene.cylinders.length > 0, 'fill wrapper must not yield 0 primitives');
+        const sph = scene.cylinders.find((c) => c.shape === 'sphere' && Math.abs((c.radius ?? 0) - 5) < 0.1);
+        assert.ok(sph, `expected r=5 sphere, got ${JSON.stringify(scene.cylinders.map((c) => [c.shape, c.radius]))}`);
+        const built = buildScene(deck, 'mcnp');
+        assert.ok(built.cylinders.length > 0);
     });
 });

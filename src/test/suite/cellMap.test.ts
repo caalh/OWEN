@@ -5,6 +5,7 @@ import { PREBUILT_MODELS } from '../paths';
 import { buildCellMap, collectSurfaceSenses, computeUniverseDepths } from '../../cellmap/model';
 import { buildCellMapFromGeometry } from '../../cellmap/fromGeometry';
 import { buildCellMapHtml } from '../../cellmap/webview';
+import { pickDeck, pickRevealColumn } from '../../cellmap/pickDeck';
 import { findCellMapTarget } from '../../cellmap/reveal';
 import { parseDeckToModel } from '../../preview/engineDispatch';
 import { parseMcnpDeck, parseRegion } from '../../converter/mcnpModel';
@@ -255,6 +256,25 @@ suite('OWEN Cell Map — other codes via the geometry engine', () => {
         assert.strictEqual(model.cells.find((c) => c.id === 1)?.role, 'container');
     });
 
+    test('OpenMC XML with universe=5 is the root, not an orphan of universe 0', () => {
+        const xml = `<?xml version="1.0"?>
+<geometry>
+  <surface id="1" type="sphere" coeffs="0 0 0 10"/>
+  <cell id="1" material="1" region="-1" universe="5"/>
+  <cell id="2" material="void" region="+1" universe="5"/>
+</geometry>`;
+        const geom = parseDeckToModel(xml, 'openmc');
+        assert.ok(geom);
+        const model = buildCellMapFromGeometry(geom!, 'openmc');
+        const u5 = model.universes.find((u) => u.id === 5);
+        assert.ok(u5, 'universe 5 should be on the map');
+        assert.strictEqual(u5!.orphan, false, 'the unfilled world is not an orphan');
+        assert.strictEqual(u5!.depth, 0);
+        assert.ok(!model.warnings.some((w) => /nothing fills it/.test(w)),
+            `live-export root must not be flagged unused: ${model.warnings.join(' | ')}`);
+        assert.ok(buildCellMapHtml('vscode-webview:', 'testnonce').includes('rootUni'));
+    });
+
     test('click-to-reveal does not land on a higher-numbered surface or the first id=', () => {
         const xml = [
             '<?xml version="1.0"?>',
@@ -321,6 +341,178 @@ suite('OWEN Cell Map — webview HTML', () => {
         assert.ok(html.includes('vertical columns by fill depth'), 'layout comment describes columns');
         assert.ok(html.includes('x += colW + BAND_GAP'), 'next depth steps in x');
         assert.ok(html.includes('from.x + dx'), 'fill edges run left to right');
+    });
+
+    test('cards are larger than the chrome; the side panes stay at editor size', () => {
+        // The request was legible cell cards, not a bigger detail pane. The
+        // body (toolbar, tree, detail) stays at 12px and only `.cell` grows.
+        assert.ok(/body \{[^}]*font-size: 12px/.test(html), 'body type must stay 12px');
+        assert.ok(/\.cell \{[^}]*font-size: 14px/.test(html), 'cell cards should read at 14px');
+        assert.ok(/#detail h2 \{[^}]*font-size: 14px/.test(html), 'detail heading back at 14px');
+        assert.ok(/#detail \{[^}]*flex: 0 0 288px/.test(html), 'detail pane back at 288px');
+    });
+
+    test('has a structure tree and a path-from-root breadcrumb', () => {
+        assert.ok(html.includes('id="tree"'), 'structure tree pane');
+        assert.ok(html.includes('function renderTree'), 'tree renderer');
+        assert.ok(html.includes('function pathToRoot'), 'root path');
+        assert.ok(html.includes('Path from root'), 'breadcrumb heading');
+        assert.ok(html.includes('see above'), 'a shared universe is expanded once and referenced after');
+        assert.ok(html.includes('function defaultCollapse'), 'large decks start folded');
+    });
+
+    test('reveal messages carry the source name for renamed decks', () => {
+        assert.ok(html.includes("command: 'revealCell', id, name: c.name || ''"));
+        assert.ok(html.includes("command: 'revealSurface'") && html.includes('el.dataset.sname'));
+    });
+});
+
+suite('OWEN Cell Map — source names for Serpent, SCONE and OpenMC XML', () => {
+    test('Serpent cell, material, surface and universe names survive onto the map', () => {
+        const deck = [
+            'surf fuel_or cyl 0.0 0.0 0.4096',
+            'surf clad_or cyl 0.0 0.0 0.475',
+            'surf box sqc 0.0 0.0 0.63',
+            'cell c_fuel  pin1 uo2   -fuel_or',
+            'cell c_clad  pin1 zirc   fuel_or -clad_or',
+            'cell c_water pin1 water  clad_or',
+            'cell world 0 fill pin1 -box',
+            'cell out   0 outside box',
+            'mat uo2 -10.4 92235.09c 0.04 92238.09c 0.96 8016.09c 2.0',
+            'mat zirc -6.55 40090.09c 1.0',
+            'mat water -0.74 1001.09c 2.0 8016.09c 1.0',
+        ].join('\n');
+        const geom = parseDeckToModel(deck, 'serpent');
+        assert.ok(geom && geom.names, 'serpent parser should record names');
+        const map = buildCellMapFromGeometry(geom!, 'serpent');
+        const fuel = map.cells.find((c) => c.name === 'c_fuel');
+        assert.ok(fuel, 'cell keeps its Serpent name');
+        assert.strictEqual(fuel!.materialLabel, 'uo2', 'material shows its name, not m1');
+        assert.strictEqual(fuel!.regionRaw, '-fuel_or', 'region is written in surface names');
+        assert.strictEqual(fuel!.surfaces[0].name, 'fuel_or');
+        assert.strictEqual(fuel!.line, null, 'no line: the engine drops them, reveal searches instead');
+        const pin = map.universes.find((u) => u.name === 'pin1');
+        assert.ok(pin, 'universe keeps its Serpent name');
+        assert.ok(pin!.cells.includes(fuel!.id));
+    });
+
+    test('a Serpent name is what click-to-reveal searches for', () => {
+        const deck = ['cell c_clad pin1 zirc fuel_or -clad_or', 'cell c_fuel pin1 uo2 -fuel_or'].join('\n');
+        const hit = findCellMapTarget(deck, 'cell', 7, 'c_fuel');
+        assert.ok(hit, 'found by name');
+        assert.strictEqual(hit!.line, 1, 'must land on c_fuel, not the engine id 7');
+        const surf = findCellMapTarget('surf clad_or cyl 0 0 1\nsurf fuel_or cyl 0 0 .4', 'surface', 2, 'fuel_or');
+        assert.strictEqual(surf!.line, 1);
+    });
+
+    test('SCONE synthesized cells reveal the block they came from, inside the right section', () => {
+        const deck = [
+            'surfaces {',
+            '  s1 { id 1; type zCylinder; origin (0 0 0); radius 0.4; }',
+            '}',
+            'cells {',
+            '  c1 { id 1; type simpleCell; surfaces (-1); filltype mat; material fuel; }',
+            '}',
+            'universes {',
+            '  root { id 1; type rootUniverse; border 1; fill u<2>; }',
+            '  pin { id 2; type pinUniverse; radii (0.4 0.0); fills (fuel water); }',
+            '}',
+        ].join('\n');
+        const cell = findCellMapTarget(deck, 'cell', 1000000, '1');
+        assert.ok(cell && cell.line === 4, `cell id 1 must be found in cells{}, not surfaces{}; got ${cell?.line}`);
+        const pin = findCellMapTarget(deck, 'cell', 1000001, 'pinUniverse 2');
+        assert.ok(pin && pin.line === 8, `pinUniverse 2 should land on the universe block; got ${pin?.line}`);
+        const surf = findCellMapTarget(deck, 'surface', 1, '1');
+        assert.ok(surf && surf.line === 1, `surface 1 must be found in surfaces{}; got ${surf?.line}`);
+    });
+
+    test('OpenMC XML names ride along', () => {
+        const xml = [
+            '<materials><material id="7" name="UO2 3.1%"/></materials>',
+            '<geometry>',
+            '  <surface id="1" type="z-cylinder" coeffs="0 0 0.4" name="fuel OR"/>',
+            '  <cell id="10" name="fuel" material="7" region="-1"/>',
+            '</geometry>',
+        ].join('\n');
+        const geom = parseDeckToModel(xml, 'openmc');
+        assert.ok(geom);
+        const map = buildCellMapFromGeometry(geom!, 'openmc');
+        const c = map.cells.find((x) => x.id === 10)!;
+        assert.strictEqual(c.name, 'fuel');
+        assert.strictEqual(c.materialLabel, 'UO2 3.1%');
+        assert.strictEqual(c.surfaces[0].name, 'fuel OR');
+        assert.strictEqual(findCellMapTarget(xml, 'cell', 10, 'fuel')!.line, 3);
+    });
+});
+
+suite('OWEN Cell Map — where a click reveals the deck', () => {
+    test('the deck\'s own tab wins, even from a floating map', () => {
+        // Groups: main window [deck], auxiliary window [map].
+        assert.strictEqual(
+            pickRevealColumn([
+                { column: 1, hasDeck: true, hasMap: false },
+                { column: 2, hasDeck: false, hasMap: true },
+            ]),
+            1,
+            'must jump to the existing tab, not open a copy beside the map',
+        );
+    });
+
+    test('a deck that is not open anywhere goes to a group without the map', () => {
+        assert.strictEqual(
+            pickRevealColumn([
+                { column: 1, hasDeck: false, hasMap: false },
+                { column: 2, hasDeck: false, hasMap: true },
+            ]),
+            1,
+        );
+        assert.strictEqual(
+            pickRevealColumn([
+                { column: 1, hasDeck: false, hasMap: true },
+                { column: 2, hasDeck: false, hasMap: false },
+            ]),
+            2,
+            'a docked map in column 1 must not be covered',
+        );
+    });
+
+    test('only the map exists: caller opens beside it', () => {
+        assert.strictEqual(pickRevealColumn([{ column: 1, hasDeck: false, hasMap: true }]), undefined);
+    });
+});
+
+suite('OWEN Cell Map — which deck the map reads', () => {
+    const deck = { key: 'file:///w/basic_mcnp_test.inp', mapped: true };
+    const notes = { key: 'file:///w/notes.md', mapped: false };
+
+    test('a floating window with no active editor still reads its deck', () => {
+        assert.strictEqual(
+            pickDeck({ active: undefined, remembered: deck.key, visible: [deck], open: [deck, notes] })?.key,
+            deck.key,
+            'an auxiliary window reports no activeTextEditor; the map must not blank',
+        );
+    });
+
+    test('a non-deck editor does not blank the map', () => {
+        assert.strictEqual(
+            pickDeck({ active: notes, remembered: deck.key, visible: [notes], open: [deck, notes] })?.key,
+            deck.key,
+        );
+    });
+
+    test('an active deck still wins over the remembered one', () => {
+        const other = { key: 'file:///w/other.i', mapped: true };
+        assert.strictEqual(
+            pickDeck({ active: other, remembered: deck.key, visible: [other], open: [deck, other] })?.key,
+            other.key,
+        );
+    });
+
+    test('no deck anywhere is the only empty case', () => {
+        assert.strictEqual(
+            pickDeck({ active: undefined, remembered: undefined, visible: [notes], open: [notes] }),
+            undefined,
+        );
     });
 });
 
