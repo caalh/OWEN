@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The workspace quick-geometry sample says what it means.** On a deck whose
+  geometry parses to nothing (an invalid surface type like Serpent `rect` gets
+  dropped, so every cell built on it is empty), the warning read "found 0
+  overlapping cell pair(s) and 1500 of 1500 points in no cell" — like a leak.
+  It now says the parsed geometry places nothing and points at the surface
+  errors; partial findings mention only the nonzero counts.
+
 ## [1.4.6] - 2026-09-15
 
 ### Added

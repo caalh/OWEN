@@ -59,6 +59,30 @@ export interface FileSystemLike {
     mtime(p: string): number;
 }
 
+/**
+ * Message for a quick-geometry-sample finding. When *every* point lands in no
+ * cell the model as parsed places nothing — on a deck with an invalid surface
+ * type (`rect`, …) the parser drops the surface and the cells referencing it
+ * resolve to nothing. Saying "1500 of 1500 points in no cell" there implied a
+ * leak; say what actually happened. Otherwise, mention only nonzero counts
+ * ("found 0 overlapping cell pair(s) and …" read like a bug report about
+ * nothing).
+ */
+export function sampleProblemMessage(
+    overlapPairs: number, lost: number, samples: number, extra?: string,
+): string {
+    if (samples > 0 && lost >= samples) {
+        return `Quick geometry sample: all ${samples} points landed in no cell — as parsed, this geometry places nothing. ` +
+            'That usually means a surface card did not validate (unsupported or misspelled type), so every cell built on it is empty. ' +
+            'Fix the surface/cell errors above first, then run "OWEN: Check Geometry".';
+    }
+    const parts: string[] = [];
+    if (overlapPairs) parts.push(`${overlapPairs} overlapping cell pair(s)`);
+    if (lost) parts.push(`${lost} of ${samples} points in no cell`);
+    if (extra) parts.push(extra);
+    return `Quick geometry sample found ${parts.join(' and ')}. Run "OWEN: Check Geometry" for the full report.`;
+}
+
 export interface WorkspaceInput {
     language: WorkspaceLanguage;
     /** Absolute path of the active deck. */
@@ -440,7 +464,8 @@ export function validateOpenmcXmlProject(files: XmlFile[], fs: FileSystemLike): 
             if (chk.overlaps.length || chk.world.lost || badU.length) {
                 const gf = geomFiles[0];
                 diags.push(diag(gf.path, gf.text, /<geometry/i,
-                    `Quick geometry sample found ${chk.overlaps.length} overlapping cell pair(s) and ${chk.world.lost} of ${chk.world.samples} points in no cell. Run "OWEN: Check Geometry" for the full report.`,
+                    sampleProblemMessage(chk.overlaps.length, chk.world.lost, chk.world.samples,
+                        badU.length ? `gaps or overlaps inside ${badU.length} filled universe(s)` : undefined),
                     'warning', 'workspace.geometry-sample'));
             } else {
                 verified.push(`quick geometry sample (${chk.world.samples} points): no overlaps, nothing lost`);
@@ -692,7 +717,7 @@ function validateSerpent(input: WorkspaceInput): WorkspaceReport {
         if (geom.cells.size) {
             const chk = checkGeometry(geom, { samples: 1500, seed: 7 });
             if (chk.overlaps.length || chk.world.lost) {
-                diags.push(diag(root, texts.get(root) ?? '', /^/, `Quick geometry sample found ${chk.overlaps.length} overlapping cell pair(s) and ${chk.world.lost} of ${chk.world.samples} points in no cell. Run "OWEN: Check Geometry".`, 'warning', 'workspace.geometry-sample'));
+                diags.push(diag(root, texts.get(root) ?? '', /^/, sampleProblemMessage(chk.overlaps.length, chk.world.lost, chk.world.samples), 'warning', 'workspace.geometry-sample'));
             } else verified.push(`quick geometry sample (${chk.world.samples} points): no overlaps, nothing lost`);
         }
     } catch { /* best effort */ }
@@ -809,7 +834,7 @@ function validateScone(input: WorkspaceInput): WorkspaceReport {
         if (geom.cells.size) {
             const chk = checkGeometry(geom, { samples: 1500, seed: 7, overlapSemantics: 'first-wins' });
             if (chk.world.lost) {
-                diags.push(diag(root, text, /^/, `Quick geometry sample found ${chk.world.lost} of ${chk.world.samples} points in no cell. Run "OWEN: Check Geometry".`, 'warning', 'workspace.geometry-sample'));
+                diags.push(diag(root, text, /^/, sampleProblemMessage(0, chk.world.lost, chk.world.samples), 'warning', 'workspace.geometry-sample'));
             } else verified.push(`quick geometry sample (${chk.world.samples} points): nothing lost`);
             if (chk.overlaps.length) {
                 const names = geom.names?.cells;
