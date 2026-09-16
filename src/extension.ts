@@ -70,6 +70,23 @@ export function activate(context: vscode.ExtensionContext) {
             openResultsViewer(context.extensionUri);
         }),
 
+        // Explorer / editor right-click on a run output (mctal, outp, statepoint
+        // .h5, Serpent _res.m/_his.m/_det.m, SCONE .out): open it directly.
+        vscode.commands.registerCommand('owen.openResultsFile', async (uri?: vscode.Uri) => {
+            const target = uri instanceof vscode.Uri && uri.scheme === 'file'
+                ? uri
+                : vscode.window.activeTextEditor?.document.uri;
+            try {
+                await openResultsViewer(
+                    context.extensionUri,
+                    target?.scheme === 'file' ? { filePath: target.fsPath } : undefined,
+                );
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`OWEN Results: ${message}`);
+            }
+        }),
+
         vscode.commands.registerCommand('owen.validateInput', () => {
             const editor = vscode.window.activeTextEditor;
             if (editor) {

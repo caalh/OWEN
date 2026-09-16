@@ -4,7 +4,8 @@
 // the exact slice was 0.45. Plates now come from each baffle universe's own
 // cell halfspaces; these tests pin that: exact rect math, no overlapping
 // plates, every plate centred on real steel, and the same 76 plates from all
-// three text codes.
+// four codes (OpenMC's come from the `_baffle(name, region)` plane regions
+// of the programmatic core resolver).
 
 import * as assert from 'assert';
 import * as fs from 'fs';
@@ -13,6 +14,7 @@ import { plateRectFromConstraints } from '../../preview/radialStructure';
 import { parseMcnp } from '../../preview/codes/mcnp';
 import { parseSerpent } from '../../preview/codes/serpent';
 import { parseScone } from '../../preview/codes/scone';
+import { parseOpenmc } from '../../preview/codes/openmc';
 import { parseDeckToModel } from '../../preview/engineDispatch';
 import { findCell } from '../../preview/mcnpEvaluate';
 import { PREBUILT_MODELS } from '../paths';
@@ -25,8 +27,11 @@ function platesOf(sc: { cylinders: CylinderSpec[] }): CylinderSpec[] {
 }
 
 function signature(plates: CylinderSpec[]): string[] {
+    // 3 decimals (10 µm): MCNP derives centres from surface offsets while
+    // OpenMC accumulates lower_left + r·pitch, and the two land ~1e-4 cm apart
+    // right on the 4-decimal rounding boundary (−162.55125) at the core edge.
     return plates
-        .map((p) => [p.x, p.y, p.halfX!, p.halfY!].map((v) => Number(v.toFixed(4))).join(','))
+        .map((p) => [p.x, p.y, p.halfX!, p.halfY!].map((v) => Number(v.toFixed(3))).join(','))
         .sort();
 }
 
@@ -59,16 +64,18 @@ suite('Baffle plates from cell halfspaces (BEAVRS X/T corner fix)', () => {
             [{ axis: 'x', sense: 1, d: 5 }, { axis: 'x', sense: -1, d: 4 }], HP, HP), null);
     });
 
-    test('BEAVRS: all three codes emit identical, non-overlapping plates on real steel', function () {
+    test('BEAVRS: all four codes emit identical, non-overlapping plates on real steel', function () {
         this.timeout(60000);
         const mcnpText = fs.readFileSync(path.join(PREBUILT_MODELS, 'beavrs_fullcore_mcnp.i'), 'utf8');
         const m = platesOf(parseMcnp(mcnpText, { maxInstances: 2_000_000 }));
         const s = platesOf(parseSerpent(fs.readFileSync(path.join(PREBUILT_MODELS, 'beavrs_fullcore_serpent.sss'), 'utf8'), { maxInstances: 2_000_000 }));
         const c = platesOf(parseScone(fs.readFileSync(path.join(PREBUILT_MODELS, 'beavrs_fullcore_scone.scone'), 'utf8'), { maxInstances: 2_000_000 }));
+        const o = platesOf(parseOpenmc(fs.readFileSync(path.join(PREBUILT_MODELS, 'beavrs_fullcore_openmc.py'), 'utf8'), { maxInstances: 2_000_000 }));
 
         assert.ok(m.length >= 70, `expected the full stepped ring, got ${m.length} plates`);
         assert.deepStrictEqual(signature(s), signature(m), 'Serpent plates must match MCNP');
         assert.deepStrictEqual(signature(c), signature(m), 'SCONE plates must match MCNP');
+        assert.deepStrictEqual(signature(o), signature(m), 'OpenMC plates must match MCNP');
 
         // No two plates may share plan area — crossing plates were the X/T bug.
         for (let i = 0; i < m.length; i++) {
