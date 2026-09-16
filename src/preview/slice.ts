@@ -15,7 +15,7 @@
 // site, or under node for the verify scripts. Output arrays are transferable.
 
 import { McnpGeometryModel, Vec3 } from './mcnpGeometry';
-import { findCell, worldBounds } from './mcnpEvaluate';
+import { domainPredicate, findCell, worldBounds } from './mcnpEvaluate';
 
 export type SliceAxis = 'xy' | 'xz' | 'yz';
 
@@ -61,6 +61,13 @@ export interface SliceLegendEntry {
 /** Pixel codes < 0 are diagnostics; ≥ 0 index into `legend`. */
 export const SLICE_LOST = -1;
 export const SLICE_OVERLAP = -2;
+/**
+ * Beyond every boundary surface — outside the problem domain. OpenMC-style
+ * models have no graveyard cell, so a window wider than the outermost vacuum
+ * boundary used to paint the corners magenta as if the deck leaked. Rendered
+ * as background, not as an error.
+ */
+export const SLICE_OUTSIDE = -3;
 
 export interface SliceResult {
     width: number;
@@ -71,6 +78,8 @@ export interface SliceResult {
     legend: SliceLegendEntry[];
     lostCount: number;
     overlapCount: number;
+    /** Pixels beyond every boundary surface (drawn as background). */
+    outsideCount: number;
     /** World-space rect for axis labels: [uMin, uMax, vMin, vMax]. */
     window: [number, number, number, number];
     /** Subpixel grid per axis actually used (see SliceRequest.samples). */
@@ -175,10 +184,12 @@ export function beginSlice(model: McnpGeometryModel, req: SliceRequest): SliceJo
         legend,
         lostCount: 0,
         overlapCount: 0,
+        outsideCount: 0,
         window: [cu - halfU, cu + halfU, cv - halfV, cv + halfV],
         samples,
         cmPerPixel: [(2 * halfU) / width, (2 * halfV) / height],
     };
+    const inDomain = domainPredicate(model);
 
     const labelOf = (key: number): string => {
         if (req.labelFor) return req.labelFor(key);
@@ -240,8 +251,20 @@ export function beginSlice(model: McnpGeometryModel, req: SliceRequest): SliceJo
                 if (n > bestCount) { bestKey = key; bestCount = n; }
             }
             if (bestKey === null || lostVotes > bestCount) {
-                ids[idx] = SLICE_LOST;
-                result.lostCount++;
+                // No cell claims the pixel. Past the outermost boundary
+                // surface that is the edge of the problem, not a leak.
+                const center = planePoint(
+                    req.plane,
+                    cu - halfU + ((px + 0.5) / width) * (2 * halfU),
+                    cv + halfV - ((py + 0.5) / height) * (2 * halfV),
+                );
+                if (inDomain && !inDomain(center)) {
+                    ids[idx] = SLICE_OUTSIDE;
+                    result.outsideCount++;
+                } else {
+                    ids[idx] = SLICE_LOST;
+                    result.lostCount++;
+                }
                 continue;
             }
             const li = indexOf(bestKey);
@@ -354,11 +377,13 @@ export function sliceRowsToRgba(
     const edgeColor = opts.edgeColor ?? [10, 14, 22];
     const k = Math.max(0, Math.min(1, opts.edgeStrength ?? 0.55));
 
+    const OUTSIDE_COLOR: [number, number, number] = [11, 16, 24];
     for (let py = from; py < to; py++) {
         for (let px = 0; px < width; px++) {
             const i = py * width + px;
             const id = ids[i];
-            const rgb = id >= 0 ? palette[id] ?? PROBLEM_COLOR : PROBLEM_COLOR;
+            const rgb = id >= 0 ? palette[id] ?? PROBLEM_COLOR
+                : id === SLICE_OUTSIDE ? OUTSIDE_COLOR : PROBLEM_COLOR;
             let r = rgb[0], g = rgb[1], b = rgb[2];
             if (opts.edges) {
                 // A pixel is on a boundary when the region to its left or above

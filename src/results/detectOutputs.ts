@@ -11,7 +11,7 @@ import type { DetectedOutput, OutputKind, RunResults } from './types';
 import { looksLikeMcnpOutp } from './parsers/mcnpOutp';
 import { looksLikeMctal } from './parsers/mctal';
 import { looksLikeOpenmcStdout, looksLikeOpenmcTalliesOut } from './parsers/openmc';
-import { looksLikeSerpentDet, looksLikeSerpentRes } from './parsers/serpent';
+import { looksLikeSerpentDet, looksLikeSerpentHis, looksLikeSerpentRes } from './parsers/serpent';
 import { looksLikeSconeOutput } from './parsers/scone';
 
 const SNIFF_BYTES = 16384;
@@ -71,6 +71,7 @@ export function identifyOutput(file: string): Identity | undefined {
     if (looksLikeOpenmcStdout(head)) return { code: 'openmc', kind: 'stdout', label: 'OpenMC log' };
     if (looksLikeSerpentDet(head)) return { code: 'serpent', kind: 'detm', label: 'Serpent detector' };
     if (looksLikeSerpentRes(head)) return { code: 'serpent', kind: 'resm', label: 'Serpent results' };
+    if (looksLikeSerpentHis(head)) return { code: 'serpent', kind: 'resm', label: 'Serpent history' };
     if (looksLikeSconeOutput(head)) return { code: 'scone', kind: 'scone_out', label: 'SCONE output' };
     return undefined;
 }

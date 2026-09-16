@@ -18,7 +18,7 @@
 // the index columns depends on the detector card, and guessing it would invent
 // geometry.
 import * as fs from 'fs';
-import type { RunResults, KeffHistory, KeffEstimator, TallyEntry, FluxSpectrum } from '../types';
+import type { RunResults, KeffHistory, KeffEstimator, TallyEntry, FluxSpectrum, MeshTally } from '../types';
 
 /** One `NAME = [...]` / `NAME (idx, …) = …` assignment. */
 interface Assignment {
@@ -105,6 +105,17 @@ export function looksLikeSerpentRes(text: string): boolean {
     return /^\s*(IMP_KEFF|ANA_KEFF|COL_KEFF|ABS_KEFF|VERSION)\s*(\(\s*idx)?/m.test(head);
 }
 
+/**
+ * A `_his<n>.m` cycle-history file (`set his 1`). It opens with a `TIME`
+ * matrix, so the `_res.m` sniff never fires — serpent-tools' real
+ * `bwr_his0.m` was falling through to the MCNP reader.
+ */
+export function looksLikeSerpentHis(text: string): boolean {
+    const head = text.slice(0, 20000);
+    return /^\s*HIS_\w+\s*=\s*\[/m.test(head)
+        || (/^\s*TIME\s*=\s*\[/m.test(head) && /^\s+\d+\s+\d\.\d{5}E[+-]\d\d\b/m.test(head));
+}
+
 export function looksLikeSerpentDet(text: string): boolean {
     return /^\s*DET[A-Za-z_]\w*\s*(\(\s*idx[^)]*\))?\s*=\s*\[/m.test(text.slice(0, 20000));
 }
@@ -187,29 +198,39 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
     }
 
     // Cycle-wise history from a _his file, when that is what we were handed.
+    // Serpent writes [cycle, k_cycle, k_cumulative, relative σ of the
+    // cumulative mean] (verified against serpent-tools' real bwr_his0.m).
     for (const hisName of ['HIS_IMP_KEFF', 'HIS_ANA_KEFF', 'HIS_COL_KEFF']) {
         const hit = byName.get(hisName)?.[0];
         if (!hit?.rows || hit.rows.length < 3) continue;
         const width = hit.rows[0].length;
-        // Find the column that looks like k-eff rather than a cycle counter.
-        let col = -1;
-        for (let c = 0; c < width; c++) {
-            const values = hit.rows.map((r) => r[c]).filter(Number.isFinite);
-            if (values.length < hit.rows.length) continue;
-            const isCounter = values.every((v, i) => v === i + 1);
-            if (isCounter) continue;
-            if (values.every((v) => v > 0.1 && v < 10)) {
-                col = c;
-                break;
+        // Column 0 is the cycle counter, but it is not always a clean 1..N
+        // run (bwr_his0.m restarts numbering when the active cycles begin).
+        const counter0 = hit.rows.every((r, i) => i === 0 || Number.isInteger(r[0]));
+        let mean: number[];
+        let final: { mean: number; std: number } | undefined;
+        if (counter0 && width >= 4) {
+            mean = hit.rows.map((r) => r[1]);
+            const last = hit.rows[hit.rows.length - 1];
+            final = { mean: last[2], std: plausibleRelativeError(last[3]) ? Math.abs(last[2] * last[3]) : 0 };
+        } else {
+            // Unknown layout: find the column that looks like k rather than a counter.
+            let col = -1;
+            for (let c = 0; c < width; c++) {
+                const values = hit.rows.map((r) => r[c]).filter(Number.isFinite);
+                if (values.length < hit.rows.length) continue;
+                const isCounter = values.every((v, i) => v === i + 1);
+                if (isCounter) continue;
+                if (values.every((v) => v > 0.1 && v < 10)) { col = c; break; }
             }
+            if (col < 0) continue;
+            mean = hit.rows.map((r) => r[col]);
         }
-        if (col < 0) continue;
-        const mean = hit.rows.map((r) => r[col]);
         keff = {
             cycles: mean.map((_, i) => i + 1),
             mean,
             std: mean.map(() => 0),
-            final: keff?.final ?? { mean: mean[mean.length - 1], std: 0 },
+            final: final ?? keff?.final ?? { mean: mean[mean.length - 1], std: 0 },
         };
         metadata.keffHistorySource = hisName;
         break;
@@ -237,6 +258,7 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
     tallies.push(...det.tallies);
     spectra.push(...det.spectra);
     notes.push(...det.notes);
+    const meshTallies = det.meshes;
 
     // Serpent counts lost particles in _res.m as LOST_PARTICLES (older) / TOT_LOST (newer).
     const lostVar = byName.get('LOST_PARTICLES') ?? byName.get('TOT_LOST');
@@ -248,7 +270,7 @@ export function parseSerpentResults(text: string, sourceFile?: string): RunResul
         keff,
         spectra,
         tallies,
-        meshTallies: [],
+        meshTallies,
         metadata,
         notes: notes.length ? notes : undefined,
         convergence: estimators.length || lostParticles !== undefined
@@ -270,10 +292,12 @@ function parseSerpentDetectors(byName: Map<string, Assignment[]>): {
     tallies: TallyEntry[];
     spectra: FluxSpectrum[];
     notes: string[];
+    meshes: MeshTally[];
 } {
     const tallies: TallyEntry[] = [];
     const spectra: FluxSpectrum[] = [];
     const notes: string[] = [];
+    const meshes: MeshTally[] = [];
 
     for (const [name, list] of byName) {
         if (!name.startsWith('DET') || /E$/.test(name)) continue;
@@ -324,20 +348,76 @@ function parseSerpentDetectors(byName: Map<string, Assignment[]>): {
             );
         }
 
+        // Cartesian mesh detector: the companion X and Y matrices carry one
+        // [min max mid] row per bin, and the value rows' last two index
+        // columns are (y bin, x bin) — the layout of serpent-tools'
+        // ref_det0.m DETxyFissionCapt. Rebuild the 2D map so the Mesh
+        // heatmap tab works for Serpent, not just MCNP FMESH.
+        const xAssign = byName.get(`${name}X`)?.[0];
+        const yAssign = byName.get(`${name}Y`)?.[0];
         const indexCols = width - 2;
-        if (indexCols >= 8) {
+        let meshBuilt = false;
+        if (xAssign?.rows && yAssign?.rows && xAssign.rows[0].length === 3 && yAssign.rows[0].length === 3 && indexCols >= 2) {
+            const nx = xAssign.rows.length;
+            const ny = yAssign.rows.length;
+            if (nx > 1 && ny > 1 && rows.length % (nx * ny) === 0) {
+                const xCol = indexCols - 1;   // x varies fastest in file order
+                const yCol = indexCols - 2;
+                // A detector can carry extra bins on top of the mesh (two
+                // reactions in ref_det0.m's DETxyFissionCapt → 2·nx·ny rows).
+                // Group by every index column that is neither x nor y and
+                // emit one mesh per complete group.
+                const groupsByKey = new Map<string, number[][]>();
+                for (const r of rows) {
+                    const key = r.slice(1, xCol).filter((_, c) => c + 1 !== yCol).join(',');
+                    let list = groupsByKey.get(key);
+                    if (!list) { list = []; groupsByKey.set(key, list); }
+                    list.push(r);
+                }
+                let bin = 0;
+                for (const [, groupRows] of groupsByKey) {
+                    if (groupRows.length !== nx * ny) continue;
+                    bin += 1;
+                    if (bin > 4) break;   // keep the panel sane on huge detectors
+                    const grid = new Array(nx * ny).fill(0);
+                    const errs = new Array(nx * ny).fill(0);
+                    let ok = true;
+                    for (const r of groupRows) {
+                        const xi = r[xCol] - 1, yi = r[yCol] - 1;
+                        if (xi < 0 || xi >= nx || yi < 0 || yi >= ny) { ok = false; break; }
+                        grid[xi + nx * yi] = r[width - 2];
+                        errs[xi + nx * yi] = r[width - 1];
+                    }
+                    if (!ok) continue;
+                    meshes.push({
+                        id: `${detName || name}${groupsByKey.size > 1 ? `#${bin}` : ''}`,
+                        label: `Detector ${detName || name} (${nx}\u00d7${ny} mesh${groupsByKey.size > 1 ? `, bin ${bin} of ${groupsByKey.size}` : ''})`,
+                        nx, ny, nz: 1,
+                        values: grid,
+                        errors: errs,
+                        bounds: {
+                            xmin: xAssign.rows[0][0], xmax: xAssign.rows[nx - 1][1],
+                            ymin: yAssign.rows[0][0], ymax: yAssign.rows[ny - 1][1],
+                            zmin: 0, zmax: 0,
+                        },
+                    });
+                    meshBuilt = true;
+                }
+            }
+        }
+        if (!meshBuilt && indexCols >= 8) {
             const varying = Array.from({ length: indexCols }, (_, c) => new Set(rows.map((r) => r[c])).size).filter(
                 (n) => n > 1,
             ).length;
             if (varying > 1) {
                 notes.push(
-                    `${name} bins over more than one index column (mesh or multi-bin detector). OWEN lists the bins in file order and does not reconstruct the mesh.`,
+                    `${name} bins over more than one index column (mesh or multi-bin detector). OWEN lists the bins in file order; without ${name}X/${name}Y matrices the mesh is not reconstructed.`,
                 );
             }
         }
     }
 
-    return { tallies, spectra, notes };
+    return { tallies, spectra, notes, meshes };
 }
 
 export function parseSerpentFile(filePath: string): RunResults {

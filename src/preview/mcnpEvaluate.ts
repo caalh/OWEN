@@ -474,7 +474,11 @@ function elementWindowContains(
 function fillEntryAt(fill: Fill, i: number, j: number, k: number): { universe: number; tr: Transform | null } | null {
     const g = fill.grid;
     if (!g) return fill.universe !== null ? { universe: fill.universe, tr: fill.tr } : null;
-    if (i < g.i1 || i > g.i2 || j < g.j1 || j > g.j2 || k < g.k1 || k > g.k2) return null;
+    if (i < g.i1 || i > g.i2 || j < g.j1 || j > g.j2 || k < g.k1 || k > g.k2) {
+        // OpenMC `<outer>`: beyond the declared grid every element reads as
+        // the outer universe. MCNP grids carry no outer and return null.
+        return g.outer !== undefined ? { universe: g.outer, tr: null } : null;
+    }
     const nx = g.i2 - g.i1 + 1;
     const ny = g.j2 - g.j1 + 1;
     const idx = (i - g.i1) + nx * ((j - g.j1) + ny * (k - g.k1));
@@ -509,6 +513,20 @@ function findInUniverse(
             if (!out.overlaps.includes(id)) out.overlaps.push(id);
         } else {
             break; // deeper levels: first exact claimant wins
+        }
+    }
+    if (!hit) {
+        // Pass 1.5: OpenMC permits a cell with no region at all — it fills
+        // its entire universe (a lattice wrapped in a bare universe is the
+        // common case). MCNP decks never produce these (the parser always
+        // yields a region), so this only fires for XML-derived models.
+        for (const id of cellIds) {
+            const cellDef = model.cells.get(id);
+            if (cellDef && cellDef.lat === 0 && cellDef.region === null && cellDef.surfaceOrder.length === 0) {
+                hit = cellDef;
+                if (depth === 0 && out.overlaps.length === 0) out.overlaps.push(id);
+                break;
+            }
         }
     }
     if (!hit) {

@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-09-15
+
+### Added
+
+- **Validate Input File opens a report** listing every finding with a "Do
+  this:" line (jump-to-line, Re-run, Open Problems). The old toast that only
+  said "Found N issue(s)" is gone. MCNP same-file cross-references (undefined
+  surface, unused M card, …) are included; OpenMC XML uses the same report.
+- **Hover a pin on a full BEAVRS core.** Picking used to be switched off
+  above 40,000 instances, so on precisely the decks worth inspecting the
+  info card never appeared. A plan-view spatial grid with closed-form
+  cylinder/box/sphere hits replaces the per-instance raycast on big scenes;
+  hover runs everywhere now (frame-throttled), and a plain click pins the
+  readout — handy while orbiting or on a touchpad.
+- **OpenMC `<lattice>` support in the exact-geometry engine.** A geometry /
+  model.xml full core used to slice as nothing but its outermost water:
+  every lattice was silently dropped. Lattices now expand natively
+  (top-row-first XML order, `<outer>` universes, region-less cells that
+  fill their whole universe), and the BEAVRS model.xml midplane matches
+  the MCNP deck's slice pixel-for-pixel on fuel / gap / clad counts.
+  Verified side-by-side against OpenMC 0.15.3's own `plot_geometry()`.
+- **`scripts/render-slice.mjs`** — headless slice-to-PNG over the exact
+  engine, for putting an OWEN slice next to an OpenMC plot.
+- **Real Serpent outputs in the test net** (serpent-tools, MIT): a cycle
+  history file, a burnup `_res.m`, and mesh detectors now guard the parsers.
+
+### Fixed
+
+- **The Results Viewer no longer renders broken.** uPlot's default live
+  legend ("Value: --", stray checkboxes) used to overflow the k-eff chart
+  onto the estimator table; the flux spectrum was built while its tab was
+  hidden (width 0 → an empty box with a vertical legend); a final-estimate-
+  only MCNP output plotted a blank one-point "history"; the mesh tab was a
+  bare grey canvas. Legends are off (each chart carries a caption row),
+  plots rebuild when their tab is shown, a missing history is a sentence
+  instead of an empty plot, and the mesh tab says what would fill it.
+- **Serpent `_his` files are recognized and read.** They open with a TIME
+  matrix, so detection fell through to the MCNP reader. A real `bwr_his0.m`
+  now yields the full 119-cycle k-eff convergence plot, with the final
+  cumulative mean ± σ from the last row.
+- **Serpent xy mesh detectors become mesh heatmaps.** `DET<name>X`/`Y`
+  matrices are used to rebuild the 2D map (one mesh per extra bin, e.g.
+  fission + capture), instead of a flat bin list with a "not reconstructed"
+  note.
+- **Slice pixels beyond every boundary surface are background, not magenta.**
+  OpenMC-style models have no graveyard cell; the window corners outside the
+  RPV used to count as "lost" as if the deck leaked.
+- **`read file = material_card.i`** is one include, not a missing file named
+  `file` ([#6](https://github.com/caalh/owen/issues/6)). `FILE=path`,
+  `FILE = path`, `FILE path`, `ECHO`/`NOECHO`, and the older `read foo.i`
+  form all resolve next to the deck.
+
 ## [1.4.5] - 2026-09-09
 
 ### Added
