@@ -35,6 +35,58 @@ const ANNULUS_XML = `<?xml version="1.0"?>
 </geometry>
 `;
 
+suite('OpenMC <lattice> → exact engine (was dropped entirely)', () => {
+    // 2×2 lattice, pitch 10, lower_left (-10,-10). XML lists the TOP row
+    // first: [u2 u3] over [u4 u5]. Each pin universe holds one region-less
+    // cell of a distinct material. Cell 90 (region-less, universe 20) wraps
+    // the lattice the way OpenMC exports do; <outer> is universe 6 (water).
+    const XML = `<?xml version="1.0"?>
+<model><geometry>
+  <surface id="1" type="z-cylinder" coeffs="0 0 4" />
+  <surface id="2" type="sphere" coeffs="0 0 0 60" boundary="vacuum" />
+  <cell id="10" universe="2" material="21" />
+  <cell id="11" universe="3" material="31" />
+  <cell id="12" universe="4" material="41" />
+  <cell id="13" universe="5" material="51" />
+  <cell id="14" universe="6" material="61" />
+  <cell id="90" universe="20" fill="7" />
+  <cell id="99" universe="0" fill="20" region="-2" />
+  <lattice id="7">
+    <pitch>10 10</pitch>
+    <dimension>2 2</dimension>
+    <lower_left>-10 -10</lower_left>
+    <universes>
+ 2 3
+ 4 5
+    </universes>
+    <outer>6</outer>
+  </lattice>
+</geometry></model>`;
+
+    test('elements land where the XML draws them (top row first)', () => {
+        const model = parseOpenmcGeometryXml(XML);
+        const at = (x: number, y: number) => findCell(model, [x, y, 0]).cell?.material;
+        assert.strictEqual(at(-5, 5), 21, 'top-left of the map is universe 2');
+        assert.strictEqual(at(5, 5), 31, 'top-right is universe 3');
+        assert.strictEqual(at(-5, -5), 41, 'bottom-left is universe 4');
+        assert.strictEqual(at(5, -5), 51, 'bottom-right is universe 5');
+    });
+
+    test('<outer> universe fills beyond the declared grid', () => {
+        const model = parseOpenmcGeometryXml(XML);
+        const out = findCell(model, [25, 0, 0]);
+        assert.strictEqual(out.cell?.material, 61, 'outer water universe');
+        assert.ok(!out.lost);
+    });
+
+    test('a region-less cell fills its whole universe', () => {
+        const model = parseOpenmcGeometryXml(XML);
+        const c = findCell(model, [0.5, 0.5, 0]);
+        assert.ok(!c.lost, 'descent through the region-less wrapper must not lose the point');
+        assert.strictEqual(c.cell?.material, 31, '(0.5,0.5) sits in element (1,1) — the top-right map entry, universe 3');
+    });
+});
+
 suite('OpenMC geometry.xml → exact engine', () => {
     test('looksLikeOpenmcXml accepts XML and rejects Python', () => {
         assert.ok(looksLikeOpenmcXml(SPHERE_XML));

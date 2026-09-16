@@ -6,6 +6,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { buildPreviewHtml } from '../../preview/webview';
 import { inputBuilderWebviewHtml } from '../../panels/inputBuilderWebview';
+import { validationReportHtml } from '../../validation/report';
 
 interface ScriptBlock { attrs: string; body: string }
 
@@ -53,5 +54,22 @@ suite('Webview scripts parse', () => {
         const bodies = scripts(html);
         assert.ok(bodies.length > 0, 'expected at least one script block');
         bodies.forEach((s, i) => assertParses(s, `input builder script #${i + 1}`));
+    });
+
+    test('the Validate Input report script is syntactically valid', () => {
+        const html = validationReportHtml({
+            fileName: 'broken.i',
+            language: 'MCNP',
+            findings: [{
+                severity: 'error', line: 3, startCol: 0,
+                message: 'Macrobody "CYL" is not an MCNP keyword — use "RCC".',
+                code: 'mcnp.macrobody',
+            }],
+        }, 'vscode-resource:', 'testnonce');
+        const bodies = scripts(html);
+        assert.ok(bodies.length > 0, 'expected a script block');
+        bodies.forEach((s, i) => assertParses(s, `validate report script #${i + 1}`));
+        assert.ok(html.includes('Do this:'), 'report must list a solution');
+        assert.ok(html.includes('Replace the unknown mnemonic'), 'solution text present');
     });
 });

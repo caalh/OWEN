@@ -155,7 +155,10 @@ export class ResultsPanel {
     .tab { padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--muted); }
     .tab.active { background: var(--card); color: var(--text); }
     main { padding: 16px; }
-    .chart { width: 100%; height: 280px; background: var(--card); border-radius: 8px; border: 1px solid var(--border); margin-bottom: 12px; }
+    .chart { width: 100%; height: 280px; background: var(--card); border-radius: 8px; border: 1px solid var(--border); margin-bottom: 12px; overflow: hidden; }
+    .chart.placeholder { height: auto; }
+    .plotcap { display: flex; flex-wrap: wrap; gap: 14px; padding: 4px 12px 6px; font-size: 11px; color: var(--muted); }
+    .plotcap i { display: inline-block; width: 12px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
     th { color: var(--muted); font-weight: 600; }
@@ -231,13 +234,26 @@ export class ResultsPanel {
       <table><thead><tr><th>ID</th><th>Tally</th><th>Value</th><th>Rel. error</th><th>Checks</th></tr></thead><tbody id="tallyBody"></tbody></table>
     </div>
     <div id="meshTab" style="display:none">
-      <canvas id="meshCanvas" width="600" height="400" style="max-width:100%;background:var(--card);border-radius:8px"></canvas>
+      <div id="meshWrap"><div class="chart placeholder"><div class="empty">No mesh tally in this output.</div></div></div>
     </div>
   </main>
   <script src="${uplotBase}/uPlot.iife.min.js"></script>
   <script>
     const vscode = acquireVsCodeApi();
     let keffPlot = null, specPlot = null, entropyPlot = null;
+    let lastResults = null;
+
+    // uPlot's default legend (the "Value: --" / series checkboxes strip) is
+    // built for dashboards, not this panel — it used to overflow the fixed
+    // chart box onto the estimators table. Legends are off everywhere; each
+    // chart carries its own caption row instead.
+    function addCaption(host, parts) {
+      const d = document.createElement('div');
+      d.className = 'plotcap';
+      d.innerHTML = parts.map(p => '<span><i style="background:' + p.color + '"></i>' + esc(p.label) + '</span>').join('');
+      host.appendChild(d);
+    }
+    function plotWidth(host) { return host.clientWidth || host.parentElement.clientWidth || 640; }
 
     function supExp(p) {
       const m = { '-': '\\u207b', '0': '\\u2070', '1': '\\u00b9', '2': '\\u00b2', '3': '\\u00b3', '4': '\\u2074', '5': '\\u2075', '6': '\\u2076', '7': '\\u2077', '8': '\\u2078', '9': '\\u2079' };
@@ -254,12 +270,34 @@ export class ResultsPanel {
       ['keff','spectrum','tallies','mesh'].forEach(id => {
         document.getElementById(id + 'Tab').style.display = id === name ? 'block' : 'none';
       });
+      // A plot built while its tab was display:none had clientWidth 0 and
+      // rendered as a blank box. Rebuild the newly visible tab's plots now.
+      if (lastResults) {
+        if (name === 'keff') {
+          buildKeffPlot(document.getElementById('keffChart'), lastResults.keff);
+          buildEntropyPlot(document.getElementById('entropyChart'), lastResults.keff);
+        } else if (name === 'spectrum') {
+          buildSpecPlot(document.getElementById('specChart'), lastResults.spectra || []);
+        } else if (name === 'mesh') {
+          renderMesh(lastResults);
+        }
+      }
     }
     document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
 
     function buildKeffPlot(host, keff) {
       if (keffPlot) { keffPlot.destroy(); keffPlot = null; }
-      if (!keff || !keff.mean.length) { host.innerHTML = '<div class="empty">No k-eff history</div>'; return; }
+      // A single fabricated point (final-estimate-only outputs) is not a
+      // history — plotting it gave a blank axis box. Say so instead.
+      const realPoints = keff && keff.mean ? keff.mean.length : 0;
+      if (!keff || realPoints < 2) {
+        host.classList.add('placeholder');
+        host.innerHTML = '<div class="empty">' + (keff && keff.final
+          ? 'This output carries only the final k-eff (no cycle-by-cycle table), so there is no convergence history to plot. The banner above shows the final estimate; the estimator table below still applies.'
+          : 'No k-eff history in this output.') + '</div>';
+        return;
+      }
+      host.classList.remove('placeholder');
       host.innerHTML = '';
       const inactive = keff.inactive ?? 0;
       // Split the series so discarded settling cycles read differently.
@@ -275,7 +313,8 @@ export class ResultsPanel {
         data.push(keff.mean.map((m, i) => (keff.std[i] > 0 ? m + keff.std[i] : null)));
       }
       keffPlot = new uPlot({
-        width: host.clientWidth, height: 260,
+        width: plotWidth(host), height: 236,
+        legend: { show: false },
         scales: { x: { time: false }, y: { auto: true } },
         axes: [
           { label: inactive ? 'Cycle / batch (' + inactive + ' discarded)' : 'Cycle / batch', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' } },
@@ -283,6 +322,11 @@ export class ResultsPanel {
         ],
         series,
       }, data, host);
+      const cap = [];
+      if (inactive) cap.push({ color: '#64748b', label: 'k (settling, discarded)' });
+      cap.push({ color: '#38bdf8', label: inactive ? 'k (active)' : 'k per cycle' });
+      if (hasSigma) cap.push({ color: 'rgba(56,189,248,0.55)', label: 'k + σ' });
+      addCaption(host, cap);
     }
 
     function buildEntropyPlot(host, keff) {
@@ -296,7 +340,8 @@ export class ResultsPanel {
       const settling = ent.map((v, i) => (i < inactive ? v : null));
       const active = ent.map((v, i) => (i >= inactive ? v : null));
       entropyPlot = new uPlot({
-        width: host.clientWidth, height: 180,
+        width: plotWidth(host), height: 156,
+        legend: { show: false },
         scales: { x: { time: false }, y: { auto: true } },
         axes: [
           { label: 'Cycle / batch', stroke: '#94a3b8', grid: { stroke: 'rgba(255,255,255,0.06)' } },
@@ -304,6 +349,7 @@ export class ResultsPanel {
         ],
         series: [{}, { label: 'H (settling)', stroke: '#64748b', width: 1 }, { label: 'H (active)', stroke: '#a78bfa', width: 2 }],
       }, [keff.cycles, settling, active], host);
+      addCaption(host, [{ color: '#64748b', label: 'H (settling)' }, { color: '#a78bfa', label: 'H (active)' }]);
     }
 
     function renderConvergence(r) {
@@ -341,23 +387,38 @@ export class ResultsPanel {
 
     function buildSpecPlot(host, spectra) {
       if (specPlot) { specPlot.destroy(); specPlot = null; }
-      if (!spectra.length) { host.innerHTML = '<div class="empty">No flux spectrum in this output</div>'; return; }
+      if (!spectra.length) {
+        host.classList.add('placeholder');
+        host.innerHTML = '<div class="empty">No flux spectrum in this output.</div>';
+        return;
+      }
+      host.classList.remove('placeholder');
       host.innerHTML = '';
       const s = spectra[0];
       const E = s.E.filter(e => e > 0);
       const phi = s.phi.slice(0, E.length);
       specPlot = new uPlot({
-        width: host.clientWidth, height: 260,
-        scales: { x: { distr: 3 }, y: { distr: 3 } },
+        width: plotWidth(host), height: 236,
+        legend: { show: false },
+        scales: { x: { distr: 3, time: false }, y: { distr: 3 } },
         axes: [
           { scale: 'x', label: 'Energy (eV)', stroke: '#94a3b8', values: (u,v) => v.map(logTick), grid: { stroke: 'rgba(255,255,255,0.06)' } },
           { scale: 'y', label: 'Flux', stroke: '#94a3b8', values: (u,v) => v.map(logTick), grid: { stroke: 'rgba(255,255,255,0.06)' } },
         ],
         series: [{}, { label: s.label, stroke: '#f97316', width: 2, points: { show: false } }],
       }, [E, phi.map(v => Math.max(v, 1e-30))], host);
+      addCaption(host, [{ color: '#f97316', label: s.label + (s.unit ? ' — ' + s.unit : '') }]);
     }
 
-    function drawMeshHeatmap(mesh) {
+    function renderMesh(r) {
+      const wrap = document.getElementById('meshWrap');
+      const meshes = (r && r.meshTallies) || [];
+      if (!meshes.length) {
+        wrap.innerHTML = '<div class="chart placeholder"><div class="empty">No mesh tally in this output. MCNP: add an FMESH card; OpenMC: a MeshFilter tally; Serpent: a det with dx/dy bins.</div></div>';
+        return;
+      }
+      wrap.innerHTML = '<canvas id="meshCanvas" width="600" height="400" style="max-width:100%;background:var(--card);border-radius:8px"></canvas><div class="plotcap" id="meshCap"></div>';
+      const mesh = meshes[0];
       const c = document.getElementById('meshCanvas');
       const ctx = c.getContext('2d');
       const { nx, ny, values } = mesh;
@@ -374,6 +435,10 @@ export class ResultsPanel {
           ctx.fillRect(i * cw, (ny - 1 - j) * ch, cw, ch);
         }
       }
+      document.getElementById('meshCap').innerHTML =
+        '<span><i style="background:hsl(240,70%,45%)"></i>0</span>' +
+        '<span><i style="background:hsl(0,70%,45%)"></i>max ' + fmt(max) + '</span>' +
+        '<span>' + nx + '\u00d7' + ny + (nz > 1 ? '\u00d7' + nz + ' (first z-slice shown)' : '') + '</span>';
     }
 
     function esc(s) {
@@ -386,6 +451,7 @@ export class ResultsPanel {
     }
 
     function renderResults(r) {
+      lastResults = r;
       document.getElementById('meta').textContent =
         (r.code ? r.code.toUpperCase() + ' · ' : '') + (r.sourceFile || 'unknown source');
 
@@ -459,7 +525,7 @@ export class ResultsPanel {
       });
 
       document.getElementById('meshBtn').style.display = (r.meshTallies?.length) ? 'inline-block' : 'none';
-      if (r.meshTallies?.length) drawMeshHeatmap(r.meshTallies[0]);
+      renderMesh(r);
     }
 
     window.addEventListener('message', e => {
@@ -470,9 +536,9 @@ export class ResultsPanel {
     document.getElementById('pickBtn').onclick = () => vscode.postMessage({ command: 'pickFile' });
     document.getElementById('meshBtn').onclick = () => vscode.postMessage({ command: 'overlayMesh' });
     window.addEventListener('resize', () => {
-      if (keffPlot) keffPlot.setSize({ width: document.getElementById('keffChart').clientWidth, height: 260 });
-      if (specPlot) specPlot.setSize({ width: document.getElementById('specChart').clientWidth, height: 260 });
-      if (entropyPlot) entropyPlot.setSize({ width: document.getElementById('entropyChart').clientWidth, height: 180 });
+      if (keffPlot) keffPlot.setSize({ width: plotWidth(document.getElementById('keffChart')), height: 236 });
+      if (specPlot) specPlot.setSize({ width: plotWidth(document.getElementById('specChart')), height: 236 });
+      if (entropyPlot) entropyPlot.setSize({ width: plotWidth(document.getElementById('entropyChart')), height: 156 });
     });
   </script>
 </body>

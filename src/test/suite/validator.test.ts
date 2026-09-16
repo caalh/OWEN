@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import { runValidators } from '../../validation/validator';
+import { solutionFor } from '../../language/solutions';
 
 suite('OWEN validator', () => {
     test('MCNP: flags S(α,β) on a material with no hydrogen', () => {
@@ -57,5 +58,11 @@ suite('OWEN validator', () => {
             diags.some((d) => d.code === 'scone.pin-len' || d.code === 'scone.pin-outer'),
             'expected scone.pin-len or scone.pin-outer diagnostic',
         );
+    });
+
+    test('solutions catalog covers the common codes', () => {
+        assert.ok(solutionFor('mcnp.macrobody', 'x').includes('RCC'));
+        assert.ok(solutionFor('openmc.source', 'x').includes('IndependentSource'));
+        assert.ok(solutionFor('mcnp.include-not-found', 'x').toLowerCase().includes('file'));
     });
 });

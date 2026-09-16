@@ -42,6 +42,13 @@ describe('mcnp-workspace fixtures', () => {
         assert.ok(countCode(r, 'mcnp.include-not-found') >= 1);
     });
 
+    it('read-file-eq/ → FILE = path is one include, not a missing file named "file" (#6)', () => {
+        const r = validateMcnpProject({ rootPath: path.join(fixtureDir('read-file-eq'), 'main.inp') });
+        assert.strictEqual(r.summary.errors, 0, JSON.stringify(r.diagnostics));
+        assert.ok(!r.diagnostics.some((d) => /Include file not found: file\b/.test(d.message)),
+            'the FILE keyword must not be treated as a filename');
+    });
+
     it('cycle/ → include cycle', () => {
         const r = validateMcnpProject({ rootPath: path.join(fixtureDir('cycle'), 'a.i') });
         assert.ok(countCode(r, 'mcnp.include-cycle') >= 1);

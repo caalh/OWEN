@@ -93,6 +93,11 @@ export interface FillGrid {
     k1: number; k2: number;
     /** Row-major [k][j][i] flattened: index = i + nx*(j + ny*k). */
     entries: FillEntry[];
+    /**
+     * OpenMC `<outer>`: the universe every element beyond the declared range
+     * reads as. MCNP has no equivalent (out-of-range is undefined there).
+     */
+    outer?: number;
 }
 
 /**

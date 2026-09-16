@@ -12,6 +12,8 @@ packages/*/dist/
 packages/*/src/*.js
 packages/*/src/*.js.map
 *.vsix
+# Scratch renders for the OpenMC-plotter comparison (scripts/render-slice.mjs)
+.compare2d/
 .vscode-test/
 *.log
 !src/test/fixtures/*.log

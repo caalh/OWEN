@@ -5,20 +5,26 @@
  *
  * Division of labor since the LSP migration (docs/LSP_DESIGN.md):
  *  - mcnp / serpent / scone: the LSP owns the diagnostics collection; this
- *    command just reports the current issue count (it re-runs the same rules,
- *    so counts always agree with the squiggles).
- *  - OpenMC Python: unchanged pre-LSP behavior — the command runs the OpenMC
- *    gotcha rules and publishes them to its own collection (Pylance owns the
- *    rest of Python).
+ *    command re-runs the same rules (counts always agree with the squiggles),
+ *    merges same-file MCNP cross-references, and opens a report that lists
+ *    every finding with a "what to do" line.
+ *  - OpenMC Python: publishes to its own collection (Pylance owns the rest).
+ *  - OpenMC XML: the host collection already squiggles; this command lists
+ *    the same findings in the report.
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { detectMonteCarloLanguage, detectMonteCarloLanguageFromText, MonteCarloLanguage } from '../util/detectLanguage';
 import { joinNotebookCode, notebookOfCell } from '../util/deckSource';
 import { runLanguageRules } from '../language/rules';
 import { PlainDiagnostic } from '../language/types';
+import { mcnpCrossReferenceDiagnostics } from '../language/crossReference';
+import { detectOpenmcXmlKind, validateOpenmcXml } from '../language/openmcXml';
+import { validationReportHtml, ReportFinding } from './report';
 
 const diagnosticCollection = vscode.languages.createDiagnosticCollection('owen');
+const VIEW = 'owen.validateInputReport';
 
 type Diags = vscode.Diagnostic[];
 
@@ -37,7 +43,72 @@ function toVscodeDiagnostic(d: PlainDiagnostic): vscode.Diagnostic {
     );
     diag.source = 'owen';
     diag.code = d.code;
+    if (d.unnecessary) diag.tags = [vscode.DiagnosticTag.Unnecessary];
     return diag;
+}
+
+function findingOf(d: vscode.Diagnostic): ReportFinding {
+    return {
+        severity: d.severity === vscode.DiagnosticSeverity.Error ? 'error'
+            : d.severity === vscode.DiagnosticSeverity.Warning ? 'warning'
+                : d.severity === vscode.DiagnosticSeverity.Information ? 'information'
+                    : 'hint',
+        line: d.range.start.line,
+        startCol: d.range.start.character,
+        message: d.message,
+        code: typeof d.code === 'string' ? d.code : String(d.code ?? ''),
+    };
+}
+
+function collectPlain(lang: MonteCarloLanguage | null, text: string): PlainDiagnostic[] {
+    const rules = runLanguageRules(lang, text);
+    if (lang !== 'mcnp') return rules;
+    return [...rules, ...mcnpCrossReferenceDiagnostics(text)];
+}
+
+let panel: vscode.WebviewPanel | undefined;
+let lastDoc: vscode.TextDocument | undefined;
+
+function showReport(document: vscode.TextDocument, langLabel: string, diags: Diags): void {
+    lastDoc = document;
+    const html = (webview: vscode.Webview) => {
+        const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        return validationReportHtml(
+            {
+                fileName: path.basename(document.uri.fsPath || document.uri.path) || 'untitled',
+                language: langLabel,
+                findings: diags.map(findingOf),
+            },
+            webview.cspSource,
+            nonce,
+        );
+    };
+    if (panel) {
+        panel.reveal(vscode.ViewColumn.Beside, true);
+        panel.webview.html = html(panel.webview);
+        return;
+    }
+    panel = vscode.window.createWebviewPanel(VIEW, 'OWEN: Validate Input', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }, { enableScripts: true });
+    panel.webview.html = html(panel.webview);
+    panel.webview.onDidReceiveMessage(async (msg: { command?: string; line?: number; col?: number }) => {
+        if (msg.command === 'rerun' && lastDoc) {
+            validateInputFile(lastDoc);
+            return;
+        }
+        if (msg.command === 'problems') {
+            await vscode.commands.executeCommand('workbench.actions.view.problems');
+            return;
+        }
+        if (msg.command === 'goto' && lastDoc) {
+            const line = Math.max(0, Number(msg.line) || 0);
+            const col = Math.max(0, Number(msg.col) || 0);
+            const editor = await vscode.window.showTextDocument(lastDoc, { preview: false, preserveFocus: false });
+            const pos = new vscode.Position(line, col);
+            editor.selection = new vscode.Selection(pos, pos);
+            editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+        }
+    });
+    panel.onDidDispose(() => { panel = undefined; });
 }
 
 /**
@@ -45,8 +116,6 @@ function toVscodeDiagnostic(d: PlainDiagnostic): vscode.Diagnostic {
  * `dispatch` returns the diagnostics array so tests can introspect it directly.
  */
 export function validateInputFile(document: vscode.TextDocument): Diags {
-    // A notebook cell is validated as part of its notebook: every code cell
-    // joined, then each diagnostic mapped back to the cell it belongs to.
     const nb = notebookOfCell(document);
     if (nb) {
         const { text, cells } = joinNotebookCode(nb);
@@ -55,7 +124,6 @@ export function validateInputFile(document: vscode.TextDocument): Diags {
         const perCell = new Map<vscode.TextDocument, Diags>();
         for (const cell of cells) perCell.set(cell, []);
         for (const d of all) {
-            // Joined text is the cells separated by one newline: walk to the owner.
             let line = d.range.start.line;
             for (const cell of cells) {
                 if (line < cell.lineCount) {
@@ -71,25 +139,40 @@ export function validateInputFile(document: vscode.TextDocument): Diags {
             }
         }
         for (const [cell, diags] of perCell) diagnosticCollection.set(cell.uri, diags);
-        if (all.length === 0) vscode.window.showInformationMessage('OWEN: No issues found in this notebook\'s OpenMC model.');
-        else vscode.window.showWarningMessage(`OWEN: Found ${all.length} issue(s) across the notebook's code cells.`);
+        showReport(document, 'OpenMC notebook', all);
+        if (all.length > 0) void vscode.commands.executeCommand('workbench.actions.view.problems');
         return all;
+    }
+
+    if (document.languageId === 'xml') {
+        const kind = detectOpenmcXmlKind(document.getText());
+        if (kind) {
+            const diagnostics = validateOpenmcXml(kind, document.getText()).map(toVscodeDiagnostic);
+            showReport(document, `OpenMC ${kind}.xml`, diagnostics);
+            if (diagnostics.length > 0) void vscode.commands.executeCommand('workbench.actions.view.problems');
+            return diagnostics;
+        }
+    }
+
+    if (document.languageId === 'phits') {
+        showReport(document, 'PHITS (syntax only)', []);
+        return [];
     }
 
     const lang = detectMonteCarloLanguage(document);
     const diagnostics = dispatch(document);
 
-    // The LSP owns the collection for its languages; only OpenMC Python (which
-    // is not routed through the server) publishes from this command.
     if (lang === 'openmc') {
         diagnosticCollection.set(document.uri, diagnostics);
     }
 
-    if (diagnostics.length === 0) {
-        vscode.window.showInformationMessage('OWEN: No issues found.');
-    } else {
-        vscode.window.showWarningMessage(`OWEN: Found ${diagnostics.length} issue(s).`);
+    const label = lang ? lang.toUpperCase() : document.languageId || 'unknown';
+    if (!lang) {
+        vscode.window.showInformationMessage('OWEN: this file is not an MCNP, OpenMC, Serpent, or SCONE deck, so there is nothing to validate.');
+        return [];
     }
+    showReport(document, label, diagnostics);
+    if (diagnostics.length > 0) void vscode.commands.executeCommand('workbench.actions.view.problems');
     return diagnostics;
 }
 
@@ -103,5 +186,5 @@ export function dispatch(document: vscode.TextDocument): Diags {
  * existing test suite and callers keep working unchanged.
  */
 export function runValidators(lang: MonteCarloLanguage | null, text: string): Diags {
-    return runLanguageRules(lang, text).map(toVscodeDiagnostic);
+    return collectPlain(lang, text).map(toVscodeDiagnostic);
 }

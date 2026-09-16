@@ -10,6 +10,8 @@ AI_CHANGELOG.md
 AI_MAINTAINER_GUIDE.md
 PROJECT_STRUCTURE.md
 src/**
+test/**
+.compare2d/**
 scripts/**
 node_modules/**
 !node_modules/h5wasm/**

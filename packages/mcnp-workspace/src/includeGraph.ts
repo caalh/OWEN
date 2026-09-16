@@ -57,27 +57,88 @@ function buildCards(text: string): Card[] {
     return cards;
 }
 
+/** Keywords on an MCNP READ card that are not filenames (LA-UR-22-30006 §4.5). */
+const READ_KEYWORDS = new Set(['file', 'echo', 'noecho', 'encode', 'decode']);
+
+/**
+ * Filenames named by an MCNP `read` / `copy` card.
+ *
+ * MCNP 6.3 accepts `read file=foo.i`, `read file = foo.i`, `read file foo.i`,
+ * and the older `read foo.i`. Splitting on whitespace and treating every
+ * leftover token as a path made `file` in `read file = material_card.i` look
+ * like a missing include (caalh/owen#6).
+ */
+export function parseMcnpReadTargets(cardText: string): string[] {
+    const trimmed = cardText.trim();
+    if (!trimmed) return [];
+    const head = trimmed.split(/\s+/, 1)[0]?.toLowerCase();
+    if (head !== 'read' && head !== 'copy') return [];
+
+    const targets: string[] = [];
+    const fileEq = /\bfile\s*=\s*(?:"([^"]+)"|'([^']+)'|(\S+))/ig;
+    let m: RegExpExecArray | null;
+    while ((m = fileEq.exec(trimmed)) !== null) {
+        const t = (m[1] ?? m[2] ?? m[3]).replace(/,$/, '');
+        if (t) targets.push(t);
+    }
+    if (targets.length > 0) return uniq(targets);
+
+    const fileSp = /\bfile\s+(?:"([^"]+)"|'([^']+)'|(\S+))/i.exec(trimmed);
+    if (fileSp) {
+        const t = fileSp[1] ?? fileSp[2] ?? fileSp[3];
+        if (t && t !== '=' && !READ_KEYWORDS.has(t.toLowerCase())) return [t];
+    }
+
+    const toks = trimmed.split(/\s+/);
+    for (let i = 1; i < toks.length; i++) {
+        const tok = toks[i];
+        if (tok === '=' || /^\d+$/.test(tok)) continue;
+        const eq = tok.indexOf('=');
+        if (eq > 0) {
+            const key = tok.slice(0, eq).toLowerCase();
+            const val = tok.slice(eq + 1).replace(/^["']|["']$/g, '');
+            if (READ_KEYWORDS.has(key)) {
+                if (key === 'file' && val) targets.push(val);
+                continue;
+            }
+        }
+        const bare = tok.replace(/^["']|["']$/g, '');
+        if (READ_KEYWORDS.has(bare.toLowerCase())) continue;
+        targets.push(bare);
+    }
+    return uniq(targets);
+}
+
+function uniq(xs: string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const x of xs) {
+        if (seen.has(x)) continue;
+        seen.add(x);
+        out.push(x);
+    }
+    return out;
+}
+
+function locateTargetSpan(card: Card, target: string): { line: number; startCol: number; endCol: number } {
+    for (const s of card.spans) {
+        const t = s.token.replace(/^["']|["']$/g, '');
+        if (t === target || t.endsWith('=' + target) || t.toLowerCase() === 'file=' + target) {
+            return { line: s.line, startCol: s.startCol, endCol: s.endCol };
+        }
+    }
+    return { line: card.firstLine, startCol: 0, endCol: Math.max(1, target.length) };
+}
+
 function extractIncludeTargets(card: Card): { kind: 'read' | 'copy'; target: string; line: number; startCol: number; endCol: number }[] {
     const toks = card.text.trim().split(/\s+/);
     if (toks.length === 0) return [];
     const head = toks[0].toLowerCase();
     if (head !== 'read' && head !== 'copy') return [];
-
-    const out: { kind: 'read' | 'copy'; target: string; line: number; startCol: number; endCol: number }[] = [];
-    for (let i = 1; i < toks.length; i++) {
-        const tok = toks[i];
-        if (/^\d+$/.test(tok)) continue;
-        const idx = card.text.indexOf(tok, i === 1 ? card.text.toLowerCase().indexOf(head) + head.length : undefined);
-        const span = card.spans.find((s) => s.token === tok && s.line >= card.firstLine);
-        out.push({
-            kind: head as 'read' | 'copy',
-            target: tok,
-            line: span?.line ?? card.firstLine,
-            startCol: span?.startCol ?? 0,
-            endCol: span?.endCol ?? tok.length,
-        });
-    }
-    return out;
+    return parseMcnpReadTargets(card.text).map((target) => {
+        const span = locateTargetSpan(card, target);
+        return { kind: head as 'read' | 'copy', target, ...span };
+    });
 }
 
 function resolveIncludePath(fromFile: string, target: string): string {

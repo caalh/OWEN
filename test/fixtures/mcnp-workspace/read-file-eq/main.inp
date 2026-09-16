@@ -1,0 +1,10 @@
+c MCNP 6.3 READ FILE= form (spaces around =) — caalh/owen#6
+read file = material_card.i
+
+1 1 -10.4 -1 imp:n=1
+2 0 1 imp:n=0
+
+1 cz 0.4096
+
+kcode 1000 1.0 20 50
+ksrc 0 0 0

@@ -1097,6 +1097,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       }
 
       totalInstances = groups.reduce((n, g) => n + g.instances.length, 0);
+      buildPickGrid();
       clearMeasurements();   // stale geometry — drop any prior measurements/labels
       setHover(null);
       buildPanel(sc);
@@ -1513,8 +1514,173 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       l.renderOrder = 998; return l;
     }
 
+    // --- Fast analytic picking for huge scenes -----------------------------
+    // three.js InstancedMesh.raycast walks every instance (O(n) per mesh), so
+    // a BEAVRS core (~56k pins, up to 1.5M primitives) used to have hover
+    // disabled outright. Instead: a plan-view (deck x,y) hash grid of the
+    // instances, walked along the ray, with closed-form cylinder/box/sphere
+    // hits. Zoomed into a full core the walk touches a few hundred cells.
+    const PICK_FAST_THRESHOLD = 40000;
+    let pickGrid = null;   // { cell, map: 'i:j' -> [gi,id,...], big: [gi,id,...] }
+
+    function buildPickGrid() {
+      pickGrid = null;
+      if (totalInstances <= PICK_FAST_THRESHOLD) return;   // small scenes: exact three.js raycast
+      const cell = 4;   // cm; > every pin-scale radius, so a pin lands in ≤4 cells
+      const map = new Map();
+      const big = [];   // vessel shells, barrel rings, plates wider than a cell
+      for (let gi = 0; gi < groups.length; gi++) {
+        const insts = groups[gi].instances;
+        for (let id = 0; id < insts.length; id++) {
+          const inst = insts[id];
+          const e = inst.matrix.elements;
+          const rad = Math.max(inst.r || 0, inst.hx || 0, inst.hy || 0) || 0.01;
+          if (rad > cell) { big.push(gi, id); continue; }
+          const x0 = Math.floor((e[12] - rad) / cell), x1 = Math.floor((e[12] + rad) / cell);
+          const y0 = Math.floor((e[14] - rad) / cell), y1 = Math.floor((e[14] + rad) / cell);
+          for (let i = x0; i <= x1; i++) {
+            for (let j = y0; j <= y1; j++) {
+              const key = i + ':' + j;
+              let arr = map.get(key);
+              if (!arr) { arr = []; map.set(key, arr); }
+              arr.push(gi, id);
+            }
+          }
+        }
+      }
+      pickGrid = { cell, map, big };
+    }
+
+    // Ray vs one instance in deck coordinates (x,y plan; z axial). Cylinders,
+    // rings, boxes and spheres are exact; rarer shapes (arc, cone, torus,
+    // ellipsoid, polyhedron) fall back to their bounding cylinder — plenty for
+    // a hover readout. Returns the ray parameter t, or Infinity.
+    function rayHitInstance(inst, ox, oy, oz, dx, dy, dz) {
+      const e = inst.matrix.elements;
+      const cx = e[12], cy = e[14], cz = e[13];
+      const hh = Math.max((inst.h || 0) / 2, 1e-4);
+      const zlo = cz - hh, zhi = cz + hh;
+      if (inst.shape === 'sphere') {
+        const px = ox - cx, py = oy - cy, pz = oz - cz;
+        const b = px * dx + py * dy + pz * dz;
+        const c = px * px + py * py + pz * pz - inst.r * inst.r;
+        const disc = b * b - c;
+        if (disc < 0) return Infinity;
+        const t = -b - Math.sqrt(disc);
+        return t > 0 ? t : Infinity;
+      }
+      if (inst.shape === 'box') {
+        const hx = inst.hx || inst.r || 0.01, hy = inst.hy || hx;
+        let t0 = 0, t1 = Infinity;
+        const slabs = [[ox - cx, dx, hx], [oy - cy, dy, hy], [oz - cz, dz, hh]];
+        for (const [p, d, h] of slabs) {
+          if (Math.abs(d) < 1e-12) { if (Math.abs(p) > h) return Infinity; continue; }
+          let ta = (-h - p) / d, tb = (h - p) / d;
+          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+          if (ta > t0) t0 = ta;
+          if (tb < t1) t1 = tb;
+          if (t0 > t1) return Infinity;
+        }
+        return t0 > 0 ? t0 : Infinity;
+      }
+      // Finite z-cylinder (ring caps respect the inner radius).
+      const r = inst.r || Math.max(inst.hx || 0, inst.hy || 0) || 0.01;
+      const ri = inst.ri || 0;
+      const px = ox - cx, py = oy - cy;
+      const a = dx * dx + dy * dy;
+      let best = Infinity;
+      if (a > 1e-12) {
+        const b = px * dx + py * dy;
+        const c = px * px + py * py - r * r;
+        const disc = b * b - a * c;
+        if (disc >= 0) {
+          const sq = Math.sqrt(disc);
+          for (const t of [(-b - sq) / a, (-b + sq) / a]) {
+            if (t <= 0 || t >= best) continue;
+            const z = oz + dz * t;
+            if (z >= zlo && z <= zhi) { best = t; break; }
+          }
+        }
+      } else if (px * px + py * py > r * r) {
+        return Infinity;   // vertical ray outside the shell
+      }
+      if (Math.abs(dz) > 1e-12) {
+        for (const zc of [zlo, zhi]) {
+          const t = (zc - oz) / dz;
+          if (t <= 0 || t >= best) continue;
+          const hx2 = px + dx * t, hy2 = py + dy * t;
+          const rr = hx2 * hx2 + hy2 * hy2;
+          if (rr <= r * r && rr >= ri * ri) best = t;
+        }
+      }
+      return best;
+    }
+
+    function pickAtFast(clientX, clientY) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(ndc, camera);
+      const ro = raycaster.ray.origin, rd = raycaster.ray.direction;
+      // Deck coordinates: world X = deck x, world Z = deck y, world Y = deck z.
+      const ox = ro.x, oy = ro.z, oz = ro.y;
+      const dx = rd.x, dy = rd.z, dz = rd.y;
+      let best = null, bestT = Infinity;
+      const seen = new Set();
+      const testPair = (gi, id) => {
+        const key = gi * 16777216 + id;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const inst = groups[gi] && groups[gi].instances[id];
+        if (!inst || !isInstanceVisible(inst)) return;
+        const t = rayHitInstance(inst, ox, oy, oz, dx, dy, dz);
+        if (t < bestT) { bestT = t; best = { inst, gi, id }; }
+      };
+      const bg = pickGrid.big;
+      for (let i = 0; i < bg.length; i += 2) testPair(bg[i], bg[i + 1]);
+      // Walk the ray across the plan grid between the scene's x/y slabs.
+      const cell = pickGrid.cell;
+      let tMin = 0, tMax = 1e9;
+      if (sceneBounds) {
+        const clamp = (o, d, lo, hi) => {
+          if (Math.abs(d) < 1e-12) return Math.abs(o - (lo + hi) / 2) <= (hi - lo) / 2 + cell ? null : 'miss';
+          let ta = (lo - cell - o) / d, tb = (hi + cell - o) / d;
+          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+          tMin = Math.max(tMin, ta); tMax = Math.min(tMax, tb);
+          return null;
+        };
+        // sceneBounds is world-mapped: X = deck x, Z = deck y (plan), Y = deck z.
+        if (clamp(ox, dx, sceneBounds.minX, sceneBounds.maxX) === 'miss') tMax = -1;
+        if (clamp(oy, dy, sceneBounds.minZ, sceneBounds.maxZ) === 'miss') tMax = -1;
+      }
+      if (tMax >= tMin) {
+        const planSpeed = Math.hypot(dx, dy);
+        if (planSpeed < 1e-9) {
+          const arr = pickGrid.map.get(Math.floor(ox / cell) + ':' + Math.floor(oy / cell));
+          if (arr) for (let i = 0; i < arr.length; i += 2) testPair(arr[i], arr[i + 1]);
+        } else {
+          const step = (cell * 0.5) / planSpeed;
+          const maxSteps = Math.min(4096, Math.ceil((tMax - tMin) / step) + 1);
+          let lastKey = '';
+          for (let s = 0; s <= maxSteps; s++) {
+            const t = tMin + s * step;
+            if (t > tMax || t - step > bestT) break;   // nothing nearer can be found past the hit
+            const key = Math.floor((ox + dx * t) / cell) + ':' + Math.floor((oy + dy * t) / cell);
+            if (key === lastKey) continue;
+            lastKey = key;
+            const arr = pickGrid.map.get(key);
+            if (arr) for (let i = 0; i < arr.length; i += 2) testPair(arr[i], arr[i + 1]);
+          }
+        }
+      }
+      if (!best) return null;
+      const point = ro.clone().addScaledVector(rd, bestT);
+      return { inst: best.inst, point, gi: best.gi, id: best.id };
+    }
+
     function pickAt(clientX, clientY) {
       if (!groups.length) return null;
+      if (pickGrid) return pickAtFast(clientX, clientY);
       const rect = renderer.domElement.getBoundingClientRect();
       ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -1730,22 +1896,35 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     // measurement point. We distinguish the two by total pointer travel so
     // OrbitControls keeps working unchanged.
     let downPos = null;
+    let hoverRaf = 0, hoverPending = null;
     renderer.domElement.addEventListener('pointerdown', (e) => { downPos = { x: e.clientX, y: e.clientY }; });
+    // Hover picking runs on every scene now — the analytic grid path makes a
+    // BEAVRS full core as cheap as a pin cell — throttled to one pick per frame.
     renderer.domElement.addEventListener('pointermove', (e) => {
       if (e.buttons !== 0) return;                       // mid-drag: let OrbitControls own it
-      if (totalInstances > 40000) return;                // huge cores: skip continuous hover
-      setHover(pickAt(e.clientX, e.clientY));
+      hoverPending = { x: e.clientX, y: e.clientY };
+      if (!hoverRaf) {
+        hoverRaf = requestAnimationFrame(() => {
+          hoverRaf = 0;
+          if (hoverPending) setHover(pickAt(hoverPending.x, hoverPending.y));
+        });
+      }
     });
-    renderer.domElement.addEventListener('pointerleave', () => setHover(null));
+    renderer.domElement.addEventListener('pointerleave', () => { hoverPending = null; setHover(null); });
     renderer.domElement.addEventListener('pointerup', (e) => {
       if (!downPos) return;
       const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
       downPos = null;
       if (e.button !== 0 || moved > 4) return;           // right/middle or a drag → orbit, not a click
-      if (!measureMode) return;
       const pick = pickAt(e.clientX, e.clientY);
-      if (!pick) { setMeasHint('No geometry under the cursor — click on a surface.'); return; }
-      handleMeasureClick(pick);
+      if (measureMode) {
+        if (!pick) { setMeasHint('No geometry under the cursor — click on a surface.'); return; }
+        handleMeasureClick(pick);
+        return;
+      }
+      // Click-to-inspect: pin the readout on the clicked cell (useful when
+      // orbiting a full core, or on a touchpad where hovering is fiddly).
+      setHover(pick);
     });
 
     window.addEventListener('resize', () => {

@@ -15,4 +15,10 @@ suite('MCNP workspace validation (shared package)', () => {
         const r = validateMcnpProject({ rootPath: path.join(FIXTURES, 'bad-surface', 'main.inp') });
         assert.ok(r.diagnostics.some((d) => d.code === 'mcnp.undefined-surface' && d.file.endsWith('main.inp')));
     });
+
+    test('read FILE = path does not look for a file named "file" (#6)', () => {
+        const r = validateMcnpProject({ rootPath: path.join(FIXTURES, 'read-file-eq', 'main.inp') });
+        assert.strictEqual(r.summary.errors, 0, JSON.stringify(r.diagnostics));
+        assert.ok(!r.diagnostics.some((d) => /Include file not found: file\b/.test(d.message)));
+    });
 });

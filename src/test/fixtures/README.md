@@ -19,3 +19,14 @@ nothing. Fixtures are excluded from the VSIX (`src/**` in `.vscodeignore`).
 Real MCNP output files live outside this repository (they are research data). The
 standing check picks them up when present — see `scripts/verify-results.mjs` and
 its `OWEN_MCNP_OUTP` environment variable.
+
+## `serpent-tools/` — real Serpent 2 outputs
+
+Downloaded Sep 2026 from [CORE-GATECH-GROUP/serpent-tools](https://github.com/CORE-GATECH-GROUP/serpent-tools)
+(`src/serpentTools/data`, MIT license) — files written by Serpent itself, not
+synthesized to match our parser. `bwr_his0.m` (cycle history with a restarting
+counter; caught the his-detection gap), `pwr_res.m` (two burnup steps),
+`ref_det0.m` (5×5 xy mesh detector × 2 reactions; drives the mesh
+reconstruction), `fuelPin_det0.m` (16 axial bins, 1 energy bin — must NOT
+become a spectrum), `radplot_det0.m`, `hexplot_det0.m`. Tests:
+`suite/realOutputs.test.ts`.
