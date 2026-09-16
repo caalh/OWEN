@@ -1206,15 +1206,19 @@ geometry { universes {
             const plates = scene.cylinders.filter((c) => c.component === 'baffle');
             assert.ok(plates.length >= 50, `expected baffle plates, got ${plates.length}`);
             // Plates are thin rectangles: one half-size is the plate thickness
-            // (~1.1 cm from the BEAVRS px/py band), the other spans the cell.
+            // (~1.1 cm from the BEAVRS px/py band). Most span their cell, but
+            // the deck's square outer corners (u=708-711: `-41 44` etc.) are
+            // legitimately ~2.4 cm blocks — the exact halfspace reader keeps
+            // them; only the old adjacency heuristic forced everything long.
+            let longPlates = 0;
             for (const p of plates) {
                 const hx = p.halfX ?? p.radius;
                 const hy = p.halfY ?? p.radius;
                 const thin = Math.min(hx, hy);
-                const long = Math.max(hx, hy);
+                if (Math.max(hx, hy) > 4.0) longPlates++;
                 assert.ok(thin < 2.0, `plate ${p.label}: thickness half-size ${thin} should be < 2 cm`);
-                assert.ok(long > 4.0, `plate ${p.label}: span half-size ${long} should be > 4 cm`);
             }
+            assert.ok(longPlates >= 40, `expected mostly cell-spanning plates, got ${longPlates} long of ${plates.length}`);
             // Every plate must hug the core-facing side of its reflector cell.
             const pitch = 21.50364;
             for (const p of plates) {

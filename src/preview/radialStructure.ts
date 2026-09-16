@@ -89,6 +89,112 @@ function subtractSpans(span: Span, cuts: readonly Span[]): Span[] {
     return parts.filter(([a, b]) => b - a > 1e-6);
 }
 
+/** Plate rectangle in the lattice element's local frame (cm from centre). */
+export interface PlateRect { x0: number; x1: number; y0: number; y1: number }
+
+/** One axis-aligned halfspace of a plate cell: sense>0 keeps axis > d. */
+export interface PlateConstraint { axis: 'x' | 'y'; sense: number; d: number }
+
+/**
+ * Intersect a plate cell's px/py halfspaces into a rect, clamping unbounded
+ * directions to the lattice element (MCNP truncates lattice-universe cells by
+ * the element window, so "no y planes at all" legitimately means "the full
+ * 21.5 cm cell"). Null when the intersection is empty or degenerate.
+ */
+export function plateRectFromConstraints(
+    cons: readonly PlateConstraint[],
+    halfPitchX: number,
+    halfPitchY: number,
+): PlateRect | null {
+    let x0 = -halfPitchX, x1 = halfPitchX, y0 = -halfPitchY, y1 = halfPitchY;
+    for (const c of cons) {
+        if (c.axis === 'x') {
+            if (c.sense > 0) x0 = Math.max(x0, c.d);
+            else x1 = Math.min(x1, c.d);
+        } else {
+            if (c.sense > 0) y0 = Math.max(y0, c.d);
+            else y1 = Math.min(y1, c.d);
+        }
+    }
+    x0 = Math.max(x0, -halfPitchX); x1 = Math.min(x1, halfPitchX);
+    y0 = Math.max(y0, -halfPitchY); y1 = Math.min(y1, halfPitchY);
+    if (!(x1 - x0 > 0.02) || !(y1 - y0 > 0.02)) return null;
+    return { x0, x1, y0, y1 };
+}
+
+/**
+ * Exact baffle plates from the deck's own cell rectangles. This is what the
+ * neighborhood heuristic below approximates — and got wrong on BEAVRS
+ * (plates on faces the deck leaves open crossed the real ones in X/T shapes;
+ * plan-view IoU against the exact slice was 0.45). MCNP/Serpent/SCONE cells
+ * within a universe are disjoint, so these boxes never overlap by
+ * construction.
+ */
+export function bafflePlatesFromRects(
+    label: string,
+    cx: number,
+    cy: number,
+    rects: readonly PlateRect[],
+    ctx: RadialContext,
+    material = 'SS304',
+): CylinderSpec[] {
+    return rects.map((r, i) => ({
+        label: `${label}_p${i}`,
+        shape: 'box' as const,
+        radius: Math.max((r.x1 - r.x0) / 2, (r.y1 - r.y0) / 2),
+        halfX: (r.x1 - r.x0) / 2,
+        halfY: (r.y1 - r.y0) / 2,
+        height: ctx.height,
+        x: cx + (r.x0 + r.x1) / 2,
+        y: cy + (r.y0 + r.y1) / 2,
+        z: ctx.zCenter,
+        color: componentColor(Component.Baffle),
+        opacity: 0.9,
+        component: Component.Baffle,
+        material,
+    }));
+}
+
+/**
+ * Per-cell plate rects for one MCNP baffle universe, read from the signed
+ * px/py references of its steel cells. Empty when any steel cell uses a
+ * surface this cannot express (callers fall back to the heuristic).
+ */
+export function mcnpBafflePlateRects(
+    uid: number,
+    byUniverse: Map<number, McnpCellLike[]>,
+    surfaces: Map<number, McnpSurfaceLike>,
+    materials: Map<number, { component: ComponentId; name: string }>,
+    halfPitchX: number,
+    halfPitchY: number,
+): PlateRect[] {
+    const group = byUniverse.get(uid);
+    if (!group) return [];
+    const rects: PlateRect[] = [];
+    for (const cell of group) {
+        if (cell.material === 0) continue;
+        const mat = materials.get(cell.material);
+        const steel = mat && (mat.component === Component.Structure || mat.name.toLowerCase().includes('steel'));
+        if (!steel) continue;
+        const cons: PlateConstraint[] = [];
+        for (const sid of cell.surfaces) {
+            const s = surfaces.get(Math.abs(sid));
+            if (!s) return [];
+            if (s.type === 'px' || s.type === 'py') {
+                cons.push({ axis: s.type === 'px' ? 'x' : 'y', sense: sid >= 0 ? 1 : -1, d: s.params[0] ?? 0 });
+            } else if (s.type === 'pz') {
+                continue;   // axial bounds are the context height
+            } else {
+                return [];  // not a plane-only plate cell — let the heuristic try
+            }
+        }
+        if (cons.length === 0) return [];
+        const r = plateRectFromConstraints(cons, halfPitchX, halfPitchY);
+        if (r) rects.push(r);
+    }
+    return rects;
+}
+
 export interface BaffleNeighborhood {
     east: boolean;
     west: boolean;

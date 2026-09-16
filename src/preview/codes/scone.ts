@@ -24,7 +24,10 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
-import { BaffleNeighborhood, bafflePlates, emitSconeRadialStructure } from '../radialStructure';
+import {
+    BaffleNeighborhood, bafflePlates, bafflePlatesFromRects, emitSconeRadialStructure,
+    PlateConstraint, PlateRect, plateRectFromConstraints,
+} from '../radialStructure';
 import { parseSconeGeometry } from '../sconeGeometry';
 import { buildCsgScene } from '../csgScene';
 
@@ -79,6 +82,11 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     const surfaces = new Map<number, SurfaceDef>();
     const planeZ = new Map<number, number>(); // plane surface id -> z elevation
     const planeXY = new Map<number, number>(); // axis-aligned x/y plane id -> |offset|
+    // Same planes with axis + signed position + normal direction, for exact
+    // plate rects. SCONE planes carry the normal in the coeffs, so
+    // `leftClose (-1 0 0 8.36662)` is the plane x = -8.36662 with sense
+    // flipped relative to +x.
+    const planeXYd = new Map<number, { axis: 'x' | 'y'; d: number; neg: boolean }>();
 
     for (const block of blocks) {
         const id = num(field(block.inner, 'id'));
@@ -135,8 +143,13 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             } else if (coeffs.length >= 4 && coeffs[2] === 0) {
                 // Axis-aligned x/y plane → |offset| from the cell centre, for
                 // locating baffle plate bands.
-                if (coeffs[1] === 0 && coeffs[0] !== 0) planeXY.set(id, Math.abs(coeffs[3] / coeffs[0]));
-                else if (coeffs[0] === 0 && coeffs[1] !== 0) planeXY.set(id, Math.abs(coeffs[3] / coeffs[1]));
+                if (coeffs[1] === 0 && coeffs[0] !== 0) {
+                    planeXY.set(id, Math.abs(coeffs[3] / coeffs[0]));
+                    planeXYd.set(id, { axis: 'x', d: coeffs[3] / coeffs[0], neg: coeffs[0] < 0 });
+                } else if (coeffs[0] === 0 && coeffs[1] !== 0) {
+                    planeXY.set(id, Math.abs(coeffs[3] / coeffs[1]));
+                    planeXYd.set(id, { axis: 'y', d: coeffs[3] / coeffs[1], neg: coeffs[1] < 0 });
+                }
             }
         } else if (isSurfaceType(type) && id !== null) {
             const radius = num(field(block.inner, 'radius')) ?? undefined;
@@ -219,16 +232,23 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     // offsets| give the plate band from the cell centre.
     const baffleUniverses = new Set<number>();
     const baffleBands = new Map<number, [number, number]>();
+    // Exact plate rects per baffle universe from the steel cells' halfspaces;
+    // missing entry → call site falls back to the neighborhood heuristic.
+    const baffleRects = new Map<number, { cons: PlateConstraint[] }[]>();
     for (const [uid, cids] of cellUniCells) {
         let steel = false;
         let hasXY = false;
         let cyl = false;
         const offs = new Set<number>();
+        let rectsOk = true;
+        const cellCons: { cons: PlateConstraint[] }[] = [];
         for (const cid of cids) {
             const mat = cellMaterial.get(cid);
             const isSteel = !!mat && /steel|ss-?304/i.test(mat);
+            const cons: PlateConstraint[] = [];
             for (const sid of cellSurfaces.get(cid) ?? []) {
                 const abs = Math.abs(sid);
+                const pd = planeXYd.get(abs);
                 if (planeXY.has(abs)) {
                     hasXY = true;
                     if (isSteel) {
@@ -236,14 +256,29 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                         if (v > 0.01) offs.add(Number(v.toFixed(5)));
                     }
                 }
+                if (isSteel) {
+                    if (pd) {
+                        // SCONE sense: +id keeps n·p − d > 0. With a negative
+                        // normal component the effective axis sense flips.
+                        const raw = sid >= 0 ? 1 : -1;
+                        cons.push({ axis: pd.axis, sense: pd.neg ? -raw : raw, d: pd.d });
+                    } else if (!planeZ.has(abs)) {
+                        rectsOk = false;   // steel bounded by something not a plane
+                    }
+                }
                 if (surfaces.get(abs)?.type.includes('cylinder')) cyl = true;
             }
-            if (isSteel) steel = true;
+            if (isSteel) {
+                steel = true;
+                if (cons.length > 0) cellCons.push({ cons });
+                else rectsOk = false;
+            }
         }
         if (steel && hasXY && !cyl) {
             baffleUniverses.add(uid);
             const sorted = [...offs].sort((a, b) => a - b);
             if (sorted.length >= 2) baffleBands.set(uid, [sorted[0], sorted[sorted.length - 1]]);
+            if (rectsOk && cellCons.length > 0) baffleRects.set(uid, cellCons);
         }
     }
 
@@ -425,6 +460,21 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                 const ay = cy0 - r * core.pitch;
                 const uid = core.grid[r][c];
                 if (baffleUniverses.has(uid)) {
+                    const cellCons = baffleRects.get(uid);
+                    if (cellCons) {
+                        const rects: PlateRect[] = [];
+                        for (const { cons } of cellCons) {
+                            const rect = plateRectFromConstraints(cons, core.pitch / 2, core.pitch / 2);
+                            if (rect) rects.push(rect);
+                        }
+                        if (rects.length > 0) {
+                            cylinders.push(...bafflePlatesFromRects(
+                                `core_r${r}c${c}_baffle`, ax, ay, rects,
+                                { height: coreHeight, zCenter: coreZ },
+                            ));
+                            continue;
+                        }
+                    }
                     const nb: BaffleNeighborhood = {
                         east: isAsm(r, c + 1), west: isAsm(r, c - 1),
                         north: isAsm(r - 1, c), south: isAsm(r + 1, c),

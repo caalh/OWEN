@@ -54,6 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Slice pixels beyond every boundary surface are background, not magenta.**
   OpenMC-style models have no graveyard cell; the window corners outside the
   RPV used to count as "lost" as if the deck leaked.
+- **Baffle corners no longer render as X/T crossings.** Full-core baffle
+  plates were synthesized from a fuel-adjacency guess, which put plates on
+  faces the deck leaves open (plan-view IoU 0.45 against the exact slice).
+  They are now read from each baffle universe's own cell halfspaces —
+  unbounded directions clamp to the lattice element, exactly as MCNP
+  truncates lattice-universe cells — and MCNP, Serpent and SCONE emit the
+  identical 76-plate stepped ring on BEAVRS, verified non-overlapping and
+  centred on the deck's SS304 by the exact engine. The adjacency heuristic
+  survives only as a fallback for decks whose plate cells the reader cannot
+  express.
 - **`read file = material_card.i`** is one include, not a missing file named
   `file` ([#6](https://github.com/caalh/owen/issues/6)). `FILE=path`,
   `FILE = path`, `FILE path`, `ECHO`/`NOECHO`, and the older `read foo.i`
