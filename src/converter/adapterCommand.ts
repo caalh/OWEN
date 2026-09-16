@@ -55,6 +55,63 @@ export const ADAPTERS: Record<AdapterSource, AdapterSpec> = {
 };
 
 /**
+ * Classify a `stderr` (or `stdout`) traceback from the MCNP or Serpent adapter
+ * into one of a few actionable kinds. The full text still goes to the OWEN
+ * Adapter output channel; this is only what we surface to the user.
+ *
+ * `kind: 'nested-lattice'` is the BEAVRS full-core failure: OpenMC rejects a
+ * `RectLattice` placed directly as a `lattice.universes` entry because a
+ * lattice is a fill, not a universe — it needs to be wrapped in a Universe.
+ * OWEN's own converter (`owen.convertDeck`) wraps it, so we offer to hand
+ * this deck straight to that command.
+ */
+export type AdapterErrorKind =
+    | 'nested-lattice'
+    | 'unsupported-macrobody'
+    | 'hex-lattice'
+    | 'openmc-missing'
+    | 'unknown';
+
+export interface AdapterError {
+    kind: AdapterErrorKind;
+    /** One-line human summary; the full traceback still lives in the output channel. */
+    summary: string;
+}
+
+export function classifyAdapterError(stderr: string, stdout = ''): AdapterError {
+    const text = `${stdout}\n${stderr}`;
+    // OpenMC's own checkvalue.py message when a lattice is placed where a universe is expected.
+    if (/Items must be of type "UniverseBase"[^\n]*is of type "(?:Rect|Hex)Lattice"/.test(text)) {
+        return {
+            kind: 'nested-lattice',
+            summary:
+                'The MCNP → OpenMC adapter cannot place a lattice inside another lattice ' +
+                '(BEAVRS-style: assembly lattices filled into a core lattice). OWEN\'s built-in ' +
+                'converter wraps them in a Universe and handles this case.',
+        };
+    }
+    if (/hex(?:agonal)?[- ]?lattice|LAT\s*=\s*2/i.test(text) && /unsupported|not supported|NotImplemented/i.test(text)) {
+        return {
+            kind: 'hex-lattice',
+            summary: 'The adapter does not support MCNP hexagonal lattices (LAT=2).',
+        };
+    }
+    if (/(RHP|REC|ELL|WED|ARB)\b[^\n]*not supported|Unsupported macrobody|not implemented for macrobody/i.test(text)) {
+        return {
+            kind: 'unsupported-macrobody',
+            summary: 'The adapter does not support one of the MCNP macrobodies used in the deck (RHP/REC/ELL/WED/ARB).',
+        };
+    }
+    if (/No module named ['"]openmc['"]|ImportError: cannot import name .* from ['"]openmc['"]/i.test(text)) {
+        return {
+            kind: 'openmc-missing',
+            summary: 'The interpreter found the adapter but the OpenMC Python package itself is not importable.',
+        };
+    }
+    return { kind: 'unknown', summary: '' };
+}
+
+/**
  * Python payload that runs the adapter CLI in-process (no console-script PATH
  * games). The Serpent adapter writes a hardcoded model.xml into the CWD, so
  * both payloads chdir to the requested output directory and normalize the
@@ -170,12 +227,24 @@ export function registerConvertDeckAdapter(context: vscode.ExtensionContext): vs
 
                 if (!res.ok) {
                     output.show(true);
-                    vscode.window.showErrorMessage(
-                        `OWEN: ${spec.label} failed — see the "OWEN Adapter" output for the Python traceback. ` +
-                        'Common causes: unsupported geometry (nested lattices, RHP/REC/ELL/WED/ARB macrobodies, ' +
-                        'hex lattices) or data-block U/LAT/FILL cards. ' +
-                        "OWEN's built-in converter (OWEN: Convert Deck…) may handle it.",
-                    );
+                    const classified = classifyAdapterError(res.stderr, res.stdout);
+                    const suggestOwen = classified.kind === 'nested-lattice'
+                        || classified.kind === 'unsupported-macrobody'
+                        || classified.kind === 'hex-lattice';
+                    const base = classified.summary
+                        ? `OWEN: ${spec.label} failed — ${classified.summary}`
+                        : `OWEN: ${spec.label} failed — see the "OWEN Adapter" output for the Python traceback. ` +
+                          'Common causes: unsupported geometry (nested lattices, RHP/REC/ELL/WED/ARB macrobodies, ' +
+                          'hex lattices) or data-block U/LAT/FILL cards.';
+                    const actions: string[] = [];
+                    if (suggestOwen) actions.push('Convert with OWEN instead');
+                    actions.push('Show adapter output');
+                    const pick = await vscode.window.showErrorMessage(base, ...actions);
+                    if (pick === 'Convert with OWEN instead') {
+                        await vscode.commands.executeCommand('owen.convertDeck');
+                    } else if (pick === 'Show adapter output') {
+                        output.show(true);
+                    }
                     return;
                 }
 

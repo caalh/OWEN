@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Adapter failures no longer dump only a Python traceback.** `OWEN: Convert
+  with adapter…` on a BEAVRS-scale MCNP deck used to fail with a raw
+  `TypeError: Items must be of type "UniverseBase" … RectLattice`. That is
+  the openmc_mcnp_adapter's known limit: it does not wrap a lattice in a
+  universe before placing it in a parent lattice. OWEN now recognises that
+  message (plus the `HexLattice` and unsupported-macrobody variants) and
+  offers a **Convert with OWEN instead** button that runs `owen.convertDeck`
+  on the same file — OWEN's own converter wraps the lattices and produces a
+  loadable model. The full traceback still goes to the "OWEN Adapter" output
+  channel.
 - **The workspace quick-geometry sample says what it means.** On a deck whose
   geometry parses to nothing (an invalid surface type like Serpent `rect` gets
   dropped, so every cell built on it is empty), the warning read "found 0
