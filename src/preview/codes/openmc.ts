@@ -18,7 +18,10 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
-import { BaffleNeighborhood, baffleBox, bafflePlates, emitOpenmcRadialStructure } from '../radialStructure';
+import {
+    BaffleNeighborhood, PlateConstraint, PlateRect, baffleBox, bafflePlates,
+    bafflePlatesFromRects, emitOpenmcRadialStructure, plateRectFromConstraints,
+} from '../radialStructure';
 import { buildOpenmcShellScene } from './openmcShells';
 import { looksLikeOpenmcXml, openmcMaterialLookup, parseOpenmcGeometryXml } from '../openmcGeometry';
 import { buildCsgScene } from '../csgScene';
@@ -409,6 +412,22 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
                 const x = x0 + c * px;
                 const y = y0 - r * py;
                 if (child.kind === 'structure' && child.subtype === 'baffle') {
+                    if (child.plates) {
+                        // Exact rectangles from the deck's own plane halfspaces
+                        // (the heuristic below drew X/T crossings at corners).
+                        const rects: PlateRect[] = [];
+                        for (const cons of child.plates) {
+                            const rect = plateRectFromConstraints(cons, px / 2, py / 2);
+                            if (rect) rects.push(rect);
+                        }
+                        if (rects.length > 0) {
+                            cylinders.push(...bafflePlatesFromRects(
+                                `${label}_r${r}c${c}_baffle`, x, y, rects,
+                                { height: collapsedHeight, zCenter: collapsedZ },
+                            ));
+                            continue;
+                        }
+                    }
                     const nb: BaffleNeighborhood = {
                         east: isAsm(r, c + 1), west: isAsm(r, c - 1),
                         north: isAsm(r - 1, c), south: isAsm(r + 1, c),
@@ -1297,7 +1316,17 @@ interface ResolvedLattice {
     lowerLeft: [number, number] | null;
 }
 interface ResolvedSkip { kind: 'skip'; }
-interface ResolvedStructure { kind: 'structure'; subtype: 'baffle' | 'other'; }
+interface ResolvedStructure {
+    kind: 'structure';
+    subtype: 'baffle' | 'other';
+    /**
+     * Exact steel-plate halfspaces read from the deck's `_baffle(name, region)`
+     * region (one constraint list per union term). Present when the region is
+     * a pure ±XPlane/±YPlane expression; placement then draws the deck's own
+     * rectangles instead of the neighborhood heuristic (the X/T corner bug).
+     */
+    plates?: PlateConstraint[][];
+}
 type ResolvedNode = ResolvedPin | ResolvedLattice | ResolvedSkip | ResolvedStructure;
 
 interface AssemblyFn {
@@ -1319,6 +1348,8 @@ interface Scope {
     rectLats: Set<string>;
     latUniverses: Map<string, string>;
     asmFns: Map<string, AssemblyFn>;
+    /** X/Y plane variables (`_bxp = openmc.XPlane(8.36662)`) for exact baffles. */
+    planes: Map<string, { axis: 'x' | 'y'; d: number }>;
     memo: Map<string, ResolvedNode>;
 }
 
@@ -1512,7 +1543,80 @@ function buildScope(text: string): Scope {
         });
     }
 
-    return { text, dicts, vars, rectLats, latUniverses, asmFns, memo: new Map() };
+    // X/Y plane variables anywhere in the file (several share a line in the
+    // BEAVRS deck: `_bxp = openmc.XPlane(8.36662);   _bxm = openmc.XPlane(-…)`).
+    const planes = new Map<string, { axis: 'x' | 'y'; d: number }>();
+    for (const m of text.matchAll(
+        /([A-Za-z_]\w*)\s*=\s*openmc\.([XY])Plane\s*\(\s*(?:[xy]0\s*=\s*)?(-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)/g,
+    )) {
+        planes.set(m[1], { axis: m[2] === 'X' ? 'x' : 'y', d: Number(m[3]) });
+    }
+
+    return { text, dicts, vars, rectLats, latUniverses, asmFns, planes, memo: new Map() };
+}
+
+/** Splits on a single-character operator at bracket depth 0 (quotes respected). */
+function splitTopLevelOn(s: string, sep: string): string[] {
+    const out: string[] = [];
+    let depth = 0;
+    let quote = '';
+    let start = 0;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (quote) { if (ch === quote && s[i - 1] !== '\\') quote = ''; continue; }
+        if (ch === '"' || ch === "'") { quote = ch; continue; }
+        if (ch === '[' || ch === '{' || ch === '(') depth++;
+        else if (ch === ']' || ch === '}' || ch === ')') depth--;
+        else if (ch === sep && depth === 0) { out.push(s.slice(start, i)); start = i + 1; }
+    }
+    out.push(s.slice(start));
+    return out;
+}
+
+/**
+ * Parses a baffle steel region — a union (`|`) of intersections (`&`) of
+ * signed plane halfspaces like `(+_bxM & -_bxm & -_byP) | (+_byp & …)` — into
+ * one PlateConstraint list per union term. Null when any atom is not a named
+ * X/Y plane, in which case the caller keeps the neighborhood heuristic.
+ */
+function planeRegionTerms(
+    expr: string,
+    planes: Map<string, { axis: 'x' | 'y'; d: number }>,
+): PlateConstraint[][] | null {
+    const terms: PlateConstraint[][] = [];
+    for (const rawTerm of splitTopLevelOn(expr, '|')) {
+        let term = rawTerm.trim();
+        while (term.startsWith('(') && findMatching(term, 0) === term.length - 1) {
+            term = term.slice(1, -1).trim();
+        }
+        const cons: PlateConstraint[] = [];
+        for (const atom of splitTopLevelOn(term, '&')) {
+            const m = atom.trim().match(/^([+-])\s*([A-Za-z_]\w*)$/);
+            if (!m) return null;
+            const p = planes.get(m[2]);
+            if (!p) return null;
+            cons.push({ axis: p.axis, sense: m[1] === '+' ? 1 : -1, d: p.d });
+        }
+        if (cons.length === 0) return null;
+        terms.push(cons);
+    }
+    return terms.length ? terms : null;
+}
+
+/**
+ * A baffle structure node. When `expr` is a `_baffle(name, region)` call whose
+ * region is plane-only, the node carries the exact plate constraints.
+ */
+function baffleNode(expr: string | undefined, scope: Scope): ResolvedStructure {
+    const node: ResolvedStructure = { kind: 'structure', subtype: 'baffle' };
+    if (!expr) return node;
+    const call = expr.trim().match(/^([A-Za-z_]\w*)\s*\(([\s\S]*)\)$/);
+    if (!call || !/baffle/i.test(call[1])) return node;
+    const args = splitTopLevel(call[2]);
+    if (args.length < 2) return node;
+    const terms = planeRegionTerms(args[1].trim(), scope.planes);
+    if (terms) node.plates = terms;
+    return node;
 }
 
 /** First top-level `:` in a dict-entry string (respects brackets/quotes). */
@@ -1673,7 +1777,7 @@ function resolveExpr(expr: string, scope: Scope, depth: number): ResolvedNode {
     const sub = t.match(/^([A-Za-z_]\w*)\s*\[\s*['"]([^'"]+)['"]\s*\]$/);
     if (sub && scope.dicts.has(sub[1])) {
         if (/^(BAF|baf)$/i.test(sub[1])) {
-            result = { kind: 'structure', subtype: 'baffle' };
+            result = baffleNode(scope.dicts.get(sub[1])!.get(sub[2]), scope);
         } else {
             const d = scope.dicts.get(sub[1])!;
             if (d.has(sub[2])) result = resolveExpr(d.get(sub[2])!, scope, depth + 1);
@@ -1688,7 +1792,7 @@ function resolveExpr(expr: string, scope: Scope, depth: number): ResolvedNode {
         if (call && scope.asmFns.has(call[1])) {
             result = resolveAssemblyCall(call[1], splitTopLevel(call[2]), scope) ?? { kind: 'skip' };
         } else if (call && /_baffle/i.test(call[1])) {
-            result = { kind: 'structure', subtype: 'baffle' };
+            result = baffleNode(t, scope);
         } else if (/^[A-Za-z_]\w*$/.test(t)) {
             // Bare identifier: a RectLattice, another variable, or a leaf pin.
             if (scope.rectLats.has(t) && scope.latUniverses.has(t)) {

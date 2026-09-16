@@ -212,6 +212,12 @@
         "icon": "$(output)"
       },
       {
+        "command": "owen.openResultsFile",
+        "title": "OWEN: View Results from This File",
+        "category": "OWEN",
+        "icon": "$(output)"
+      },
+      {
         "command": "owen.openLatticeBuilder",
         "title": "OWEN: Open Input Builder (Lattice tab)",
         "category": "OWEN"
@@ -411,6 +417,13 @@
       }
     ],
     "menus": {
+      "explorer/context": [
+        {
+          "command": "owen.openResultsFile",
+          "group": "owen@1",
+          "when": "resourceScheme == file && resourceFilename =~ /^(statepoint[.\\d]*\\.h5|mcta[l-z]\\w*|meshta[l-z]\\w*|out[p-z]\\w*|.*\\.outp?|.*_res\\.m|.*_det\\w*\\.m|.*_his\\w*\\.m|.*\\.mctal)$/i"
+        }
+      ],
       "editor/title": [
         {
           "submenu": "owen.editorTitleMenu",
@@ -567,6 +580,11 @@
           "submenu": "owen.contextMenu",
           "group": "owen@1",
           "when": "editorTextFocus && (editorLangId =~ /^(mcnp|serpent|scone|python|phits)$/ || editorLangId == xml && resourceFilename =~ /(materials|geometry|settings|tallies|model)\\.xml$/)"
+        },
+        {
+          "command": "owen.openResultsFile",
+          "group": "owen@2",
+          "when": "resourceScheme == file && resourceFilename =~ /^(statepoint[.\\d]*\\.h5|mcta[l-z]\\w*|meshta[l-z]\\w*|out[p-z]\\w*|.*\\.outp?|.*_res\\.m|.*_det\\w*\\.m|.*_his\\w*\\.m|.*\\.mctal)$/i"
         }
       ],
       "owen.contextMenu": [
@@ -709,6 +727,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "owen.openResultsFile",
+          "when": "false"
+        },
         {
           "command": "owen.showMcnpReferences",
           "when": "editorLangId == mcnp"

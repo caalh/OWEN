@@ -59,11 +59,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   faces the deck leaves open (plan-view IoU 0.45 against the exact slice).
   They are now read from each baffle universe's own cell halfspaces —
   unbounded directions clamp to the lattice element, exactly as MCNP
-  truncates lattice-universe cells — and MCNP, Serpent and SCONE emit the
-  identical 76-plate stepped ring on BEAVRS, verified non-overlapping and
-  centred on the deck's SS304 by the exact engine. The adjacency heuristic
-  survives only as a fallback for decks whose plate cells the reader cannot
-  express.
+  truncates lattice-universe cells — and all four codes emit the identical
+  76-plate stepped ring on BEAVRS, verified non-overlapping and centred on
+  the deck's SS304 by the exact engine. OpenMC Python decks get theirs from
+  the `_baffle(name, region)` XPlane/YPlane regions of the programmatic core
+  resolver (this path initially shipped in 1.4.6 still on the heuristic).
+  The adjacency heuristic survives only as a fallback for decks whose plate
+  cells the reader cannot express.
+- **Right-click a run output to open it in the Results Viewer.** `mctal`,
+  `outp` (and MCNP's letter-bumped reruns), `statepoint*.h5`, Serpent
+  `_res.m` / `_his.m` / `_det.m`, and `.out` files get **OWEN: View Results
+  from This File** in the Explorer and editor context menus — no more
+  opening the viewer first and browsing to the file.
 - **`read file = material_card.i`** is one include, not a missing file named
   `file` ([#6](https://github.com/caalh/owen/issues/6)). `FILE=path`,
   `FILE = path`, `FILE path`, `ECHO`/`NOECHO`, and the older `read foo.i`
