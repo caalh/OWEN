@@ -18,3 +18,6 @@ packages/*/src/*.js.map
 *.log
 !src/test/fixtures/*.log
 .DS_Store
+
+.git-commit-msg.txt
+

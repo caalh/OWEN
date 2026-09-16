@@ -41,4 +41,7 @@ both copies before release. Mirror AI hygiene docs **only** in the monorepo.
 ## Release reminder
 
 After shipping from here: bump version strings on reactormc.net — see
-`reactor-monte-carlo-guide/.cursor/rules/owen-version.mdc`.
+`reactor-monte-carlo-guide/.cursor/rules/owen-version.mdc`. After changing
+`src/preview`, `src/converter`, or `src/compare/canonical.ts`, sync the
+browser copies with `npm run sync:owen-vendor` in that repo
+(`.cursor/rules/reactormc-vendor.mdc`).

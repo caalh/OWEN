@@ -1,0 +1,29 @@
+---
+description: After changing OWEN preview or converter, sync the reactormc.net browser copies
+globs: ["src/preview/**", "src/converter/**", "src/compare/canonical.ts"]
+alwaysApply: false
+---
+
+# reactormc.net vendor copies
+
+The public site vendors this engine for:
+
+- `/belvoirdynamics/visualizer` ← `src/preview/` (not `webview.ts`, not `openmcNative/`)
+- `/belvoirdynamics/converter` ← `src/converter/` (not `command.ts`, `rosettaView.ts`, `adapterCommand.ts`) plus `src/compare/canonical.ts`
+
+**Do not leave the site on an old copy.** After you change any of those files,
+from `C:\Users\calho\GitHub\reactor-monte-carlo-guide` run:
+
+```
+npm run sync:owen-vendor
+npm run verify:owen-vendor
+npm run typecheck
+npm run verify:mcnp-geometry
+```
+
+The site script rewrites `../preview` → `../owen-preview` (and compare/converter
+the same way). It will not overwrite the site-only files listed in
+`reactor-monte-carlo-guide/.cursor/rules/owen-vendor.mdc`.
+
+If this session cannot reach the site repo, say so in the reply and name
+`npm run sync:owen-vendor` as the leftover — do not silently skip it.

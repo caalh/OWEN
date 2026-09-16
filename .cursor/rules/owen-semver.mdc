@@ -40,6 +40,6 @@ Not listings, leave them alone: `## [1.4.4] - …` history in `CHANGELOG.md`, "s
 3. `npm run sync:version` — rewrites the two monorepo markdown listings — then mirror `src/`, `package.json`, `package-lock.json`, `CHANGELOG.md`, `README.md`, `.vscodeignore`, `media/vendor`, `docs/` to `BelvoirDynamics/owen/` (never the four AI docs: see the monorepo's `owen-public-sync.mdc`).
 4. `npx @vscode/vsce package -o owen-<version>.vsix` in both folders; leak-check (no `AGENTS.md`, `AI_*`, `PROJECT_STRUCTURE.md`, `.cursor/` inside).
 5. GitHub Release `v<version>` on `caalh/owen` with the VSIX. `gh release list --repo caalh/owen` must show it before step 6.
-6. Site: edit **only** `src/lib/owenVersion.ts` (`OWEN_VERSION` = new; `OWEN_MARKETPLACE_VERSION` stays at the store's number until the maintainer publishes), then `npm run sync:owen-version` and `npm run verify:owen-version` there.
+6. Site: edit **only** `src/lib/owenVersion.ts` (`OWEN_VERSION` = new; `OWEN_MARKETPLACE_VERSION` stays at the store's number until the maintainer publishes), then `npm run sync:owen-version` and `npm run verify:owen-version` there. If this release changed `src/preview`, `src/converter`, or `src/compare/canonical.ts`, also `npm run sync:owen-vendor` in the site repo.
 7. `node scripts/verify-version-listings.mjs --release` here must exit 0. That is the definition of "the version is updated everywhere".
 8. Marketplace / Open VSX publish is the maintainer's manual step. When the stores catch up, set `OWEN_MARKETPLACE_VERSION` equal on the site and re-run its verify.
