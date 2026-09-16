@@ -17,7 +17,10 @@
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
 import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
-import { BaffleNeighborhood, bafflePlates, emitSerpentRadialStructure } from '../radialStructure';
+import {
+    BaffleNeighborhood, bafflePlates, bafflePlatesFromRects, emitSerpentRadialStructure,
+    PlateConstraint, PlateRect, plateRectFromConstraints,
+} from '../radialStructure';
 import { pickRootId } from '../rootUniverse';
 import { parseSerpentGeometry } from '../serpentGeometry';
 import { buildCsgScene } from '../csgScene';
@@ -119,31 +122,49 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     // centre; rendered as thin plates on core-facing edges at lattice level.
     const baffleUniverses = new Set<string>();
     const baffleBands = new Map<string, [number, number]>();
+    // Exact plate rects per baffle universe, from the steel cells' own signed
+    // px/py halfspaces (the heuristic band + neighborhood guess drew plates
+    // on faces the deck leaves open — X/T crossings at BEAVRS' stepped
+    // corners). Missing entry → the call site falls back to the heuristic.
+    const baffleRects = new Map<string, { cons: PlateConstraint[] }[]>();
     for (const [uni, cs] of cellsByUniverse) {
         let steel = false;
         let pxpy = false;
         let cyl = false;
         const offs = new Set<number>();
+        let rectsOk = true;
+        const cellCons: { cons: PlateConstraint[] }[] = [];
         for (const c of cs) {
             const isSteel = !!c.material && /steel|ss-?304|\bss\b/i.test(c.material);
+            const cons: PlateConstraint[] = [];
             for (const sref of c.surfaces) {
                 const s = surfs.get(sref.id);
-                if (!s) continue;
+                if (!s) { if (isSteel) rectsOk = false; continue; }
                 if (s.type === 'px' || s.type === 'py') {
                     pxpy = true;
                     if (isSteel) {
                         const v = Math.abs(s.params[0] ?? 0);
                         if (v > 0.01) offs.add(Number(v.toFixed(5)));
+                        cons.push({ axis: s.type === 'px' ? 'x' : 'y', sense: sref.sense, d: s.params[0] ?? 0 });
                     }
+                } else if (s.type === 'pz') {
+                    continue;   // axial bounds are the context height
+                } else if (isSteel) {
+                    rectsOk = false;
                 }
                 if (s.type === 'cyl' || s.type === 'cylz' || s.type === 'cylv') cyl = true;
             }
-            if (isSteel) steel = true;
+            if (isSteel) {
+                steel = true;
+                if (cons.length > 0) cellCons.push({ cons });
+                else rectsOk = false;
+            }
         }
         if (steel && pxpy && !cyl) {
             baffleUniverses.add(uni);
             const sorted = [...offs].sort((a, b) => a - b);
             if (sorted.length >= 2) baffleBands.set(uni, [sorted[0], sorted[sorted.length - 1]]);
+            if (rectsOk && cellCons.length > 0) baffleRects.set(uni, cellCons);
         }
     }
 
@@ -392,6 +413,21 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                         const key = baffleUniverses.has(entry) ? entry : resolveFill(entry);
                         const bx = x0 + col * lat.pitch;
                         const by = yBot + row * lat.pitch;
+                        const cellCons = baffleRects.get(key);
+                        if (cellCons) {
+                            const rects: PlateRect[] = [];
+                            for (const { cons } of cellCons) {
+                                const r = plateRectFromConstraints(cons, lat.pitch / 2, lat.pitch / 2);
+                                if (r) rects.push(r);
+                            }
+                            if (rects.length > 0) {
+                                cylinders.push(...bafflePlatesFromRects(
+                                    `${label}_r${row}c${col}_baffle`, bx, by, rects,
+                                    { height: fullHeight, zCenter: fullZmid },
+                                ));
+                                continue;
+                            }
+                        }
                         const nb: BaffleNeighborhood = {
                             east: isAsm(row, col + 1), west: isAsm(row, col - 1),
                             north: isAsm(row + 1, col), south: isAsm(row - 1, col),

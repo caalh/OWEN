@@ -26,8 +26,8 @@ import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, Fid
 import { componentColor, emitLayers, materialColor, resolveDetail } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import {
-    BaffleNeighborhood, bafflePlates, emitMcnpRadialStructure,
-    mcnpBaffleBand, mcnpBaffleUniverses,
+    BaffleNeighborhood, bafflePlates, bafflePlatesFromRects, emitMcnpRadialStructure,
+    mcnpBaffleBand, mcnpBafflePlateRects, mcnpBaffleUniverses,
 } from '../radialStructure';
 import { parseMcnpGeometry } from '../mcnpGeometry';
 import { buildCsgScene } from '../csgScene';
@@ -320,24 +320,47 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         cylinders.push(...emitLayers(radii, components, cx, cy, zCenter, segHeight, label, colors, mats));
     };
 
+    // Exact plates for a baffle universe at a lattice slot. Zero rects means
+    // the cells were not plane-only plates — the caller decides the fallback.
+    const emitBaffleRects = (uid: number, cx: number, cy: number, label: string,
+        zCenter: number, segHeight: number, hpX: number, hpY: number): boolean => {
+        const rects = mcnpBafflePlateRects(uid, byUniverse, surfaces, materials, hpX, hpY);
+        if (rects.length === 0) return false;
+        cylinders.push(...bafflePlatesFromRects(label, cx, cy, rects, { height: segHeight, zCenter }));
+        return true;
+    };
+
     // Place a lattice entry: an axial stack (when axial detail is on) expands
     // into its z-segments; otherwise it collapses to its tallest (active-fuel)
     // segment over the full model height. A plain pin universe places directly.
-    const placeEntry = (uid: number, cx: number, cy: number, label: string): void => {
-        // Baffle universes are handled at the lattice level (neighbor-aware
-        // plates); one reached outside a lattice has no core to hug — skip.
-        if (baffleUniverses.has(uid)) return;
+    // Baffle-plate universes draw their exact plates — BEAVRS carries them
+    // through the same axial wrapper as the fuel, and skipping them here left
+    // most of the stepped ring undrawn (only directly-mapped slots had plates).
+    const placeEntry = (uid: number, cx: number, cy: number, label: string, hpX = 0, hpY = 0): void => {
+        if (baffleUniverses.has(uid)) {
+            if (hpX > 0 && hpY > 0) emitBaffleRects(uid, cx, cy, label, zmid, height, hpX, hpY);
+            return;   // outside a lattice there is no element to clamp to
+        }
         const segs = axialStacks.get(uid);
         if (segs) {
             if (axialOn) {
                 for (let i = 0; i < segs.length; i++) {
                     const seg = segs[i];
                     const h = Math.max(0.01, seg.zmax - seg.zmin);
-                    placePin(seg.universe, cx, cy, `${label}_z${i}`, (seg.zmin + seg.zmax) / 2, h);
+                    const zc = (seg.zmin + seg.zmax) / 2;
+                    if (baffleUniverses.has(seg.universe)) {
+                        if (hpX > 0 && hpY > 0) emitBaffleRects(seg.universe, cx, cy, `${label}_z${i}`, zc, h, hpX, hpY);
+                        continue;
+                    }
+                    placePin(seg.universe, cx, cy, `${label}_z${i}`, zc, h);
                 }
             } else {
                 let rep = segs[0];
                 for (const s of segs) if ((s.zmax - s.zmin) > (rep.zmax - rep.zmin)) rep = s;
+                if (baffleUniverses.has(rep.universe)) {
+                    if (hpX > 0 && hpY > 0) emitBaffleRects(rep.universe, cx, cy, label, zmid, height, hpX, hpY);
+                    return;
+                }
                 placePin(rep.universe, cx, cy, label, zmid, height);
             }
             return;
@@ -391,6 +414,14 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                     }
                     if (!lat.hex && baffleUniverses.has(sub)) {
                         if (cylinders.length >= maxInstances) { capped = true; return; }
+                        // Exact plates from the universe's own cell halfspaces.
+                        // The old neighborhood heuristic guessed plate faces
+                        // from fuel adjacency and drew X/T crossings at the
+                        // stepped corners (IoU 0.45 vs the exact slice).
+                        if (emitBaffleRects(sub, px, py, `${label}_r${j}c${i}_baffle`,
+                            zmid, height, lat.pitchX / 2, lat.pitchY / 2)) {
+                            continue;
+                        }
                         const nb: BaffleNeighborhood = {
                             east: isAsm(j, i + 1), west: isAsm(j, i - 1),
                             north: isAsm(j + 1, i), south: isAsm(j - 1, i),
@@ -406,7 +437,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                         continue;
                     }
                     if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1, nextAncestors);
-                    else placeEntry(sub, px, py, `${label}_r${j}c${i}`);
+                    else placeEntry(sub, px, py, `${label}_r${j}c${i}`, lat.pitchX / 2, lat.pitchY / 2);
                 }
             }
             return;
