@@ -206,6 +206,27 @@ suite('OWEN workspace validation — Serpent, SCONE, MCNP, OpenMC Python', () =>
         assert.ok(/1 & 2/.test(sh!.message), sh!.message);
     });
 
+    test('Serpent deck whose geometry parses to nothing: sample says so, not "1500 in no cell"', () => {
+        // The intentionally-broken tester deck: `rect` is not a Serpent surface
+        // type, so the parser drops it and every sampled point lands in no
+        // cell. The old message ("found 0 overlapping cell pair(s) and 1500 of
+        // 1500 points in no cell") read like a leak; it is a parse-level hole.
+        const serp = [
+            'surf 1 rect -0.63 0.63 -0.63 0.63',
+            'cell 1 0 water -1',
+            'mat water -0.74',
+            '1001.06c 2.0',
+            '8016.06c 1.0',
+            'set pop 1000 20 5',
+        ].join('\n');
+        const fsl = memFs({ [`${ROOT}/broken.serp`]: serp });
+        const r = validateWorkspace({ language: 'serpent', rootPath: `${ROOT}/broken.serp`, fs: fsl });
+        const g = r.diagnostics.find((d) => d.code === 'workspace.geometry-sample');
+        assert.ok(g, 'the sample diagnostic fires on an all-lost model');
+        assert.ok(/places nothing/.test(g!.message), g!.message);
+        assert.ok(!/0 overlapping/.test(g!.message), g!.message);
+    });
+
     test('MCNP single file: cross-file symbol table passes, and the report says it is single-file', () => {
         const real: FileSystemLike = { exists: (p) => fs.existsSync(p), read: (p) => fs.readFileSync(p, 'utf8'), list: (d) => fs.readdirSync(d), mtime: () => 0 };
         const r = validateWorkspace({ language: 'mcnp', rootPath: path.join(PREBUILT_MODELS, 'beavrs_fullcore_mcnp.i'), fs: real });
