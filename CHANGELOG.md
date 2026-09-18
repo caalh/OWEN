@@ -7,8 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.7] - 2026-09-17
+
 ### Fixed
 
+- **A blank 3D view after a lost WebGL context now recovers.** The canvas
+  used to stay black forever (panel still listing the pin count) because VS
+  Code often never fires `webglcontextrestored` on a dead canvas. On a loss,
+  OWEN now tears the dead canvas down and builds a fresh renderer, with
+  retry/backoff for the moment right after a GPU reset when the browser
+  refuses a context; the animation loop also polls `isContextLost()` for
+  drivers that never fire the loss event. Rendering quality is untouched —
+  full MSAA at native pixel density on every scene, including full cores;
+  quality steps down (MSAA off, then 1x pixels) only *after* an actual loss,
+  never preemptively. Drag / orbit / pan are 100% stock OrbitControls
+  (damping on, pivot never retargeted) — the classic feel. The wheel is
+  OWEN's own **surface-relative zoom**: each tick covers the stock
+  fraction (0.95 per notch) of the distance to the surface under the
+  cursor, not to the orbit target. On a pin cell the two are identical; on
+  a full core the target is metres past the first pin, which is why stock
+  dolly leapt from vessel view onto a single random cell in one flick.
+  Zoom now decelerates smoothly into whatever you point at, crawls through
+  the surface instead of stalling on it, and speeds back up in open space;
+  over the void beside the model it falls back to the classic
+  dolly-to-target. A per-frame guard keeps the camera out of opaque
+  solids (it pops through anything thin along its travel — a pin crossed
+  sideways, a vessel wall — and stops on the surface of anything thick,
+  like a pin entered end-on), so no frame ever renders the black inside
+  of fuel. Two earlier attempts are documented here so they are not
+  retried: a `minDistance` floor made a full core's interior unreachable
+  (the look ray always hits some outer pin), and uncapped pass-through
+  teleported the camera a pin-length deep. All of this is exercised in a
+  real headless browser by `npm run verify:webview-3d` (startup, render,
+  single-tick-is-gradual on both assembly and core-sized scenes, deep
+  zoom+orbit through the lattice, heavy-scene quality, forced context
+  loss + recovery).
+- **Grid-spacer bands now render in MCNP, Serpent, and SCONE axial views —
+  not just OpenMC.** With axial segments on, the ~5.7 cm Inconel spacer
+  bands at the 8 BEAVRS elevations only ever drew on the OpenMC path: MCNP
+  never extracted the px/py square sleeve (no bounding cylinder, so the cell
+  was skipped), Serpent folded the `sqc` sleeve under the fuel disc, and
+  SCONE dropped the mat-fill overlay cell while resolving pins. All three
+  now detect the square structural sleeve and draw those bands as gray
+  `grid` components — replacing the fuel signature in disc mode and as a
+  thin square annulus over the shells in layers mode, matching OpenMC.
+  Locked by a new four-code parity test (disc + layers) in
+  `beavrsAxial.test.ts`.
 - **Adapter failures no longer dump only a Python traceback.** `OWEN: Convert
   with adapter…` on a BEAVRS-scale MCNP deck used to fail with a raw
   `TypeError: Items must be of type "UniverseBase" … RectLattice`. That is

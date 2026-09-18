@@ -816,18 +816,131 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     const vscode = acquireVsCodeApi();
     const stage = document.getElementById('stage');
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(stage.clientWidth, stage.clientHeight);
-    renderer.localClippingEnabled = true;
-    stage.appendChild(renderer.domElement);
+    // Every scene renders at full quality: MSAA on, native pixel ratio — the
+    // classic look. The GPU-side safety is *reactive* only: if the WebGL
+    // context is lost, the dead canvas is torn down and a new renderer built
+    // (VS Code often never fires webglcontextrestored on a dead canvas, so
+    // waiting for it leaves a permanent blank view). Only after a real loss
+    // does quality step down: MSAA off first, 1x pixels after a second loss.
+    const nativePixelRatio = window.devicePixelRatio || 1;
+    let renderPixelRatio = nativePixelRatio;
+    let useAntialias = true;
+    let renderer;
+    let controls;
+    let lastRenderedScene = null;
+    let contextLost = false;
+    let replacingRenderer = false;
+    let sceneBounds = null;   // declared here: rebuildRenderer() reads it during startup
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b1018);
     const camera = new THREE.PerspectiveCamera(45, stage.clientWidth / stage.clientHeight, 0.05, 200000);
     camera.position.set(40, 40, 40);
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
+
+    const gpuOverlay = document.createElement('div');
+    gpuOverlay.id = 'gpuLost';
+    gpuOverlay.style.cssText = 'position:absolute;inset:0;display:none;align-items:center;'
+      + 'justify-content:center;flex-direction:column;gap:14px;background:rgba(11,16,24,.88);'
+      + 'color:#e6edf6;font:13px/1.5 -apple-system,"Segoe UI",sans-serif;text-align:center;'
+      + 'padding:32px;z-index:20;';
+    const gpuMsg = document.createElement('div');
+    gpuMsg.style.maxWidth = '38ch';
+    gpuMsg.textContent = 'The 3D view lost the GPU context while zooming. Restoring…';
+    const gpuBtn = document.createElement('button');
+    gpuBtn.textContent = 'Restore 3D view';
+    gpuBtn.style.cssText = 'padding:6px 16px;cursor:pointer;border-radius:4px;border:1px solid #3a4457;'
+      + 'background:#1f2735;color:#e6edf6;font:inherit;';
+    gpuBtn.addEventListener('click', () => rebuildRenderer(false, 1, true));
+    gpuOverlay.appendChild(gpuMsg);
+    gpuOverlay.appendChild(gpuBtn);
+    document.body.appendChild(gpuOverlay);
+
+    let lossCount = 0;
+    function triggerRecovery() {
+      if (contextLost || replacingRenderer) return;
+      contextLost = true;
+      lossCount++;
+      gpuOverlay.style.display = 'flex';
+      // First loss: drop MSAA only, keep native pixels (no blur). If the GPU
+      // drops us again in the same session, also fall back to 1x pixels.
+      const dpr = lossCount >= 2 ? 1 : nativePixelRatio;
+      setTimeout(() => rebuildRenderer(false, dpr, true), 60);
+    }
+    function onContextLost(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      triggerRecovery();
+    }
+
+    function makeRenderer(antialias, dpr) {
+      const r = new THREE.WebGLRenderer({ antialias: antialias, powerPreference: 'high-performance' });
+      r.setPixelRatio(dpr);
+      r.setSize(stage.clientWidth, stage.clientHeight);
+      r.localClippingEnabled = true;
+      r.domElement.addEventListener('webglcontextlost', onContextLost, false);
+      return r;
+    }
+
+    let rebuildAttempts = 0;
+    const REBUILD_BACKOFF_MS = [120, 300, 700, 1500, 3000];
+
+    function rebuildRenderer(antialias, dpr, redraw) {
+      if (replacingRenderer) return;
+      replacingRenderer = true;
+      let next;
+      try {
+        next = makeRenderer(antialias, dpr);
+      } catch (err) {
+        // Right after a GPU reset the browser can refuse a new context for a
+        // moment. Keep the overlay up and try again with backoff instead of
+        // leaving a dead canvas.
+        replacingRenderer = false;
+        const wait = REBUILD_BACKOFF_MS[Math.min(rebuildAttempts, REBUILD_BACKOFF_MS.length - 1)];
+        rebuildAttempts++;
+        if (rebuildAttempts <= REBUILD_BACKOFF_MS.length) {
+          gpuMsg.textContent = 'The 3D view lost the GPU context while zooming. Restoring (attempt '
+            + rebuildAttempts + ')…';
+          setTimeout(() => rebuildRenderer(antialias, dpr, redraw), wait);
+        } else {
+          gpuMsg.textContent = 'The GPU refused to give the 3D view a new WebGL context. '
+            + 'Switch to the 2D slice view, or press Restore to try again.';
+        }
+        return;
+      }
+      rebuildAttempts = 0;
+      useAntialias = antialias;
+      renderPixelRatio = dpr;
+      stage.appendChild(next.domElement);
+      if (controls) { controls.dispose(); controls = null; }
+      if (renderer) {
+        const old = renderer.domElement;
+        if (old) {
+          // A dead canvas can still deliver a late webglcontextlost; make sure
+          // it cannot restart recovery against the renderer that replaced it.
+          old.removeEventListener('webglcontextlost', onContextLost, false);
+          if (old.parentNode) old.parentNode.removeChild(old);
+        }
+        renderer.dispose();
+      }
+      renderer = next;
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      // Drag / pan are stock OrbitControls. The wheel is OWEN's own
+      // surface-relative zoom (onWheelZoom below): stock dolly steps by a
+      // fraction of the distance to the orbit TARGET, which on a full core
+      // is metres per tick — one flick flew from the vessel to a single
+      // pin. Ours steps by the same fraction of the distance to the
+      // SURFACE under the cursor, so it is gradual near geometry and never
+      // touches the orbit pivot (drag feel unchanged).
+      controls.enableZoom = false;
+      controls.minDistance = 0.2;      // cm; never sit exactly on the target
+      renderer.domElement.addEventListener('wheel', onWheelZoom, { passive: false });
+      contextLost = false;
+      gpuOverlay.style.display = 'none';
+      replacingRenderer = false;
+      if (redraw && lastRenderedScene) render(lastRenderedScene);
+    }
+
+    rebuildRenderer(true, nativePixelRatio, false);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dl = new THREE.DirectionalLight(0xffffff, 0.85); dl.position.set(1, 1.4, 0.8); scene.add(dl);
@@ -849,7 +962,6 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     let axEnabled = {};       // axial layer id -> bool
     let axWindow = { min: -Infinity, max: Infinity }; // visible axial z-window
     let shellOpacity = 0.45;
-    let sceneBounds = null;
     let translucentMats = []; // materials whose opacity we scale live
     let compLabels = {};      // component id -> friendly label (for the readout)
     let totalInstances = 0;   // for hover-pick throttling on huge cores
@@ -896,8 +1008,9 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     }
 
     function render(sc) {
-      disposeAll();
+      lastRenderedScene = sc; // kept so we can rebuild after a WebGL context loss
       const cyls = (sc && Array.isArray(sc.cylinders)) ? sc.cylinders : [];
+      disposeAll();
       document.getElementById('empty').style.display = cyls.length ? 'none' : 'flex';
 
       // Reset toggle state from summaries.
@@ -1085,7 +1198,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
             zc: (typeof c.z === 'number' ? c.z : 0),
             r: c.radius, ri: c.innerRadius || 0, h: grp.h,
             hx: grp.hx || 0, hy: grp.hy || 0,
-            shape: grp.shape, label: c.label || '',
+            shape: grp.shape, solid: grp.solid, label: c.label || '',
             axIndex: (typeof c.axialIndex === 'number' ? c.axialIndex : null),
           });
         });
@@ -1408,6 +1521,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     }
 
     function resetView() {
+      _prevCamValid = false;   // new scene / new framing: drop stale camera-motion history
       if (!sceneBounds) { camera.position.set(40, 40, 40); controls.target.set(0, 0, 0); controls.update(); return; }
       const b = sceneBounds;
       const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2, cz = (b.minZ + b.maxZ) / 2;
@@ -1416,7 +1530,9 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       const dist = radius * 2.6 + 4;
       camera.near = Math.max(0.05, radius / 1000); camera.far = radius * 40 + 1000; camera.updateProjectionMatrix();
       camera.position.set(cx + dist, cy + dist * 0.8, cz + dist);
-      controls.target.set(cx, cy, cz); controls.update();
+      controls.target.set(cx, cy, cz);
+      controls.maxDistance = Math.max(dist * 8, radius * 20);
+      controls.update();
       axes.scale.setScalar(Math.max(1, radius * 0.15));
       // clip slider ranges
       const sx = document.getElementById('clipX'); sx.min = b.minX; sx.max = b.maxX; sx.value = cx; clipX.constant = cx;
@@ -1480,6 +1596,8 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     // --- Picking, hover readout & measurement tools ---
     const raycaster = new THREE.Raycaster();
     const ndc = new THREE.Vector2();
+    const _zoomDir = new THREE.Vector3();
+    const _clipPt = new THREE.Vector3();
     const overlay = new THREE.Group();         // measurement lines/markers (unclipped)
     scene.add(overlay);
     const labelsBox = document.getElementById('labels');
@@ -1616,6 +1734,49 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       return best;
     }
 
+    // Shared plan-grid walk used by hover picking and by the zoom floor.
+    // pastBest() is the current closest hit (world-distance t); once the walk
+    // is past that, nearer hits are impossible.
+    function walkPickGrid(ox, oy, oz, dx, dy, dz, testPair, pastBest, includeBig) {
+      if (includeBig) {
+        const bg = pickGrid.big;
+        for (let i = 0; i < bg.length; i += 2) testPair(bg[i], bg[i + 1]);
+      }
+      const cell = pickGrid.cell;
+      let tMin = 0, tMax = 1e9;
+      if (sceneBounds) {
+        const clamp = (o, d, lo, hi) => {
+          if (Math.abs(d) < 1e-12) return Math.abs(o - (lo + hi) / 2) <= (hi - lo) / 2 + cell ? null : 'miss';
+          let ta = (lo - cell - o) / d, tb = (hi + cell - o) / d;
+          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+          tMin = Math.max(tMin, ta); tMax = Math.min(tMax, tb);
+          return null;
+        };
+        // sceneBounds is world-mapped: X = deck x, Z = deck y (plan), Y = deck z.
+        if (clamp(ox, dx, sceneBounds.minX, sceneBounds.maxX) === 'miss') tMax = -1;
+        if (clamp(oy, dy, sceneBounds.minZ, sceneBounds.maxZ) === 'miss') tMax = -1;
+      }
+      if (tMax < tMin) return;
+      const planSpeed = Math.hypot(dx, dy);
+      if (planSpeed < 1e-9) {
+        const arr = pickGrid.map.get(Math.floor(ox / cell) + ':' + Math.floor(oy / cell));
+        if (arr) for (let i = 0; i < arr.length; i += 2) testPair(arr[i], arr[i + 1]);
+        return;
+      }
+      const step = (cell * 0.5) / planSpeed;
+      const maxSteps = Math.min(4096, Math.ceil((tMax - tMin) / step) + 1);
+      let lastKey = '';
+      for (let s = 0; s <= maxSteps; s++) {
+        const t = tMin + s * step;
+        if (t > tMax || (pastBest && t - step > pastBest())) break;
+        const key = Math.floor((ox + dx * t) / cell) + ':' + Math.floor((oy + dy * t) / cell);
+        if (key === lastKey) continue;
+        lastKey = key;
+        const arr = pickGrid.map.get(key);
+        if (arr) for (let i = 0; i < arr.length; i += 2) testPair(arr[i], arr[i + 1]);
+      }
+    }
+
     function pickAtFast(clientX, clientY) {
       const rect = renderer.domElement.getBoundingClientRect();
       ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -1636,43 +1797,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         const t = rayHitInstance(inst, ox, oy, oz, dx, dy, dz);
         if (t < bestT) { bestT = t; best = { inst, gi, id }; }
       };
-      const bg = pickGrid.big;
-      for (let i = 0; i < bg.length; i += 2) testPair(bg[i], bg[i + 1]);
-      // Walk the ray across the plan grid between the scene's x/y slabs.
-      const cell = pickGrid.cell;
-      let tMin = 0, tMax = 1e9;
-      if (sceneBounds) {
-        const clamp = (o, d, lo, hi) => {
-          if (Math.abs(d) < 1e-12) return Math.abs(o - (lo + hi) / 2) <= (hi - lo) / 2 + cell ? null : 'miss';
-          let ta = (lo - cell - o) / d, tb = (hi + cell - o) / d;
-          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
-          tMin = Math.max(tMin, ta); tMax = Math.min(tMax, tb);
-          return null;
-        };
-        // sceneBounds is world-mapped: X = deck x, Z = deck y (plan), Y = deck z.
-        if (clamp(ox, dx, sceneBounds.minX, sceneBounds.maxX) === 'miss') tMax = -1;
-        if (clamp(oy, dy, sceneBounds.minZ, sceneBounds.maxZ) === 'miss') tMax = -1;
-      }
-      if (tMax >= tMin) {
-        const planSpeed = Math.hypot(dx, dy);
-        if (planSpeed < 1e-9) {
-          const arr = pickGrid.map.get(Math.floor(ox / cell) + ':' + Math.floor(oy / cell));
-          if (arr) for (let i = 0; i < arr.length; i += 2) testPair(arr[i], arr[i + 1]);
-        } else {
-          const step = (cell * 0.5) / planSpeed;
-          const maxSteps = Math.min(4096, Math.ceil((tMax - tMin) / step) + 1);
-          let lastKey = '';
-          for (let s = 0; s <= maxSteps; s++) {
-            const t = tMin + s * step;
-            if (t > tMax || t - step > bestT) break;   // nothing nearer can be found past the hit
-            const key = Math.floor((ox + dx * t) / cell) + ':' + Math.floor((oy + dy * t) / cell);
-            if (key === lastKey) continue;
-            lastKey = key;
-            const arr = pickGrid.map.get(key);
-            if (arr) for (let i = 0; i < arr.length; i += 2) testPair(arr[i], arr[i + 1]);
-          }
-        }
-      }
+      walkPickGrid(ox, oy, oz, dx, dy, dz, testPair, () => bestT, true);
       if (!best) return null;
       const point = ro.clone().addScaledVector(rd, bestT);
       return { inst: best.inst, point, gi: best.gi, id: best.id };
@@ -1694,6 +1819,223 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         return { inst, point: h.point, gi: h.object.userData.groupIndex, id: h.instanceId };
       }
       return null;
+    }
+
+    // --- Camera fly-through: never render from inside a solid --------------
+    // OrbitControls stays completely stock — dolly toward the orbit target,
+    // damping on, pivot never retargeted — because that is the classic feel.
+    // The black-canvas zoom happened when the dolly carried the camera INTO
+    // an opaque solid (fuel pin, baffle plate, barrel wall): FrontSide
+    // culling leaves nothing but background. A minDistance floor is no fix —
+    // on a full core the look ray always hits *some* pin near the outer
+    // edge, so zoom would stop hundreds of cm out and the core interior
+    // would be unreachable. Instead the camera passes through: every frame,
+    // if it sits inside a solid instance, it is advanced past that solid's
+    // far surface along its direction of travel. Zoom-in tunnels forward,
+    // zoom-out tunnels backward, an orbit sweep pops past a pin — and no
+    // frame is ever rendered from inside opaque material. Translucent
+    // shells (clad, vessels at reduced opacity) render DoubleSide and stay
+    // visible from inside, so they are left alone.
+    //
+    // The pass-through is capped: a pin crossed sideways is under a
+    // centimetre, a baffle plate or vessel wall a few tens, but a pin
+    // entered through its end cap is 3–4 METRES along the travel direction
+    // — teleporting that far reads as "one scroll tick flew into a random
+    // cell". The cap scales with the distance still to go (half of it,
+    // clamped 2–40 cm): far out it admits an RPV/barrel wall crossing,
+    // close in it shrinks so no jump is ever a visible fraction of the
+    // remaining zoom. Past the cap the camera stops on the surface it
+    // entered (restored to its last outside position); aim slightly off
+    // the pin to keep going.
+    function isWorldClipped(wx, wy, wz) {
+      _clipPt.set(wx, wy, wz);
+      const on = document.getElementById('clipOn');
+      const yOn = document.getElementById('clipYOn');
+      const zOn = document.getElementById('clipZOn');
+      if (on && on.checked && clipX.distanceToPoint(_clipPt) < 0) return true;
+      if (yOn && yOn.checked && clipY.distanceToPoint(_clipPt) < 0) return true;
+      if (zOn && zOn.checked && clipZ.distanceToPoint(_clipPt) < 0) return true;
+      return false;
+    }
+    function pointInInstance(inst, ox, oy, oz) {
+      const e = inst.matrix.elements;
+      const cx = e[12], cy = e[14], cz = e[13];
+      const hh = Math.max((inst.h || 0) / 2, 1e-4);
+      if (inst.shape === 'sphere') {
+        const d2 = (ox - cx) * (ox - cx) + (oy - cy) * (oy - cy) + (oz - cz) * (oz - cz);
+        const r = inst.r || 0, ri = inst.ri || 0;
+        return d2 <= r * r && d2 >= ri * ri;
+      }
+      if (oz < cz - hh || oz > cz + hh) return false;
+      if (inst.shape === 'box') {
+        const hx = inst.hx || inst.r || 0.01, hy = inst.hy || hx;
+        return Math.abs(ox - cx) <= hx && Math.abs(oy - cy) <= hy;
+      }
+      const r = inst.r || Math.max(inst.hx || 0, inst.hy || 0) || 0.01;
+      const ri = inst.ri || 0;
+      const rr = (ox - cx) * (ox - cx) + (oy - cy) * (oy - cy);
+      return rr <= r * r && rr >= ri * ri;
+    }
+    function visitPinInstances(ox, oy, oz, visit) {
+      if (pickGrid) {
+        const cell = pickGrid.cell;
+        const arr = pickGrid.map.get(Math.floor(ox / cell) + ':' + Math.floor(oy / cell));
+        if (arr) for (let i = 0; i < arr.length; i += 2) visit(arr[i], arr[i + 1]);
+        const bg = pickGrid.big;
+        for (let i = 0; i < bg.length; i += 2) visit(bg[i], bg[i + 1]);
+        return;
+      }
+      for (let gi = 0; gi < groups.length; gi++) {
+        const insts = groups[gi].instances;
+        for (let id = 0; id < insts.length; id++) visit(gi, id);
+      }
+    }
+    function solidContainingCamera() {
+      if (!groups.length) return null;
+      if (isWorldClipped(camera.position.x, camera.position.y, camera.position.z)) return null;
+      const ox = camera.position.x, oy = camera.position.z, oz = camera.position.y;
+      let found = null;
+      visitPinInstances(ox, oy, oz, (gi, id) => {
+        if (found) return;
+        const inst = groups[gi] && groups[gi].instances[id];
+        if (!inst || !inst.solid || !isInstanceVisible(inst)) return;
+        if (pointInInstance(inst, ox, oy, oz)) found = inst;
+      });
+      return found;
+    }
+    // Distance from a point INSIDE the instance to its exit surface along
+    // (dx,dy,dz) — the counterpart of rayHitInstance (which assumes outside).
+    // For a ring wall, "exit" includes crossing into the inner hole.
+    function instanceExitT(inst, ox, oy, oz, dx, dy, dz) {
+      const e = inst.matrix.elements;
+      const cx = e[12], cy = e[14], cz = e[13];
+      const hh = Math.max((inst.h || 0) / 2, 1e-4);
+      if (inst.shape === 'sphere') {
+        const px = ox - cx, py = oy - cy, pz = oz - cz;
+        const b = px * dx + py * dy + pz * dz;
+        const c = px * px + py * py + pz * pz - inst.r * inst.r;
+        const disc = b * b - c;
+        return disc >= 0 ? Math.max(0.01, -b + Math.sqrt(disc)) : 0.1;
+      }
+      if (inst.shape === 'box') {
+        const hx = inst.hx || inst.r || 0.01, hy = inst.hy || hx;
+        let exit = Infinity;
+        const slabs = [[ox - cx, dx, hx], [oy - cy, dy, hy], [oz - cz, dz, hh]];
+        for (const [p, d, h] of slabs) {
+          if (Math.abs(d) < 1e-12) continue;
+          const tb = Math.max((-h - p) / d, (h - p) / d);
+          if (tb < exit) exit = tb;
+        }
+        return isFinite(exit) ? Math.max(0.01, exit) : 0.1;
+      }
+      const r = inst.r || Math.max(inst.hx || 0, inst.hy || 0) || 0.01;
+      const ri = inst.ri || 0;
+      const px = ox - cx, py = oy - cy;
+      let exit = Infinity;
+      const a = dx * dx + dy * dy;
+      if (a > 1e-12) {
+        const b = px * dx + py * dy;
+        const c = px * px + py * py - r * r;
+        const disc = b * b - a * c;
+        if (disc >= 0) {
+          const t = (-b + Math.sqrt(disc)) / a;   // outer wall
+          if (t > 0) exit = t;
+        }
+        if (ri > 0) {
+          const ci = px * px + py * py - ri * ri;
+          const di = b * b - a * ci;
+          if (di >= 0) {
+            const ti = (-b - Math.sqrt(di)) / a;  // into the hole
+            if (ti > 0 && ti < exit) exit = ti;
+          }
+        }
+      }
+      if (Math.abs(dz) > 1e-12) {
+        const tz = Math.max((cz - hh - oz) / dz, (cz + hh - oz) / dz);
+        if (tz > 0 && tz < exit) exit = tz;
+      }
+      return isFinite(exit) ? Math.max(0.01, exit) : 0.1;
+    }
+    // --- Surface-relative wheel zoom (the "1.4.4 feel", made scale-free) ---
+    // Each tick moves the camera by the stock OrbitControls fraction
+    // (0.95^normalized) — but of the distance to the SURFACE under the
+    // cursor, not to the orbit target. On a pin cell the two are the same;
+    // on a full core the target is metres past the first pin, which is why
+    // stock dolly leapt from vessel view to a single cell in one flick.
+    // Approaching a surface decelerates to a crawl (MIN_STEP) that carries
+    // the camera through it, so nothing ever stalls permanently; the
+    // fly-through resolver below keeps the camera out of opaque solids.
+    // The orbit target is never touched — drag/orbit stay classic.
+    const ZOOM_STANDOFF = 1.0;   // cm; deceleration reference outside the surface
+    const ZOOM_MIN_STEP = 0.3;   // cm; crawl step right at a surface
+    const _zoomAnchor = new THREE.Vector3();
+    function onWheelZoom(e) {
+      if (!renderer || !controls || contextLost || replacingRenderer) return;
+      e.preventDefault();
+      const dpr = window.devicePixelRatio | 0 || 1;
+      const scale = Math.pow(0.95, Math.abs(e.deltaY) / (100 * dpr));
+      const pick = pickAt(e.clientX, e.clientY);
+      if (pick) _zoomAnchor.copy(pick.point);
+      else _zoomAnchor.copy(controls.target);   // over void: classic dolly
+      _zoomDir.copy(_zoomAnchor).sub(camera.position);
+      const dist = _zoomDir.length();
+      if (dist < 1e-6) return;
+      _zoomDir.multiplyScalar(1 / dist);
+      const usable = Math.max(0, dist - ZOOM_STANDOFF);
+      if (e.deltaY < 0) {
+        const step = Math.max(usable * (1 - scale), ZOOM_MIN_STEP);
+        camera.position.addScaledVector(_zoomDir, step);
+      } else {
+        const step = Math.max(usable * (1 / scale - 1), ZOOM_MIN_STEP);
+        camera.position.addScaledVector(_zoomDir, -step);
+        const dT = camera.position.distanceTo(controls.target);
+        if (isFinite(controls.maxDistance) && dT > controls.maxDistance) {
+          camera.position.sub(controls.target)
+            .multiplyScalar(controls.maxDistance / dT)
+            .add(controls.target);
+        }
+      }
+    }
+
+    const _prevCamPos = new THREE.Vector3();
+    let _prevCamValid = false;
+    function resolveCameraCollision() {
+      if (!groups.length) { _prevCamValid = false; return; }
+      let inst = solidContainingCamera();
+      if (!inst) { _prevCamPos.copy(camera.position); _prevCamValid = true; return; }
+      // Direction of travel this frame; if the camera did not move (scene
+      // just rebuilt around it), fall through along the view direction.
+      _zoomDir.copy(camera.position);
+      if (_prevCamValid) _zoomDir.sub(_prevCamPos); else _zoomDir.set(0, 0, 0);
+      if (_zoomDir.lengthSq() < 1e-12) camera.getWorldDirection(_zoomDir);
+      _zoomDir.normalize();
+      const eps = Math.max(0.05, camera.near * 1.2);
+      const tunnelCap = Math.max(2, Math.min(40,
+        0.5 * camera.position.distanceTo(controls.target)));
+      for (let i = 0; i < 8 && inst; i++) {
+        const t = instanceExitT(inst,
+          camera.position.x, camera.position.z, camera.position.y,
+          _zoomDir.x, _zoomDir.z, _zoomDir.y);
+        if (t + eps > tunnelCap) {
+          // Thick along the travel direction (a pin entered end-on, a wall
+          // hit at a grazing angle): stop on the entry surface rather than
+          // teleport. The last frame's position is by construction outside.
+          if (_prevCamValid) {
+            camera.position.copy(_prevCamPos);
+          } else {
+            const back = instanceExitT(inst,
+              camera.position.x, camera.position.z, camera.position.y,
+              -_zoomDir.x, -_zoomDir.z, -_zoomDir.y);
+            camera.position.addScaledVector(_zoomDir, -(back + eps));
+          }
+          inst = solidContainingCamera();
+          break;
+        }
+        camera.position.addScaledVector(_zoomDir, t + eps);
+        inst = solidContainingCamera();
+      }
+      _prevCamPos.copy(camera.position);
+      _prevCamValid = true;
     }
 
     function setHover(pick) {
@@ -1888,6 +2230,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       else if (measureMode === 'angle') setMeasHint('Click three points; the 2nd is the corner.');
       else setMeasHint('Click a pin/shell to read its radius + diameter.');
       renderer.domElement.style.cursor = measureMode ? 'crosshair' : '';
+      stage.style.cursor = measureMode ? 'crosshair' : '';
     }
     document.querySelectorAll('#measBtns button').forEach((b) => b.addEventListener('click', () => setMeasMode(b.getAttribute('data-mode'))));
     document.getElementById('measClear').addEventListener('click', clearMeasurements);
@@ -1897,10 +2240,10 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     // OrbitControls keeps working unchanged.
     let downPos = null;
     let hoverRaf = 0, hoverPending = null;
-    renderer.domElement.addEventListener('pointerdown', (e) => { downPos = { x: e.clientX, y: e.clientY }; });
+    stage.addEventListener('pointerdown', (e) => { downPos = { x: e.clientX, y: e.clientY }; });
     // Hover picking runs on every scene now — the analytic grid path makes a
     // BEAVRS full core as cheap as a pin cell — throttled to one pick per frame.
-    renderer.domElement.addEventListener('pointermove', (e) => {
+    stage.addEventListener('pointermove', (e) => {
       if (e.buttons !== 0) return;                       // mid-drag: let OrbitControls own it
       hoverPending = { x: e.clientX, y: e.clientY };
       if (!hoverRaf) {
@@ -1910,8 +2253,8 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         });
       }
     });
-    renderer.domElement.addEventListener('pointerleave', () => { hoverPending = null; setHover(null); });
-    renderer.domElement.addEventListener('pointerup', (e) => {
+    stage.addEventListener('pointerleave', () => { hoverPending = null; setHover(null); });
+    stage.addEventListener('pointerup', (e) => {
       if (!downPos) return;
       const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
       downPos = null;
@@ -1928,11 +2271,71 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     });
 
     window.addEventListener('resize', () => {
+      if (!renderer) return;
       camera.aspect = stage.clientWidth / stage.clientHeight; camera.updateProjectionMatrix();
       renderer.setSize(stage.clientWidth, stage.clientHeight);
     });
-    function animate() { requestAnimationFrame(animate); controls.update(); updateLabels(); renderer.render(scene, camera); }
+    function animate() {
+      requestAnimationFrame(animate);
+      if (contextLost || replacingRenderer || !renderer || !controls) return;
+      // Some drivers drop the context without ever firing webglcontextlost;
+      // poll so we still rebuild instead of spinning on a dead canvas.
+      const gl = renderer.getContext && renderer.getContext();
+      if (gl && gl.isContextLost && gl.isContextLost()) { triggerRecovery(); return; }
+      // We are rendering on a live context: the recovery overlay must not linger.
+      if (gpuOverlay.style.display !== 'none') gpuOverlay.style.display = 'none';
+      controls.update();
+      resolveCameraCollision();
+      updateLabels();
+      renderer.render(scene, camera);
+    }
     animate();
+
+    // Test hooks (scripts/verify-webview-3d.mjs drives the real page in
+    // headless Chrome). Read-only snapshot of renderer state, plus a one-frame
+    // render + pixel sample so a test can prove geometry is actually on screen.
+    window.__owenPreviewDebug = function () {
+      const gl = renderer && renderer.getContext ? renderer.getContext() : null;
+      return {
+        contextLost, replacingRenderer,
+        groups: groups.length,
+        instances: totalInstances,
+        distance: controls ? camera.position.distanceTo(controls.target) : NaN,
+        insideSolid: !!solidContainingCamera(),
+        enableZoom: controls ? controls.enableZoom : null,
+        zoomToCursor: controls ? controls.zoomToCursor : null,
+        pixelRatio: renderer ? renderer.getPixelRatio() : NaN,
+        antialias: useAntialias,
+        glLost: gl && gl.isContextLost ? gl.isContextLost() : null,
+        canvases: stage.querySelectorAll('canvas').length,
+        cam: [camera.position.x, camera.position.y, camera.position.z],
+        target: controls ? [controls.target.x, controls.target.y, controls.target.z] : null,
+        near: camera.near, far: camera.far,
+        bounds: sceneBounds,
+      };
+    };
+    window.__owenPreviewPick = function (clientX, clientY) {
+      return groups.length ? !!pickAt(clientX, clientY) : false;
+    };
+    window.__owenPreviewSample = function (step) {
+      if (!renderer || contextLost) return { lit: -1, total: 0 };
+      controls.update();
+      resolveCameraCollision();
+      renderer.render(scene, camera);
+      const gl = renderer.getContext();
+      const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+      const px = new Uint8Array(4);
+      const s = Math.max(1, step || 16);
+      let lit = 0, total = 0;
+      for (let y = 0; y < h; y += s) {
+        for (let x = 0; x < w; x += s) {
+          gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          total++;
+          if (Math.abs(px[0] - 11) + Math.abs(px[1] - 16) + Math.abs(px[2] - 24) > 30) lit++;
+        }
+      }
+      return { lit, total, w, h };
+    };
 
     window.addEventListener('message', (event) => {
       const data = event.data;

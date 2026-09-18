@@ -90,6 +90,14 @@ interface PinUniverse {
     id: number;
     layers: PinLayer[];
     kind: 'fuel' | 'guide' | 'instrument' | 'absorber' | 'other';
+    /**
+     * Square structural sleeve around the pin (BEAVRS models Inconel grid
+     * spacers as px/py-bounded squares in dedicated per-elevation universes).
+     * When set, the axial band drawn from this universe reads as a grid
+     * spacer — matching the OpenMC column model's `grid` bands — instead of
+     * silently reusing the fuel signature.
+     */
+    grid?: { outer: number; inner: number; material: string };
 }
 
 interface LatUniverse {
@@ -290,6 +298,22 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         if (!pin || pin.layers.length === 0) return;
 
         if (discMode) {
+            // A grid-overlay band replaces the pin signature with the spacer,
+            // exactly like the OpenMC column model's grid bands: the thin gray
+            // stripe is the honest content of that elevation.
+            if (pin.grid) {
+                cylinders.push({
+                    label,
+                    radius: Math.min(subPitch * 0.5, pin.grid.outer),
+                    height: segHeight,
+                    x: cx, y: cy, z: zCenter,
+                    color: materialColor('Inconel'),
+                    opacity: 1.0,
+                    component: Component.Grid,
+                    material: pin.grid.material,
+                });
+                return;
+            }
             // Dominant solid layer drives the colour; component from the pin's
             // classified kind so guide/instrument tubes read correctly.
             const solid = pin.layers.find((l) => l.component !== Component.Gap && l.component !== Component.Moderator) ?? pin.layers[0];
@@ -318,6 +342,19 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         const colors = pin.layers.map((l) => l.color);
         const mats = pin.layers.map((l) => l.material);
         cylinders.push(...emitLayers(radii, components, cx, cy, zCenter, segHeight, label, colors, mats));
+        if (pin.grid) {
+            cylinders.push({
+                label: `${label}_grid`,
+                radius: pin.grid.outer,
+                innerRadius: pin.grid.inner,
+                height: segHeight,
+                x: cx, y: cy, z: zCenter,
+                color: materialColor('Inconel'),
+                opacity: 1.0,
+                component: Component.Grid,
+                material: pin.grid.material,
+            });
+        }
     };
 
     // Exact plates for a baffle universe at a lattice slot. Zero rects means
@@ -952,6 +989,7 @@ function buildPinUniverse(
     materials: Map<number, MaterialInfo>,
 ): PinUniverse | null {
     const layers: PinLayer[] = [];
+    let grid: PinUniverse['grid'];
     for (const cell of cells) {
         if (cell.lat !== null) continue;
         // A cell filled with another universe is structural, not a drawable layer.
@@ -977,7 +1015,34 @@ function buildPinUniverse(
             const r = cylinderRadius(surf);
             if (r > 0 && r < outer) outer = r;
         }
-        if (!isFinite(outer)) continue; // background fill cell (no bounding cylinder)
+        if (!isFinite(outer)) {
+            // No bounding cylinder — usually the background fill cell, but the
+            // BEAVRS grid-overlay universes also put their Inconel spacer here:
+            // a thin square sleeve bounded only by px/py planes. Without this,
+            // those axial bands render with the fuel signature and the thin
+            // gray grid stripes only ever show up on the OpenMC path.
+            if (!grid) {
+                const inf = materials.get(cell.material);
+                if (inf && /inconel|grid/i.test(inf.name)) {
+                    const half: number[] = [];
+                    for (const s of cell.surfaces) {
+                        if (bothSenses.has(Math.abs(s))) continue;
+                        const surf = surfaces.get(Math.abs(s));
+                        if (surf && (surf.type === 'px' || surf.type === 'py') && Number.isFinite(surf.params[0])) {
+                            half.push(Math.abs(surf.params[0]));
+                        }
+                    }
+                    if (half.length >= 4) {
+                        const outerHw = Math.max(...half);
+                        const innerHw = Math.min(...half);
+                        if (outerHw > 0 && innerHw > 0 && outerHw - innerHw < 0.2) {
+                            grid = { outer: outerHw, inner: innerHw, material: inf.name };
+                        }
+                    }
+                }
+            }
+            continue;
+        }
         const info = materials.get(cell.material) ?? { name: cell.material === 0 ? 'void' : 'material', component: Component.Other };
         layers.push({
             radius: outer,
@@ -1015,7 +1080,7 @@ function buildPinUniverse(
         for (const l of layers) if (l.component === Component.Clad || l.component === Component.Structure) l.component = Component.InstrumentTube;
     }
 
-    return { id: uid, layers, kind };
+    return { id: uid, layers, kind, grid };
 }
 
 // ---------------------------------------------------------------------------

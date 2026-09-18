@@ -199,6 +199,34 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         return null;
     };
 
+    // Grid overlay: a cellUniverse that pairs a pin-filled cell with a mat-fill
+    // structural sleeve on a square surface (BEAVRS GridPin* universes carry
+    // Inconel `…Grid` material on a zSquareCylinder). `resolveToPin` rightly
+    // ignores mat-fill cells, so without this the spacer band renders with the
+    // fuel signature and the gray grid stripes only appear on the OpenMC path.
+    const gridCache = new Map<number, { outer: number; inner: number; mat: string } | null>();
+    const gridInfo = (uid: number): { outer: number; inner: number; mat: string } | null => {
+        if (gridCache.has(uid)) return gridCache.get(uid)!;
+        let out: { outer: number; inner: number; mat: string } | null = null;
+        for (const cid of cellUniCells.get(uid) ?? []) {
+            const mat = cellMaterial.get(cid);
+            if (!mat || !/inconel|grid/i.test(mat)) continue;
+            const hws: number[] = [];
+            for (const s of cellSurfaces.get(cid) ?? []) {
+                const surf = surfaces.get(Math.abs(s));
+                if (surf && surf.halfwidth !== undefined && surf.halfwidth > 0) hws.push(surf.halfwidth);
+            }
+            if (hws.length) {
+                const outer = Math.max(...hws);
+                const inner = hws.length > 1 ? Math.min(...hws) : outer * 0.97;
+                out = { outer, inner, mat };
+                break;
+            }
+        }
+        gridCache.set(uid, out);
+        return out;
+    };
+
     // An axial stack is a cellUniverse whose member cells are bounded by z-planes
     // (a top-to-bottom stack of segments). Build the sorted segment list.
     const axialCache = new Map<number, AxialSegment[] | null>();
@@ -327,7 +355,8 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         return comp;
     };
 
-    const placePinAt = (uid: number, cx: number, cy: number, z: number, height: number, label: string): void => {
+    const placePinAt = (uid: number, cx: number, cy: number, z: number, height: number, label: string,
+        grid: { outer: number; inner: number; mat: string } | null = null): void => {
         if (cylinders.length >= maxInstances) { capped = true; return; }
         const pin = pinDefs.get(uid);
         if (!pin) return;
@@ -339,6 +368,21 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         if (radii.length === 0) return; // pure-fill pin (water) — nothing to draw
 
         if (discMode) {
+            // Grid-overlay band: the spacer is the honest content of this
+            // elevation — parity with the OpenMC column model's gray bands.
+            if (grid) {
+                cylinders.push({
+                    label,
+                    radius: Math.min(subPinPitch * 0.5, grid.outer),
+                    height,
+                    x: cx, y: cy, z,
+                    color: materialColor('Inconel'),
+                    opacity: 1.0,
+                    component: Component.Grid,
+                    material: grid.mat,
+                });
+                return;
+            }
             let matIdx = 0;
             for (let i = 0; i < pin.fills.length; i++) {
                 const c = materialComponent(pin.fills[i] ?? '');
@@ -381,6 +425,19 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             mats.push(matName);
         }
         cylinders.push(...emitLayers(radii, components, cx, cy, z, height, label, colors, mats));
+        if (grid) {
+            cylinders.push({
+                label: `${label}_grid`,
+                radius: grid.outer,
+                innerRadius: grid.inner,
+                height,
+                x: cx, y: cy, z,
+                color: materialColor('Inconel'),
+                opacity: 1.0,
+                component: Component.Grid,
+                material: grid.mat,
+            });
+        }
     };
 
     // Place an entry (sub-universe of an assembly) at (cx,cy): either an axial
@@ -394,7 +451,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                     const pin = resolveToPin(seg.universe);
                     if (pin === null) continue;
                     const h = Math.max(0.01, seg.zmax - seg.zmin);
-                    placePinAt(pin, cx, cy, (seg.zmin + seg.zmax) / 2, h, `${label}_z${i}`);
+                    placePinAt(pin, cx, cy, (seg.zmin + seg.zmax) / 2, h, `${label}_z${i}`, gridInfo(seg.universe));
                 }
                 return;
             }

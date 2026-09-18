@@ -211,28 +211,51 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     };
 
     // Build a pin (concentric layers) from a name: prefer a `pin` block, else
-    // CSG cells that reference `cyl` surfaces.
-    const pinLayers = (name: string): { radii: number[]; materials: string[] } | null => {
+    // CSG cells that reference `cyl` surfaces. A square (`sqc`) structural
+    // sleeve — BEAVRS models Inconel grid spacers this way in per-elevation
+    // `…g` universes — is split out as `grid` instead of being folded into the
+    // concentric list, so those axial bands can render as gray spacers exactly
+    // like the OpenMC column model does.
+    interface PinLayerInfo { radii: number[]; materials: string[]; grid?: { outer: number; inner: number; mat: string } }
+    const pinLayers = (name: string): PinLayerInfo | null => {
         const pin = pins.get(name);
         if (pin && pin.radii.length) return { radii: pin.radii, materials: pin.materials };
         const cs = cellsByUniverse.get(name);
         if (cs) {
-            const layers: { r: number; mat: string }[] = [];
+            const layers: { r: number; mat: string; sq: boolean; sqIn: number }[] = [];
             for (const c of cs) {
                 if (!c.material) continue;
                 let outer = Infinity;
+                let outerSq = false;
+                let sqIn = 0;
                 for (const sref of c.surfaces) {
-                    if (sref.sense >= 0) continue;
                     const surf = surfs.get(sref.id);
                     if (!surf) continue;
+                    if (sref.sense >= 0) {
+                        // Outside a square: remember its halfwidth — for the
+                        // sleeve cell this is the spacer's inner wall.
+                        if (surf.type === 'sqc') sqIn = Math.max(sqIn, surf.params[2] ?? 0);
+                        continue;
+                    }
                     const r = surfRadius(surf);
-                    if (r > 0 && r < outer) outer = r;
+                    if (r > 0 && r < outer) { outer = r; outerSq = surf.type === 'sqc'; }
                 }
-                if (isFinite(outer)) layers.push({ r: outer, mat: c.material });
+                if (isFinite(outer)) layers.push({ r: outer, mat: c.material, sq: outerSq, sqIn });
             }
             if (layers.length) {
                 layers.sort((a, b) => a.r - b.r);
-                return { radii: layers.map((l) => l.r), materials: layers.map((l) => l.mat) };
+                let grid: PinLayerInfo['grid'];
+                const gi = layers.findIndex((l) => l.sq && /inconel|grid/i.test(l.mat));
+                if (gi >= 0 && layers.length > 1) {
+                    const g = layers[gi];
+                    grid = {
+                        outer: g.r,
+                        inner: g.sqIn > 0 && g.sqIn < g.r ? g.sqIn : g.r * 0.97,
+                        mat: g.mat,
+                    };
+                    layers.splice(gi, 1);
+                }
+                return { radii: layers.map((l) => l.r), materials: layers.map((l) => l.mat), grid };
             }
         }
         return null;
@@ -325,6 +348,21 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         else if (kind === 'instrument') comps.forEach((c, i) => { if (c === Component.Clad || c === Component.Structure) comps[i] = Component.InstrumentTube; });
 
         if (discMode) {
+            // Grid-overlay band: draw the spacer, not the fuel signature —
+            // parity with the OpenMC column model's gray grid bands.
+            if (layers.grid) {
+                cylinders.push({
+                    label,
+                    radius: Math.min(subPitch * 0.5, layers.grid.outer),
+                    height: segHeight,
+                    x: cx, y: cy, z: zCenter,
+                    color: materialColor('Inconel'),
+                    opacity: 1.0,
+                    component: Component.Grid,
+                    material: layers.grid.mat,
+                });
+                return;
+            }
             let solidIdx = comps.findIndex((c) => c !== Component.Gap && c !== Component.Moderator);
             if (solidIdx < 0) solidIdx = 0;
             const matName = positive[solidIdx].mat;
@@ -351,6 +389,19 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         const colors = positive.map((l) => materialColor(l.mat));
         const mats = positive.map((l) => l.mat);
         cylinders.push(...emitLayers(positive.map((l) => l.r), comps, cx, cy, zCenter, segHeight, label, colors, mats));
+        if (layers.grid) {
+            cylinders.push({
+                label: `${label}_grid`,
+                radius: layers.grid.outer,
+                innerRadius: layers.grid.inner,
+                height: segHeight,
+                x: cx, y: cy, z: zCenter,
+                color: materialColor('Inconel'),
+                opacity: 1.0,
+                component: Component.Grid,
+                material: layers.grid.mat,
+            });
+        }
     };
 
     // Place a lattice entry: an axial stack (when axial detail is on) expands
