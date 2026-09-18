@@ -100,6 +100,29 @@ suite('BEAVRS full-core axial parity (v0.2.9 OpenMC fix)', function () {
         assert.ok(comps.has('end_plug'), 'expected end-plug / nozzle bands');
     });
 
+    test('MCNP / Serpent / SCONE axial renders show grid-spacer bands like OpenMC', () => {
+        // The thin gray Inconel spacer bands (~5.7 cm at 8 elevations) used to
+        // appear only on the OpenMC path: MCNP never extracted the px/py
+        // square sleeve, Serpent folded the sqc sleeve under the fuel disc,
+        // and SCONE dropped the mat-fill overlay cell. Each code must now
+        // emit Component.Grid bands in both disc and layers axial modes.
+        for (const code of ['mcnp', 'serpent', 'scone'] as const) {
+            for (const detail of ['disc', 'layers'] as const) {
+                const scene = buildScene(loadDeck(DECKS[code]), code, { detail, axial: true });
+                const gridCyls = scene.cylinders.filter((c) => c.component === 'grid');
+                assert.ok(gridCyls.length > 0, `${code} (${detail}): expected grid-spacer bands, got none`);
+                // ~450k grid cylinders on a full core: fold, never spread.
+                let h = 0;
+                let r = 0;
+                for (const c of gridCyls) { if (c.height > h) h = c.height; if (c.radius > r) r = c.radius; }
+                // Bands are thin (spacer height), not full-height columns.
+                assert.ok(h < 20, `${code} (${detail}): grid band height ${h.toFixed(1)} cm — expected a thin spacer band`);
+                // Sleeve half-width: about 0.63 cm around a 1.26 cm pitch pin.
+                assert.ok(r > 0.4 && r < 0.8, `${code} (${detail}): grid radius ${r.toFixed(3)} cm`);
+            }
+        }
+    });
+
     test('does not regress MCNP / Serpent / SCONE axial extents', () => {
         for (const code of ['mcnp', 'serpent', 'scone'] as const) {
             const collapsed = buildScene(loadDeck(DECKS[code]), code, { detail: 'disc', axial: false });
