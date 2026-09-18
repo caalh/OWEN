@@ -1,7 +1,7 @@
 <h1 align="center">OWEN</h1>
 <p align="center"><strong>Open Workspace for Engineered Neutronics</strong></p>
 <p align="center">Created by <strong>Aaron W. Calhoun</strong></p>
-<p align="center">The nuclear reactor modeling toolkit for VS Code &amp; Cursor — a Monte Carlo language server with workspace validation, exact-geometry 3D preview with a geometry checker and volume calculator, cross-code Compare Geometry and semantic diff, converters between every pair of codes, a results viewer with convergence diagnostics, visual lattice and input builders, and workflow automation for <strong>MCNP</strong>, <strong>OpenMC</strong>, <strong>Serpent</strong>, and <strong>SCONE</strong> — fully offline.</p>
+<p align="center">Write, check, convert, and run <strong>MCNP</strong>, <strong>OpenMC</strong>, <strong>Serpent</strong>, and <strong>SCONE</strong> decks in VS Code and Cursor. Language-server diagnostics, a 3D preview of the real geometry, converters between the four codes, a results viewer, and visual lattice / input builders — fully offline.</p>
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=belvoirdynamics.owen-neutronics"><img alt="VS Code Marketplace Version" src="https://vsmarketplacebadges.dev/version-short/belvoirdynamics.owen-neutronics.svg?style=flat&label=VS%20Marketplace&color=0b1020"></a>
@@ -16,16 +16,11 @@
 
 ---
 
-OWEN brings first-class editor support for the four major Monte Carlo neutron-transport
-codes to VS Code and Cursor. Write decks faster with smart snippets, catch physics and
-cross-reference mistakes as you type with the MC Language Server, hover any nuclide for its
-library and temperature, validate a whole project at once (OpenMC XML sets, Serpent includes,
-SCONE libraries, MCNP cross-references), build lattices and full input decks visually,
-preview geometry in 3D with source and tally overlays, check it for overlaps, gaps and lost
-particles, compute cell volumes and masses into `vol`/`sd` cards, compare the same model
-across codes or diff two revisions by meaning rather than text, convert decks between any
-two of the four codes, launch solvers and parameter sweeps, and read the results with
-convergence diagnostics — without leaving your editor, and without a network connection.
+OWEN is the editor toolkit for MCNP, OpenMC, Serpent, and SCONE. Catch
+cross-reference and physics mistakes as you type, hover a nuclide for its
+library and temperature, preview the geometry in 3D, convert a deck to
+another code, run the solver, and read k-eff without leaving VS Code or
+Cursor — and without a network connection.
 
 ## See it in action
 
@@ -38,14 +33,13 @@ will. Click a card to jump to the card in the original file.
   <img alt="OWEN Cell Map of an MCNP lattice: universe 0 fills a lattice that places 264 fuel pins, 24 guide tubes and an instrument tube" src="media/demo-cell-map.png" width="900">
 </p>
 
-**A full BEAVRS core from a SCONE deck, at 1.2 million primitives, with the real axial stack.**
-OWEN resolves the nested lattice — 17×17 assemblies of 17×17 pins — and draws every one of the
-55,809 pin positions. Turn on axial segments and each pin expands into its true z-column, so the
-36 levels of active fuel, plena, grid spacers, end plugs and nozzles are individually toggleable.
-Peel off the vessel, solo a layer, or slice through the core on any axis.
+**A full BEAVRS core in 3D.** OWEN draws every pin of the nested lattice. Turn
+on axial segments to see fuel, plena, and grid spacers as separate layers;
+peel off the vessel or slice through the core. Scroll zooms toward whatever
+you point at — it no longer leaps from the whole vessel onto a single pin.
 
 <p align="center">
-  <img alt="OWEN 3D geometry preview of a full BEAVRS core from a SCONE deck, expanding to 1.2 million primitives with per-axial-layer toggles and slice planes" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-3d-core-axial.gif" width="880">
+  <img alt="OWEN 3D geometry preview of a full BEAVRS core: orbit, peel layers, and slice through the vessel" src="media/demo-3d-core-axial.gif" width="800">
 </p>
 
 **Geometry checked against your own OpenMC, not against OWEN's opinion of it.**
@@ -59,19 +53,9 @@ evidence rather than proof.
 </p>
 
 **Five highlight palettes per code, previewed side by side before you commit.**
-`OWEN: Choose Highlight Palette` opens them on the language you picked — Classic, Solarized,
-High Contrast, Pastel, and **Custom** (your own colors) — rendered from the same color table the
-editor uses, so what you compare is what you get. Click a card to apply it. For OpenMC each
-built-in palette uses its own hue family (blue/teal, olive/blue, orange/yellow/green/cyan,
-lilac/rose/mint), and the palette governs the whole deck: `openmc.*` names, method calls
-(`fuel.add_nuclide`) and attributes (`settings.batches`) on any variable, and the Python
-layer around them — comments, strings, numeric literals, keywords, and the name a
-`def`/`class` introduces. That last part is what makes a switch obvious rather than
-subtle: on the bundled BEAVRS full-core deck the palette reaches 69% of the non-whitespace
-characters, against 10% when only the API names are colored. Set
-`owen.highlight.openmc.coverage` to `OpenMC API only` for accents alone. Custom colors live
-in `owen.highlight.customColors` — set any of the ten token roles to a hex color (or
-`{foreground, fontStyle}`); roles you leave out fall back to Classic.
+`OWEN: Choose Highlight Palette` shows Classic, Solarized, High Contrast, Pastel,
+and Custom on the language you picked. Click a card to apply it. Custom colors
+live in `owen.highlight.customColors`.
 
 <p align="center">
   <img alt="OWEN highlight palette preview showing Classic, Solarized, High Contrast and Pastel side by side for MCNP" src="https://raw.githubusercontent.com/caalh/owen/main/media/demo-highlight-palettes.png" width="880">
@@ -83,7 +67,7 @@ in `owen.highlight.customColors` — set any of the ten token roles to a hex col
 
 | Feature | Description |
 |---------|-------------|
-| **Syntax highlighting** | TextMate grammars for MCNP (`.i`, `.mcnp`, `.inp`), Serpent (`.serp`), SCONE (`.scone`), and PHITS (`.phits`, `phits.inp` — sections, `$`/`#`/`!`/`c` comments, `infl:`/`set:` directives, `MAT[n]`), plus an OpenMC injection grammar for Python. Line-context MCNP rules color cell/surface/material cards, tallies, particle suffixes (`:n`), thermal libraries, and geometry operators. Five switchable palettes per language (Classic / Solarized / High Contrast / Pastel / Custom — your own colors via `owen.highlight.customColors`) via `OWEN: Choose Highlight Palette`, previewed side by side before you apply one; the OpenMC palettes each use a distinct hue family so the choice is visible at a glance. OpenMC decks are Python, so a language server such as Pylance owns their semantic tokens; OWEN draws the OpenMC palette on top of that layer, which is what makes it visible on a machine with Pylance installed (`owen.highlight.openmc.decorate` turns it off). |
+| **Syntax highlighting** | Grammars and five palettes (Classic, Solarized, High Contrast, Pastel, Custom) for MCNP, OpenMC, Serpent, SCONE, and PHITS. Switch palettes with `OWEN: Choose Highlight Palette`. |
 | **Snippets** | Ready-to-edit decks: PWR pin cell, 17×17 PWR assembly, criticality array, and shielding slab for MCNP; full OpenMC pin/assembly Python scripts plus depletion runs (`omc_deplete`, `omc_deplete_results`); SCONE fuel pin, 5×5 assembly, and shielding tutorials; PHITS starter deck, source, material, and T-Track tally blocks. |
 | **MC Language Server** | A real language server for MCNP, Serpent, and SCONE: **real-time diagnostics as you type** — density-sign and fraction-sign conventions, S(α,β) thermal scattering on non-hydrogenous materials, ZAID format, macrobody parameter counts, MCNP line length, and **cross-reference errors** (a cell referencing an undefined surface/material/universe/transform is flagged; defined-but-unused entities are faded hints) — plus hover, go-to-definition, find-references, and a grouped document outline (Cells / Surfaces / Materials / Universes / Transforms / Tallies). Ships as a self-contained `out/server.js`, reusable by other editors over stdio. OpenMC Python files keep Pylance plus `OWEN: Validate Input File`. |
 | **Nuclide & library hover** | Hover a ZAID and read the nuclide and what its suffix means: `92238.80c` is ENDF/B-VII.1 at 293.6 K (not VIII.0 — that is `.00c`), `.71c` is VII.0 at 600 K and wants a `TMP` card, `lwtr.20t` is H in light water from ENDF71SaB. Serpent and SCONE suffixes are explained as the temperature indices they are; OpenMC `'U235'` strings get the nuclide and the cell > material > settings temperature rule. Class letters follow Table B.1. |
@@ -195,7 +179,7 @@ All settings live under the **OWEN** section (`Ctrl+,` → search "owen"):
 | `owen.scone.executable` | `scone` | On Windows, SCONE typically requires WSL |
 | `owen.highlight.<lang>.palette` | `Classic` | Palette for `mcnp` / `openmc` / `serpent` / `scone`. Also settable from `OWEN: Choose Highlight Palette` |
 | `owen.highlight.customColors` | `{}` | Colors for the `Custom` palette, per token role (`"keyword": "#FF9100"` or `{foreground, fontStyle}` objects). Unset roles fall back to Classic |
-| `owen.highlight.openmc.decorate` | `true` | Draw the OpenMC palette as decorations so it survives Pylance's semantic tokens (see below) |
+| `owen.highlight.openmc.decorate` | `true` | Draw the OpenMC palette on top of the Python highlighter. Set `false` to leave coloring to Pylance |
 | `owen.highlight.openmc.coverage` | `Full deck` | Whether the OpenMC palette also colors Python comments, strings, numbers, keywords and `def`/`class` names, or only OpenMC API names |
 | `owen.preview.maxInstances` | `1500000` | Max cylinder instances in the 3D preview; auto-simplifies detail (not pins) above this. Raise (e.g. 4000000) for full shell+axial detail on a full core |
 | `owen.cellMap.openIn` | `ask` | Where the Cell Map opens: ask each time, `newWindow`, `beside`, or `activeGroup`. Clicking a cell always reveals the deck's existing tab, never a copy |
@@ -265,26 +249,6 @@ OWEN works with no network. Three.js (3D preview) and uPlot (Results, ALLEN, Swe
 ship inside the VSIX under `media/vendor/`; nothing is fetched from a CDN. ALLEN's σ(E) curves
 and the live NRDP/Community data are the only network features, and each has an offline fallback
 or an off switch.
-
-### Why OpenMC is highlighted twice
-
-MCNP, Serpent, and SCONE have their own language ids, so a grammar plus
-`editor.tokenColorCustomizations` is all a palette needs. OpenMC decks are
-Python, and Python belongs to Pylance.
-
-VS Code colors a *semantic* token — which is what Pylance publishes — from the
-scopes that token's **type** maps to. `openmc.Material` arrives as a `class` and
-resolves against `entity.name.type.class`; the `support.class.openmc` that
-OWEN's injection grammar put at the same position is never consulted. The
-palette was applied, correct, and invisible on any machine with a Python
-language server installed.
-
-So OWEN also draws the palette as editor decorations, which render above both
-the TextMate and semantic layers. The scanner behind them
-(`src/highlight/openmcTokens.ts`) matches the injection grammar's four patterns
-exactly, so both routes produce the same colors; `npm run verify:openmc-tokens`
-holds them together. Set `owen.highlight.openmc.decorate` to `false` to leave
-Python files entirely to Pylance.
 
 ## Acknowledgements
 

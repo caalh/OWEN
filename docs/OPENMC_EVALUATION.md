@@ -153,7 +153,8 @@ Open Tutorial, Run Parameter Sweep). This confirms the lazy-Supabase activation 
 **Feature:** Language highlighting. The file stays Python — OWEN registers no `openmc`
 language id — but OpenMC API tokens are recolored on top of it, two ways: an injection
 grammar into `source.python`, and editor decorations for the (usual) case where Pylance's
-semantic tokens would otherwise win. See README → *Why OpenMC is highlighted twice*.
+semantic tokens would otherwise win. See `src/highlight/openmcTokens.ts` and
+`owen.highlight.openmc.decorate` (off leaves Python files to Pylance).
 
 **Invoke:** Open `pincell.py`, with the Python extension installed and enabled.
 
