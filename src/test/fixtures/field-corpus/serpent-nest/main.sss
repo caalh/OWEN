@@ -1,0 +1,19 @@
+% Honest-unsupported: nest is named, not invented as a universe.
+surf outer cuboid -10 10 -10 10 -10 10
+nest pinstack
+  0.0 0.0 0.0
+  fuel  0.40
+  clad  0.45
+  water
+cell world 0 fill pinstack -outer
+cell grave 0 outside outer
+mat fuel -10.4
+  92235.80c 0.04
+  92238.80c 0.96
+  8016.80c 2.0
+mat clad -6.55
+  40090.80c 1.0
+mat water -0.74
+  1001.80c 2.0
+  8016.80c 1.0
+set pop 100 10 20

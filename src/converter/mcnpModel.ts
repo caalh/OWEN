@@ -494,6 +494,7 @@ function parseCells(
     transforms: Map<number, McnpTransformSpec>,
 ): McnpCell[] {
     const out: McnpCell[] = [];
+    const likeBut: { id: number; source: number; line: number; kwMatches: CellKeywordMatch[]; text: string }[] = [];
     for (const ll of joinContinuationLines(cellLines, offset)) {
         const line = ll.text;
 
@@ -518,10 +519,18 @@ function parseCells(
         const tokens = head.split(/\s+/);
         if (tokens.length < 2) continue;
         const id = parseInt(tokens[0], 10);
+        if (!Number.isFinite(id)) continue;
+
+        // `j LIKE n BUT …` (§5.2.2): copy cell n, then apply the keywords
+        // that follow BUT. The source may be defined later in the block, so
+        // these are resolved after the pass.
+        if (/^like$/i.test(tokens[1])) {
+            const src = parseInt(tokens[2] ?? '', 10);
+            if (Number.isFinite(src)) likeBut.push({ id, source: src, line: ll.line, kwMatches, text: line });
+            continue;
+        }
         const matId = parseInt(tokens[1], 10);
-        if (!Number.isFinite(id) || !Number.isFinite(matId)) continue;
-        // "like n but" cells are not expanded — surface as regionError.
-        if (/^like$/i.test(tokens[1])) continue;
+        if (!Number.isFinite(matId)) continue;
 
         let density: number | null = null;
         let surfStart = 2;
@@ -538,16 +547,54 @@ function parseCells(
             regionError = (err as Error).message;
         }
 
-        // Extract keyword values (value runs to the start of the next keyword).
-        let universe: number | null = null;
-        let lattice: number | null = null;
-        let fill: string | null = null;
-        let fillUniverse: number | null = null;
-        let fillTransform: McnpTransformSpec | null = null;
-        let latticeFill: McnpLatticeFill | null = null;
-        let trcl: McnpTransformSpec | null = null;
-        let temperatureK: number | null = null;
-        let importanceZero = false;
+        const cell: McnpCell = {
+            id, matId, density, regionRaw, region, regionError,
+            universe: null, lattice: null, fill: null, fillUniverse: null, fillTransform: null, latticeFill: null,
+            trcl: null, temperatureK: null, importanceZero: false,
+            line: ll.line,
+        };
+        applyCellKeywords(cell, kwMatches, line, transforms);
+        out.push(cell);
+    }
+
+    for (const lb of likeBut) {
+        const source = out.find((c) => c.id === lb.source);
+        if (!source) {
+            out.push({
+                id: lb.id, matId: 0, density: null, regionRaw: '', region: null,
+                regionError: `LIKE ${lb.source} BUT: cell ${lb.source} is not defined`,
+                universe: null, lattice: null, fill: null, fillUniverse: null, fillTransform: null, latticeFill: null,
+                trcl: null, temperatureK: null, importanceZero: false, line: lb.line,
+            });
+            continue;
+        }
+        const cell: McnpCell = { ...source, id: lb.id, line: lb.line, trcl: null };
+        applyCellKeywords(cell, lb.kwMatches, lb.text, transforms);
+        out.push(cell);
+    }
+    out.sort((a, b) => a.line - b.line);
+    return out;
+}
+
+interface CellKeywordMatch { star: boolean; name: string; particle: string; start: number; valueStart: number }
+
+/** Apply `u= lat= fill= trcl= tmp= imp= mat= rho=` values to a cell in place. */
+function applyCellKeywords(
+    cell: McnpCell,
+    kwMatches: CellKeywordMatch[],
+    line: string,
+    transforms: Map<number, McnpTransformSpec>,
+): void {
+    {
+        let universe: number | null = cell.universe;
+        let lattice: number | null = cell.lattice;
+        let fill: string | null = cell.fill;
+        let fillUniverse: number | null = cell.fillUniverse;
+        let fillTransform: McnpTransformSpec | null = cell.fillTransform;
+        let latticeFill: McnpLatticeFill | null = cell.latticeFill;
+        let trcl: McnpTransformSpec | null = cell.trcl;
+        let temperatureK: number | null = cell.temperatureK;
+        let importanceZero = cell.importanceZero;
 
         for (let i = 0; i < kwMatches.length; i++) {
             const kw = kwMatches[i];
@@ -602,18 +649,31 @@ function parseCells(
                     }
                     break;
                 }
+                case 'mat': {
+                    // LIKE n BUT MAT=m: the copy's material.
+                    const v = parseInt(value.split(/\s+/)[0], 10);
+                    if (Number.isFinite(v)) cell.matId = v;
+                    break;
+                }
+                case 'rho': {
+                    const v = parseFloat(value.split(/\s+/)[0]);
+                    if (Number.isFinite(v)) cell.density = v;
+                    break;
+                }
                 default: break; // vol / pwt / … ignored
             }
         }
 
-        out.push({
-            id, matId, density, regionRaw, region, regionError,
-            universe, lattice, fill, fillUniverse, fillTransform, latticeFill,
-            trcl, temperatureK, importanceZero,
-            line: ll.line,
-        });
+        cell.universe = universe;
+        cell.lattice = lattice;
+        cell.fill = fill;
+        cell.fillUniverse = fillUniverse;
+        cell.fillTransform = fillTransform;
+        cell.latticeFill = latticeFill;
+        cell.trcl = trcl;
+        cell.temperatureK = temperatureK;
+        cell.importanceZero = importanceZero;
     }
-    return out;
 }
 
 function parseTransforms(dataLines: string[], offset: number): Map<number, McnpTransformSpec> {

@@ -22,17 +22,17 @@ function makeNonce(): string {
  * density when negative (positive is atoms/b·cm, which needs the composition
  * to become a mass). Serpent: `mat <name> <dens>` with the same sign rule.
  */
-export function massDensities(src: DeckSource, model: McnpGeometryModel): Map<number, number> {
+export function massDensities(src: DeckSource, model: McnpGeometryModel, text = src.text): Map<number, number> {
     const out = new Map<number, number>();
     if (src.language === 'mcnp') {
-        for (const c of parseMcnpDeck(src.text).cells) {
+        for (const c of parseMcnpDeck(text).cells) {
             if (c.density !== null && c.density < 0) out.set(c.id, -c.density);
         }
         return out;
     }
     if (src.language === 'serpent' && model.names) {
         const byName = new Map<string, number>();
-        for (const m of src.text.matchAll(/^\s*mat\s+(\S+)\s+(-?[\d.]+(?:[eE][-+]?\d+)?)/gm)) {
+        for (const m of text.matchAll(/^\s*mat\s+(\S+)\s+(-?[\d.]+(?:[eE][-+]?\d+)?)/gm)) {
             const d = parseFloat(m[2]);
             if (Number.isFinite(d) && d < 0) byName.set(m[1], -d);
         }
@@ -68,6 +68,7 @@ abstract class ReportPanel<R> {
     protected src: DeckSource | undefined;
     protected model: McnpGeometryModel | undefined;
     protected origin = '';
+    protected sourceText = '';
     protected samples: number | undefined;
     protected result: R | undefined;
 
@@ -83,7 +84,10 @@ abstract class ReportPanel<R> {
                 const l = await loadGeometryModel(src);
                 if (!isLoaded(l)) return l;
                 this.model = l.model;
-                this.origin = l.origin === 'deck' ? 'the deck' : l.origin === 'openmc-export' ? 'OpenMC export' : 'sibling geometry.xml';
+                this.origin = l.origin === 'deck'
+                    ? (l.projectFiles && l.projectFiles.length > 1 ? 'the joined project (includes expanded)' : 'the deck')
+                    : l.origin === 'openmc-export' ? 'OpenMC export' : 'sibling model.xml / geometry.xml';
+                this.sourceText = l.text;
                 progress.report({ message: `sampling ${l.model.universes.size} universes` });
                 // Yield once so the notification paints before the CPU-bound pass.
                 await new Promise((r) => setTimeout(r, 30));
@@ -206,10 +210,10 @@ class VolumesPanel extends ReportPanel<VolumeResult> {
     }
     protected html(csp: string, nonce: string): string {
         const ctx = this.context();
-        ctx.massDensity = massDensities(this.src!, this.model!);
+        ctx.massDensity = massDensities(this.src!, this.model!, this.sourceText || this.src!.text);
         this.cards = undefined;
         if (this.src!.language === 'mcnp') {
-            const deck = parseMcnpDeck(this.src!.text);
+            const deck = parseMcnpDeck(this.sourceText || this.src!.text);
             this.cards = {
                 vol: volCard(deck.cells.map((c) => c.id), this.result!),
                 sd: sdCards(deck.settings.cellTallies, this.result!),

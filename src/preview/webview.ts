@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { detectMonteCarloLanguage } from '../util/detectLanguage';
 import { deckSourceOf } from '../util/deckSource';
+import { resolveDeckProject } from '../util/loadModel';
 import { vendorUri } from '../util/vendor';
 import { buildScene, CylinderSpec } from './extractor';
 import { GeometryScene, FidelityOptions } from './types';
@@ -346,6 +347,14 @@ function rebuildScene(): void {
         return;
     }
     lastScene = buildScene(lastText, lastLanguage, withConfig(fidelity));
+    if (lastLanguage === 'openmc' && lastOpenmcXml && lastScene.primitiveCount === 0) {
+        const xmlScene = buildScene(lastOpenmcXml, 'openmc', withConfig(fidelity));
+        if (xmlScene.primitiveCount > 0) {
+            lastScene = xmlScene;
+            postScene();
+            return;
+        }
+    }
     holdPlaceholderPendingExport();
     postScene();
 }
@@ -455,9 +464,16 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
             return;
         }
         // A notebook cell previews the whole notebook's model (all code cells).
+        // File decks join Serpent include / MCNP READ / OpenMC sibling XML so
+        // the 3D view sees the same project Cell Map and Check Geometry do.
         const src = deckSourceOf(editor.document);
+        const project = src ? resolveDeckProject(src) : null;
         const language = src?.language ?? detectMonteCarloLanguage(editor.document) ?? 'mcnp';
-        lastText = src?.text ?? editor.document.getText();
+        // Python stays the 3D text so a lattice core keeps the fast path;
+        // sibling model.xml / geometry.xml becomes the exact model (slices,
+        // and the 3D scene when the Python declares no lattice) — the same
+        // split refreshOpenmcExact applies after a live export.
+        lastText = project?.text ?? src?.text ?? editor.document.getText();
         lastLanguage = language;
         lastDeckPath = !src?.fromNotebook && editor.document.uri.scheme === 'file' ? editor.document.uri.fsPath : '';
         lastOpenmcModel = null;
@@ -465,8 +481,36 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
         openmcExportGen++;
         openmcPlaceholder = null;
         fidelity = { detail: 'auto', axial: false };
-        lastScene = buildScene(lastText, language, withConfig(fidelity));
-        holdPlaceholderPendingExport();
+        if (language === 'openmc' && project?.xmlText && !looksLikeOpenmcXml(lastText)) {
+            lastOpenmcXml = project.xmlText;
+            lastOpenmcModel = parseOpenmcGeometryXml(lastOpenmcXml);
+            sliceCache = { text: lastText, language: 'openmc', model: lastOpenmcModel };
+        }
+        if (lastOpenmcXml && !/RectLattice|HexLattice|\.universes\b/.test(lastText)) {
+            lastScene = buildScene(lastOpenmcXml, 'openmc', withConfig(fidelity));
+            lastScene.notes = [
+                `Geometry read from the exported XML next to this script (${project?.files.find((f) => /\.xml$/i.test(f.path))?.role ?? 'model.xml'}).`,
+                ...lastScene.notes,
+            ];
+        } else {
+            lastScene = buildScene(lastText, language, withConfig(fidelity));
+            // A Python lattice whose universe map the text parser could not
+            // expand (list comprehension, helper function) draws nothing. The
+            // sibling XML is the model OpenMC would actually run, so fall back
+            // to it rather than leaving an empty stage.
+            if (language === 'openmc' && lastOpenmcXml && lastScene.primitiveCount === 0) {
+                const xmlScene = buildScene(lastOpenmcXml, 'openmc', withConfig(fidelity));
+                if (xmlScene.primitiveCount > 0) {
+                    xmlScene.notes = [
+                        `Geometry read from the exported XML next to this script (${project?.files.find((f) => /\.xml$/i.test(f.path))?.role ?? 'model.xml'}).`,
+                        ...xmlScene.notes,
+                    ];
+                    lastScene = xmlScene;
+                }
+            }
+            holdPlaceholderPendingExport();
+        }
+        if (project?.warnings.length && lastScene) lastScene.warnings = [...project.warnings, ...lastScene.warnings];
 
         if (currentPanel) {
             currentPanel.reveal(vscode.ViewColumn.Beside);
@@ -512,7 +556,9 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
         // on first open the 'ready' handshake above delivers the payload instead.
         postScene();
 
-        void refreshOpenmcExact();
+        // A sibling model.xml / geometry.xml is what OpenMC would run; only
+        // reach for a live export when there is none.
+        if (!lastOpenmcXml) void refreshOpenmcExact();
 
         const n = lastScene.primitiveCount;
         if (n === 0 && openmcPlaceholder) {

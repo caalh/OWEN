@@ -12,6 +12,7 @@ PROJECT_STRUCTURE.md
 src/**
 test/**
 .compare2d/**
+.field-corpus/**
 scripts/**
 node_modules/**
 !node_modules/h5wasm/**

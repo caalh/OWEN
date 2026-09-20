@@ -21,3 +21,6 @@ packages/*/src/*.js.map
 
 .git-commit-msg.txt
 
+# License-safe field corpus cache + HTML report (fetched by SHA, not vendored)
+.field-corpus/
+

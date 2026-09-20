@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<geometry>
+  <cell id="1" fill="60" region="-4" universe="0"/>
+  <cell id="9" material="9" universe="9"/>
+  <cell id="200" material="200" universe="200"/>
+  <cell id="201" material="201" universe="201"/>
+  <cell id="202" material="202" universe="202"/>
+  <cell id="203" material="203" universe="203"/>
+  <cell id="204" material="204" universe="204"/>
+  <cell id="205" material="205" universe="205"/>
+  <cell id="206" material="206" universe="206"/>
+  <cell id="207" material="207" universe="207"/>
+  <cell id="208" material="208" universe="208"/>
+  <cell id="209" material="209" universe="209"/>
+  <cell id="210" material="210" universe="210"/>
+  <cell id="211" material="211" universe="211"/>
+  <lattice id="60">
+    <pitch>2.0 2.0 4.0</pitch>
+    <outer>9</outer>
+    <dimension>3 2 2</dimension>
+    <lower_left>-3.0 -2.0 -4.0</lower_left>
+    <universes>
+200 201 202 
+203 204 205 
+
+206 207 208 
+209 210 211 </universes>
+  </lattice>
+  <surface id="4" type="sphere" boundary="vacuum" coeffs="0.0 0.0 0.0 30.0"/>
+</geometry>

@@ -4,7 +4,7 @@
  * actually writes.
  */
 import * as assert from 'assert';
-import { detectOpenmcXmlKind, validateOpenmcXml } from '../../language/openmcXml';
+import { detectOpenmcXmlKind, validateOpenmcXml, normalizeXmlId } from '../../language/openmcXml';
 
 const codes = (diags: { code: string }[]) => diags.map((d) => d.code);
 
@@ -104,6 +104,26 @@ suite('OpenMC XML — geometry', () => {
         assert.deepStrictEqual(validateOpenmcXml('geometry', geom), []);
         const c = codes(validateOpenmcXml('geometry', geom, { materialIds: new Set(['1', '2']) }));
         assert.ok(c.includes('openmc-xml.unknown-material'), `missing unknown-material: ${c}`);
+    });
+
+    test('zero-padded ids match unpadded references (VVER-1000 regression)', () => {
+        // OpenMC reads ids as integers, so materials.xml id="01" satisfies a
+        // cell material="1" (and a region "-01" satisfies surface id="1").
+        // Field-day Sep 2026: a real VVER-1000 deck false-errored on this.
+        const geom = `<geometry>
+  <cell id="1" material="1" region="-01"/>
+  <surface id="1" type="sphere" coeffs="0 0 0 1"/>
+</geometry>`;
+        assert.deepStrictEqual(
+            validateOpenmcXml('geometry', geom, { materialIds: new Set([normalizeXmlId('01')]) }),
+            [],
+        );
+        // And the reverse: padded reference against an unpadded definition.
+        const geom2 = '<geometry><cell id="2" material="01" region="-1"/><surface id="1" type="sphere" coeffs="0 0 0 1"/></geometry>';
+        assert.deepStrictEqual(
+            validateOpenmcXml('geometry', geom2, { materialIds: new Set(['1']) }),
+            [],
+        );
     });
 
     test('complex region operators parse (union, complement, parens)', () => {

@@ -133,7 +133,8 @@ suite('OWEN preview extractor', () => {
             'lat.universes = make_universes()  # built by a function we cannot evaluate',
         ].join('\n');
         const scene = buildScene(deck, 'openmc');
-        assert.ok(scene.warnings.length >= 1, 'expected a warning explaining why only one pin shows');
+        assert.ok(scene.warnings.length >= 1, 'expected a warning explaining why the lattice was not drawn');
+        assert.strictEqual(scene.cylinders.length, 0, 'must not draw a placeholder pin for an unexpanded lattice');
     });
 
     test('expands a nested SCONE core lattice (assemblies of pins)', () => {

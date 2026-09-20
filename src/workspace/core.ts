@@ -177,6 +177,14 @@ interface XmlInventory {
     materialDensityUnits: Map<string, string>;
 }
 
+/**
+ * OpenMC ids are integers; `id="01"` and `material="1"` are the same thing
+ * (the upstream lattice_hex regression deck writes zero-padded ids).
+ */
+function nid(s: string): string {
+    return /^\s*\d+\s*$/.test(s) ? String(parseInt(s, 10)) : s.trim();
+}
+
 function inventoryOf(files: XmlFile[]): XmlInventory {
     const inv: XmlInventory = {
         materials: new Map(), cells: new Map(), surfaces: new Map(), universes: new Map(), lattices: new Map(),
@@ -187,25 +195,29 @@ function inventoryOf(files: XmlFile[]): XmlInventory {
         const mats = f.kind === 'materials' ? f.text : f.kind === 'model' ? section(f.text, 'materials') ?? '' : '';
         for (const b of blocks(mats, 'material')) {
             const id = attr(b.open, 'id');
-            if (id) inv.materials.set(id, f.path);
+            if (id) inv.materials.set(nid(id), f.path);
             for (const n of tags(b.body, 'nuclide')) {
                 const name = attr(n.tag, 'name');
                 if (name) { inv.nuclides.add(name); if (/^(U233|U235|Pu239|Pu241|U238|Th232|Pu240)$/.test(name)) inv.fissionable = true; }
             }
             const d = tags(b.body, 'density')[0];
-            if (id && d) inv.materialDensityUnits.set(id, attr(d.tag, 'units') ?? '');
+            if (id && d) inv.materialDensityUnits.set(nid(id), attr(d.tag, 'units') ?? '');
         }
         const geom = f.kind === 'geometry' ? f.text : f.kind === 'model' ? section(f.text, 'geometry') ?? '' : '';
-        for (const t of tags(geom, 'surface')) { const id = attr(t.tag, 'id'); if (id) inv.surfaces.set(id, f.path); }
+        for (const t of tags(geom, 'surface')) { const id = attr(t.tag, 'id'); if (id) inv.surfaces.set(nid(id), f.path); }
         for (const t of tags(geom, 'cell')) {
-            const id = attr(t.tag, 'id'); if (id) inv.cells.set(id, f.path);
-            const u = attr(t.tag, 'universe') ?? '0'; inv.universes.set(u, f.path);
+            const id = attr(t.tag, 'id'); if (id) inv.cells.set(nid(id), f.path);
+            const u = attr(t.tag, 'universe') ?? '0'; inv.universes.set(nid(u), f.path);
         }
         for (const name of ['lattice', 'hex_lattice']) {
             for (const b of blocks(geom, name)) {
                 const id = attr(b.open, 'id');
-                if (id) { inv.lattices.set(id, f.path); inv.universes.set(id, f.path); }
+                if (id) { inv.lattices.set(nid(id), f.path); inv.universes.set(nid(id), f.path); }
             }
+        }
+        for (const t of tags(geom, 'dagmc_universe')) {
+            const id = attr(t.tag, 'id');
+            if (id) inv.universes.set(nid(id), f.path);
         }
         const tal = f.kind === 'tallies' ? f.text : f.kind === 'model' ? section(f.text, 'tallies') ?? '' : '';
         for (const b of blocks(tal, 'mesh')) { const id = attr(b.open, 'id'); if (id) inv.meshes.set(id, f.path); }
@@ -252,7 +264,7 @@ export function validateOpenmcXmlProject(files: XmlFile[], fs: FileSystemLike): 
             if (mat) {
                 for (const tok of mat.split(/\s+/).filter(Boolean)) {
                     cellMatRefs++;
-                    if (tok !== 'void' && !inv.materials.has(tok)) {
+                    if (tok !== 'void' && !inv.materials.has(nid(tok))) {
                         diags.push(diag(f.path, f.text, new RegExp(`<cell\\b[^>]*\\bid\\s*=\\s*["']${escapeRe(id)}["'][^>]*>`), `Cell ${id} uses material ${tok}, which no <material> in this project defines.`, 'error', 'workspace.unknown-material'));
                     }
                 }
@@ -263,7 +275,7 @@ export function validateOpenmcXmlProject(files: XmlFile[], fs: FileSystemLike): 
                     const sid = tok.replace(/^[-+]/, '');
                     if (!/^\d+$/.test(sid)) continue;
                     surfRefs++;
-                    if (!inv.surfaces.has(sid)) {
+                    if (!inv.surfaces.has(nid(sid))) {
                         diags.push(diag(f.path, f.text, new RegExp(`<cell\\b[^>]*\\bid\\s*=\\s*["']${escapeRe(id)}["'][^>]*>`), `Cell ${id} region uses surface ${sid}, which is not defined.`, 'error', 'workspace.unknown-surface'));
                     }
                 }
@@ -271,7 +283,7 @@ export function validateOpenmcXmlProject(files: XmlFile[], fs: FileSystemLike): 
             const fill = attr(t.tag, 'fill');
             if (fill) {
                 fillRefs++;
-                if (!inv.universes.has(fill) && !inv.lattices.has(fill)) {
+                if (!inv.universes.has(nid(fill)) && !inv.lattices.has(nid(fill))) {
                     diags.push(diag(f.path, f.text, new RegExp(`<cell\\b[^>]*\\bid\\s*=\\s*["']${escapeRe(id)}["'][^>]*>`), `Cell ${id} fills with universe ${fill}, but no cell or lattice declares it.`, 'error', 'workspace.unknown-universe'));
                 }
             }
@@ -282,12 +294,12 @@ export function validateOpenmcXmlProject(files: XmlFile[], fs: FileSystemLike): 
                 const uni = /<universes\s*>([^<]*)<\/universes\s*>/i.exec(b.body)?.[1] ?? '';
                 for (const u of new Set(uni.trim().split(/\s+/).filter(Boolean))) {
                     fillRefs++;
-                    if (!inv.universes.has(u)) {
+                    if (!inv.universes.has(nid(u))) {
                         diags.push(diag(f.path, f.text, new RegExp(`<${name}\\b[^>]*\\bid\\s*=\\s*["']${escapeRe(id)}["']`), `Lattice ${id} places universe ${u}, which no cell declares.`, 'error', 'workspace.unknown-universe'));
                     }
                 }
                 const outer = /<outer\s*>([^<]*)<\/outer\s*>/i.exec(b.body)?.[1]?.trim();
-                if (outer && !inv.universes.has(outer)) {
+                if (outer && !inv.universes.has(nid(outer))) {
                     diags.push(diag(f.path, f.text, new RegExp(`<${name}\\b[^>]*\\bid\\s*=\\s*["']${escapeRe(id)}["']`), `Lattice ${id} outer universe ${outer} is not declared.`, 'error', 'workspace.unknown-universe'));
                 }
             }
@@ -574,7 +586,7 @@ function validateMcnp(input: WorkspaceInput): WorkspaceReport {
 
 function serpentCards(text: string): { kind: string; tokens: string[]; index: number }[] {
     const clean = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/%[^\n]*/g, (m) => ' '.repeat(m.length));
-    const KEYWORDS = /^(surf|cell|lat|pin|trans|mat|therm|set|include|plot|mesh|det|nest|dtrans|src|wwin|ene|div|branch|coef|mix)\b/i;
+    const KEYWORDS = /^(surf|cell|lat|pin|trans|mat|therm|set|include|plot|mesh|det|nest|pbed|solid|umsh|dtrans|src|wwin|ene|div|branch|coef|mix)\b/i;
     const out: { kind: string; tokens: string[]; index: number }[] = [];
     let cur: { kind: string; tokens: string[]; index: number } | null = null;
     let offset = 0;
@@ -637,7 +649,7 @@ function validateSerpent(input: WorkspaceInput): WorkspaceReport {
         if (c.kind === 'therm') therms.add(c.tokens[1]);
         if (c.kind === 'surf') surfs.add(c.tokens[1]);
         if (c.kind === 'cell' && c.tokens[2]) universes.add(c.tokens[2]);
-        if (c.kind === 'pin' || c.kind === 'lat' || c.kind === 'nest') universes.add(c.tokens[1]);
+        if (c.kind === 'pin' || c.kind === 'lat' || c.kind === 'nest' || c.kind === 'pbed' || c.kind === 'solid' || c.kind === 'umsh') universes.add(c.tokens[1]);
     }
     let matRefs = 0, uniRefs = 0, surfRefs = 0, thermRefs = 0;
     for (const c of cards) {
@@ -733,7 +745,8 @@ function validateScone(input: WorkspaceInput): WorkspaceReport {
     const root = path.resolve(input.rootPath);
     const dir = path.dirname(root);
     const text = readText(input, root) ?? '';
-    const clean = text.replace(/!.*$/gm, (m) => ' '.repeat(m.length));
+    // SCONE comments: `!` and `//` to end of line (same-length blanks keep offsets).
+    const clean = text.replace(/!.*$/gm, (m) => ' '.repeat(m.length)).replace(/\/\/.*$/gm, (m) => ' '.repeat(m.length));
     const diags: WorkspaceDiag[] = [];
     const verified: string[] = [];
     const notes: string[] = [];
@@ -782,7 +795,8 @@ function validateScone(input: WorkspaceInput): WorkspaceReport {
     let matRefs = 0, uniRefs = 0, surfRefs = 0, cellRefs = 0;
     const usedMats = new Set<string>();
     const flagMat = (name: string, where: string): void => {
-        if (!name || /^u<\d+>$/.test(name)) return;
+        // `void` is SCONE's built-in empty fill, not a materials { } entry.
+        if (!name || /^u<\d+>$/.test(name) || name === 'void') return;
         matRefs++;
         usedMats.add(name);
         if (materials.size && !materials.has(name)) {
@@ -813,7 +827,11 @@ function validateScone(input: WorkspaceInput): WorkspaceReport {
     for (const m of uniBody.matchAll(/\bfill\s+u<\s*(\d+)\s*>\s*;/g)) flagUni(m[1], 'The rootUniverse');
     for (const m of uniBody.matchAll(/\bfill\s+([A-Za-z_]\w*)\s*;/g)) flagMat(m[1], 'The rootUniverse');
     for (const m of uniBody.matchAll(/\bmap\s*\(([^)]*)\)/g)) {
-        for (const id of new Set(m[1].trim().split(/\s+/).filter(Boolean))) flagUni(id, 'A latUniverse map');
+        for (const raw of new Set(m[1].trim().split(/\s+/).filter(Boolean))) {
+            const id = /^u<\s*(\d+)\s*>$/.exec(raw)?.[1] ?? raw;
+            if (!/^\d+$/.test(id)) continue;
+            flagUni(id, 'A latUniverse map');
+        }
     }
     for (const m of uniBody.matchAll(/\bcells\s*\(([^)]*)\)/g)) {
         for (const id of m[1].trim().split(/\s+/).filter(Boolean)) {

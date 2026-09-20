@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<geometry>
+  <surface id="1" type="sphere" coeffs="0 0 0 50" boundary="vacuum"/>
+  <dagmc_universe id="7" filename="core.h5m"/>
+  <cell id="1" material="1" region="-1" fill="7"/>
+</geometry>

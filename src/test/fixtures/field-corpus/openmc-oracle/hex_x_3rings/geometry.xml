@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<geometry>
+  <cell id="1" fill="50" region="-2" universe="0"/>
+  <cell id="9" material="9" universe="9"/>
+  <cell id="100" material="100" universe="100"/>
+  <cell id="101" material="101" universe="101"/>
+  <cell id="102" material="102" universe="102"/>
+  <cell id="103" material="103" universe="103"/>
+  <cell id="104" material="104" universe="104"/>
+  <cell id="105" material="105" universe="105"/>
+  <cell id="106" material="106" universe="106"/>
+  <cell id="107" material="107" universe="107"/>
+  <cell id="108" material="108" universe="108"/>
+  <cell id="109" material="109" universe="109"/>
+  <cell id="110" material="110" universe="110"/>
+  <cell id="111" material="111" universe="111"/>
+  <cell id="112" material="112" universe="112"/>
+  <cell id="113" material="113" universe="113"/>
+  <cell id="114" material="114" universe="114"/>
+  <cell id="115" material="115" universe="115"/>
+  <cell id="116" material="116" universe="116"/>
+  <cell id="117" material="117" universe="117"/>
+  <cell id="118" material="118" universe="118"/>
+  <hex_lattice id="50" n_rings="3" orientation="x">
+    <pitch>1.5</pitch>
+    <outer>9</outer>
+    <center>0.3 -0.2</center>
+    <universes>
+      108   109   110
+   107   116   117   111
+106   115   118   112   100
+   105   114   113   101
+      104   103   102</universes>
+  </hex_lattice>
+  <surface id="2" type="sphere" boundary="vacuum" coeffs="0.0 0.0 0.0 40.0"/>
+</geometry>

@@ -4,9 +4,11 @@ import * as vscode from 'vscode';
 import { detectMonteCarloLanguage, type MonteCarloLanguage } from '../util/detectLanguage';
 import { deckSourceOf, notebookOfCell } from '../util/deckSource';
 import { parseDeckToModel } from '../preview/engineDispatch';
+import { parseMcnpGeometry } from '../preview/mcnpGeometry';
 import { looksLikeOpenmcXml, parseOpenmcGeometryXml } from '../preview/openmcGeometry';
 import { exportOpenmcGeometryXml } from '../preview/openmcNative/exportGeometry';
 import { isCaptureNoise } from '../preview/openmcNative/captureNoise';
+import { resolveDeckProject } from '../util/loadModel';
 import { buildCellMapFromGeometry } from './fromGeometry';
 import { buildCellMap, type CellMapModel } from './model';
 import { pickDeck } from './pickDeck';
@@ -82,7 +84,8 @@ function emptyModel(language: CellMapModel['language'] = 'mcnp'): CellMapModel {
 
 function siblingOpenmcXml(fsPath: string): string | null {
     const dir = path.dirname(fsPath);
-    for (const name of ['geometry.xml', 'model.xml']) {
+    // OpenMC runs model.xml when both exist.
+    for (const name of ['model.xml', 'geometry.xml']) {
         const p = path.join(dir, name);
         try {
             if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
@@ -262,10 +265,18 @@ export class CellMapPanel {
         // A notebook cell maps the whole notebook; remember the notebook.
         this._uri = src.uri;
         const lang = src.language;
-        const text = src.text;
+        const project = resolveDeckProject(src);
+        const text = project?.xmlText ?? project?.text ?? src.text;
         let model: CellMapModel;
         try {
-            model = parseCellMap(text, lang);
+            if (lang === 'mcnp' && project && project.files.length > 1) {
+                model = buildCellMapFromGeometry(parseMcnpGeometry(project.text), 'mcnp');
+            } else if (lang === 'openmc' && project?.xmlText) {
+                model = buildCellMapFromGeometry(parseOpenmcGeometryXml(project.xmlText), 'openmc');
+            } else {
+                model = parseCellMap(text, lang);
+            }
+            if (project?.warnings.length) model.warnings = [...project.warnings, ...model.warnings];
         } catch (err) {
             model = emptyModel(lang);
             model.warnings.push(

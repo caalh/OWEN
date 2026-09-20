@@ -5,7 +5,94 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.8] - 2026-09-20
+
+This release exists because people ran OWEN on their real decks and told us
+what broke — thank you to Lubomír Bureš (Saltfoss Energy) for the LinkedIn
+report on multi-file decks and unrecognized universes that set off the whole
+field-corpus campaign, and to `b-shaffer` and Cibi Sundaram for the GitHub
+issues that shaped earlier fixes.
+
+### Added
+
+- **Field corpus for the geometry tools.** Cell Map, Check Geometry, 3D, cell
+  volumes, Compare, and Convert now join Serpent `include`, MCNP `read`/`copy`,
+  and OpenMC sibling `model.xml` / `geometry.xml` / local Python imports the
+  way Validate Workspace already did. A researcher deck that keeps pins in a
+  second file no longer reports those universes as unrecognized. Headless
+  gate over 50 decks (our prebuilts, frozen fixtures, MIT decks from
+  openmc-dev/openmc, openmc_mcnp_adapter and CambridgeNuclear/SCONE):
+  `npm run field-corpus:fetch` then `npm run verify:field-corpus`. How to add
+  a deck: `docs/FIELD_CORPUS.md`.
+- **OpenMC `<hex_lattice>` is expanded exactly** — both orientations, `outer`,
+  `n_axial`, attribute or child-element fields, and the visual raster order
+  the XML is written in. Verified point-for-point against OpenMC 0.15.3's own
+  `Geometry.find()` on 13 decks / 43 000 points (the VVER-1000 assembly from
+  the OpenMC regression tests included); four of those oracles are frozen as
+  unit tests.
+- **Serpent `lat … 9` vertical stacks** expand into z layers (last layer open
+  above, nothing below the first z, xy shift only — the Serpent manual's
+  definition). Other lattice types, `nest`, `pbed`, `solid`, `umsh` are
+  registered by name so a `fill` of them is a named skip, never an unknown
+  universe.
+- **3D draws lattices the pin fast path cannot express** (OpenMC XML
+  lattices and hex lattices, Serpent stacks, SCONE lattices of cellUniverses,
+  a homogenised checkerboard): the exact model's lattice fills are instanced
+  through the CSG engine, each element clipped to its window, with an
+  element budget instead of an empty stage.
+
+### Fixed
+
+- **OpenMC `hex_lattice` and `dagmc_universe` are named universes.** A
+  `fill="id"` pointing at a hex lattice or a DAGMC mesh is no longer an
+  unknown universe. DAGMC is skipped by name, not invented as CSG. A
+  lattice's `<outer>` universe is placed, not "Not placed anywhere".
+- **Serpent `rect`** is treated as `cuboid` with a diagnostic naming the real
+  card.
+- **3D no longer draws a 0.4 cm placeholder pin** when a lattice was declared
+  but could not be expanded. Sibling XML is preferred; otherwise the view
+  stays empty with the skip named.
+- **MCNP `j LIKE n BUT …` cells are real cells** on the Cell Map and in the
+  reference index (material, region and universe copied; `BUT` keywords
+  applied). A `#j` complement of one no longer reads as "no cell defines".
+- **Validate Workspace false errors on legal input:** `u=-n` (untruncated
+  lattice universe) is universe n, not an undefined universe; `+n` / `*n`
+  white and reflecting surface cards define surface n; OpenMC zero-padded
+  ids (`id="01"`) match `material="1"`; SCONE `//` comments are ignored and
+  `void` is a built-in fill, not a missing material.
+- **SCONE spherical-border decks (Jezebel, Godiva) no longer report half the
+  sampled points as lost.** The rootUniverse border is the problem boundary
+  (`boundary (…)`), and a bare-material root gets the same outside cell as a
+  `u<N>` root.
+- **3D Geometry Preview is offered on OpenMC XML files.** The command was
+  registered for the xml language but missing from the OWEN editor menus, so
+  a `geometry.xml` / `model.xml` had Cell Map and Check Geometry in the
+  dropdown but not 3D (field-day report, Sep 2026).
+- **Zero-padded ids in the live XML diagnostics.** The Problems-panel
+  validator for `geometry.xml` compared raw attribute strings, so a
+  materials.xml with `id="01"` flagged every `material="1"` cell as
+  undefined (seen on a VVER-1000 deck). Ids are now compared as integers for
+  materials, surfaces, and duplicate detection — matching how OpenMC reads
+  them and what Validate Workspace already did.
+- **A Python deck whose lattice map cannot be reconstructed falls back to
+  its sibling XML in 3D.** Before, a script that builds its lattice with a
+  comprehension kept the (empty) text fast path and told the user to open
+  the XML themselves, even when `geometry.xml` sat next to the script.
+- **Serpent and SCONE lattices instanced through the CSG engine keep their
+  material names.** The instancing path passed an empty material table, so a
+  vertical stack rendered as one "Structure"-colored column instead of
+  steel plug / fuel / plenum layers with per-material colors.
+- **A filled universe is clipped to the region of the cell that fills it.**
+  The CSG instancer carried lattice element boxes but ignored plain fill
+  cells' own plane bounds, so a Serpent `lat … 9` layer cell (z ≥ 5, z < 45)
+  drew its pin universe's infinite cylinders over the full column height —
+  steel plug, fuel, and plenum all stacked full-length on top of each other.
+  Fill descendants now clip to the cell region's plane box (union over DNF
+  terms, curved constraints conservatively ignored).
+- **The `showcase.i` demo deck really is overlap-free now.** Its two
+  perpendicular zircaloy channels (`c/x` at z=8, `c/y` at z=8) crossed near
+  (−14, 14, 8); Check Geometry correctly reported the overlap. The y-channel
+  moved to z=−8.
 
 ## [1.4.7] - 2026-09-17
 

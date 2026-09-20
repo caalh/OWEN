@@ -1174,7 +1174,7 @@ function tryCsgScene(
         for (const w of model.warnings) warnings.push(w);
         for (const w of scene.warnings) warnings.push(w);
         for (const n of scene.notes) notes.push(n);
-        notes.push(`Exact-geometry engine: ${scene.cylinders.length} primitive(s) from ${model.cells.size} cell(s) (no lattice hierarchy in this deck).`);
+        notes.push(`Exact-geometry engine: ${scene.cylinders.length} primitive(s) from ${model.cells.size} cell(s).`);
         return { cylinders: scene.cylinders, warnings, notes };
     } catch (err) {
         warnings.push(`Exact-geometry engine failed (${err instanceof Error ? err.message : String(err)}); fell back to bare surfaces.`);

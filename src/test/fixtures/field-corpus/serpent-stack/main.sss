@@ -1,0 +1,31 @@
+% Vertical stack (lat type 9): plug / fuel / plenum, then a square lattice
+% of that column. lat 9 syntax: lat U 9 X0 Y0 NL Z1 U1 Z2 U2 ...
+pin pf
+UO2    0.40
+Zirc   0.45
+water
+pin pp
+Zirc   0.45
+water
+pin pe
+steel  0.45
+water
+
+lat col 9 0.0 0.0 3
+  0.0   pe
+  5.0   pf
+ 45.0   pp
+
+lat core 1 0.0 0.0 2 2 1.26
+col col
+col col
+
+surf outer cuboid -1.26 1.26 -1.26 1.26 0.0 55.0
+cell world 0 fill core -outer
+cell grave 0 outside outer
+
+mat UO2   -10.4 92235.80c 0.04 92238.80c 0.96 8016.80c 2.0
+mat Zirc  -6.55 40090.80c 1.0
+mat steel -8.0  26056.80c 1.0
+mat water -0.74 1001.80c 2.0 8016.80c 1.0
+set pop 200 20 50

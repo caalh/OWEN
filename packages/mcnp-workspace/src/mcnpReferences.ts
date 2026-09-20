@@ -142,7 +142,8 @@ function classify(text: string): CardKind {
     if (/^(?:mt|mx)\d+/.test(first)) return 'matdata';
     // tr{n}/*tr{n} coordinate-transformation cards define a transform id.
     if (/^\*?tr\d+$/.test(first)) return 'transform';
-    if (/^\*?\d+$/.test(tokens[0])) {
+    // `*n` (specular) and `+n` (white) prefixes mark boundary surfaces (§5.3.1).
+    if (/^[*+]?\d+$/.test(tokens[0])) {
         const t1 = (tokens[1] ?? '').toLowerCase();
         const t2 = (tokens[2] ?? '').toLowerCase();
         if (SURFACE_MNEMONICS.has(t1)) return 'surface';
@@ -324,7 +325,9 @@ export function buildMcnpReferenceIndex(text: string): McnpReferenceIndex {
 
         if (kind === 'surface') {
             const toks = card.text.trim().split(/\s+/);
-            const idTok = toks[0].replace(/^\*/, '');
+            // `*n` is a specular-reflecting surface, `+n` a white boundary
+            // (§5.3.1); both prefixes belong to the card, not the id.
+            const idTok = toks[0].replace(/^[*+]/, '');
             const id = parseInt(idTok, 10);
             if (Number.isNaN(id)) continue;
             let idx = 1;
@@ -362,6 +365,30 @@ export function buildMcnpReferenceIndex(text: string): McnpReferenceIndex {
         const idSpan = spanAt(card, idStart, idStart + toks[0].length) ?? { line: card.firstLine, startCol: 0, endCol: 1 };
         addDef({ kind: 'cell', id, ...idSpan, summary: cellSummary(card.text), detail: firstLine(text, idSpan.line) });
         occurrences.push({ kind: 'cell', id, ...idSpan, isDefinition: true });
+
+        // `j LIKE n BUT …` copies cell n; its only geometry reference is that
+        // cell (the BUT keywords are scanned below like any other cell's).
+        if (/^like$/i.test(toks[1] ?? '')) {
+            const srcId = parseInt(toks[2] ?? '', 10);
+            if (!Number.isNaN(srcId)) {
+                const srcStart = card.text.indexOf(toks[2], idStart + toks[0].length);
+                const srcSpan = spanAt(card, srcStart, srcStart + toks[2].length);
+                if (srcSpan) occurrences.push({ kind: 'cell', id: srcId, ...srcSpan, isDefinition: false, cellContext: id });
+            }
+            const params = scanParams(card);
+            if (params.u) {
+                const u = params.u.value;
+                const isFirst = !universeFirstCell.has(u);
+                if (isFirst) universeFirstCell.set(u, id);
+                occurrences.push({ kind: 'universe', id: u, ...params.u.span, isDefinition: isFirst, cellContext: id });
+                if (!universeCells.has(u)) universeCells.set(u, []);
+                universeCells.get(u)!.push(id);
+            }
+            if (params.trcl) occurrences.push({ kind: 'transform', id: params.trcl.value, ...params.trcl.span, isDefinition: false, cellContext: id });
+            if (params.fillSingle) occurrences.push({ kind: 'universe', id: params.fillSingle.value, ...params.fillSingle.span, isDefinition: false, cellContext: id });
+            cellRecords.push({ id, line: card.firstLine, matId: NaN, u: params.u?.value ?? null, lat: params.lat?.value ?? null, boundingSurfaces: [], hasFillArray: false });
+            continue;
+        }
 
         // Material reference (2nd token), skipping void (0).
         if (!Number.isNaN(matId) && matId !== 0) {
@@ -503,7 +530,9 @@ function scanParams(card: Card): ParamScan {
         const valEnd = i + 1 < keys.length ? keys[i + 1].matchStart : text.length;
         if (k.key === 'u') {
             const ints = intsIn(k.valStart, valEnd);
-            if (ints.length) out.u = ints[0];
+            // `u=-n` is universe n whose cells are not truncated by the
+            // lattice window (§5.5.3); the sign is a flag, not part of the id.
+            if (ints.length) out.u = { value: Math.abs(ints[0].value), span: ints[0].span };
         } else if (k.key === 'lat') {
             const ints = intsIn(k.valStart, valEnd);
             if (ints.length) out.lat = ints[0];

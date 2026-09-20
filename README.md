@@ -276,6 +276,25 @@ for Radiation Transport Modeling*, PNNL. https://doi.org/10.2172/1782721 — via
 - **GROVES** — the companion desktop editor for the same input languages.
 - **[NICHOLS](https://github.com/caalh/nichols)** — Sublime Text and Notepad++ packages for the same languages.
 
+## Thanks to the people who reported real problems
+
+OWEN gets better when people run it on their actual decks and say what broke.
+Some fixes in recent releases trace directly to:
+
+- **[b-shaffer](https://github.com/b-shaffer)** — GitHub issues on the MCNP
+  line-length limit, non-cylinder rendering in the geometry preview, layer-tab
+  scrolling, macrobody support in the converter, and default material-library
+  interpretation.
+- **Cibi Sundaram** ([cibi-sundaram](https://github.com/cibi-sundaram)) —
+  the MCNP 6.3.1 `READ` card report.
+- **Lubomír Bureš** (Saltfoss Energy) — feedback on the geometry tools against
+  real multi-file decks, which set off the field-corpus release: include-following
+  in every geometry tool, exact OpenMC hex lattices, Serpent vertical stacks, and
+  honest skips instead of invented geometry.
+
+Found something wrong? [Open an issue](https://github.com/caalh/owen/issues) —
+reports with a deck attached get fixed fastest.
+
 ## License
 
 [MIT](./LICENSE) © 2026 BelvoirDynamics.

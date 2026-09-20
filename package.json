@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Write, check, convert, and run MCNP, OpenMC, Serpent, and SCONE in VS Code or Cursor. Language-server diagnostics, 3D geometry preview, converters between the four codes, results viewer, lattice and input builders, and the 411-material PNNL compendium — fully offline.",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -496,7 +496,7 @@
         {
           "command": "owen.openGeometryPreview",
           "group": "2_build@2",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
           "command": "owen.renderWithOpenmc",
@@ -652,7 +652,7 @@
         {
           "command": "owen.openGeometryPreview",
           "group": "2_build@2",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
           "command": "owen.renderWithOpenmc",
@@ -1091,6 +1091,8 @@
     "verify:run": "tsc -p . && node ./scripts/verify-run.mjs",
     "verify:converter": "tsc -p . && node ./scripts/verify-converter.mjs",
     "verify:webview-3d": "tsc -p . && node ./scripts/verify-webview-3d.mjs",
+    "field-corpus:fetch": "node ./scripts/field-corpus/fetch.mjs",
+    "verify:field-corpus": "tsc -p . && node ./scripts/verify-field-corpus.mjs",
     "verify:version": "node ./scripts/verify-version-listings.mjs",
     "sync:version": "node ./scripts/verify-version-listings.mjs --write",
     "package": "vsce package",

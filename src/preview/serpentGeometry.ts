@@ -131,7 +131,7 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
         .split(/\r?\n/)
         .map((l) => l.replace(/%.*$/, '').replace(/#\s.*$/, ''));
 
-    const KEYWORDS = /^(surf|cell|lat|pin|trans|mat|therm|set|include|plot|mesh|det|nest|dtrans|src|wwin|ene|div|branch|coef)\b/i;
+    const KEYWORDS = /^(surf|cell|lat|pin|trans|mat|therm|set|include|plot|mesh|det|nest|pbed|solid|umsh|dtrans|src|wwin|ene|div|branch|coef)\b/i;
     interface Card { kind: string; tokens: string[] }
     const cards: Card[] = [];
     let current: string[] | null = null;
@@ -150,10 +150,32 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
     // Pass 1: transforms (surface translations only; rotations warn).
     const surfaceTransforms = new Map<string, Transform>();
     for (const card of cards) {
+        if (card.kind === 'pbed' || card.kind === 'solid' || card.kind === 'umsh' || card.kind === 'nest') {
+            const name = card.tokens[1] ?? '';
+            warnings.push(card.kind === 'nest'
+                ? `nest ${name}: nested universe definitions are not expanded by the engine.`
+                : `${card.kind} ${name}: not expanded by the engine (CAD/mesh geometry).`);
+            if (name) {
+                const uid = universeId(name);
+                names.cells.set(nextCell, `${card.kind} ${name} (not expanded)`);
+                cells.set(nextCell, {
+                    id: nextCell++,
+                    material: 0, density: null, region: null,
+                    universe: uid, fill: null, lat: 0, trcl: null,
+                    surfaceOrder: [], likeButOf: null,
+                });
+            }
+            continue;
+        }
         if (card.kind !== 'trans') continue;
         const t = card.tokens;
+        const kind = (t[1] ?? '').toLowerCase();
+        if (kind === 'u' || kind === 'univ') {
+            warnings.push(`trans u ${t[2] ?? ''}: universe transforms are not applied by the preview engine.`);
+            continue;
+        }
         // trans s <name> x y z [...]   (also legacy: trans <name> x y z)
-        const isSurf = t[1]?.toLowerCase() === 's';
+        const isSurf = kind === 's';
         const name = isSurf ? t[2] : t[1];
         const nums = t.slice(isSurf ? 3 : 2).map(Number).filter((v) => Number.isFinite(v));
         if (!name || nums.length < 3) continue;
@@ -297,27 +319,99 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
         }
     }
 
+    // A lattice universe that is named but cannot be expanded still has to
+    // exist, so a `fill <name>` elsewhere is a named skip rather than an
+    // unknown universe. The cell has no region: nothing is drawn for it.
+    const placeholderUniverse = (uName: string, label: string, lat: 0 | 1 | 2): void => {
+        const uid = universeId(uName);
+        names.cells.set(nextCell, label);
+        cells.set(nextCell, {
+            id: nextCell++,
+            material: 0, density: null, region: null,
+            universe: uid, fill: null, lat, trcl: null,
+            surfaceOrder: [], likeButOf: null,
+        });
+    };
+
     // Pass 4: lattices → synthesized lattice cells with window surfaces.
     for (const card of cards) {
         if (card.kind !== 'lat') continue;
         const t = card.tokens;
-        // lat <u> <type> <x0> <y0> <nx> <ny> <pitch> <entries…>
         const uName = t[1];
         const type = parseInt(t[2] ?? '', 10);
         if (!uName || !Number.isFinite(type)) continue;
-        if (type !== 1 && type !== 2 && type !== 3) {
-            warnings.push(`lat ${uName}: lattice type ${type} is not expanded by the engine (types 1/2/3 only).`);
+
+        // lat <u> 9 <x0> <y0> <nl> <z1> <u1> … <znl> <unl>: vertical stack.
+        // Layer n fills z in [z_n, z_{n+1}); the last layer extends upward
+        // without bound and the space below z_1 is undefined (Serpent input
+        // manual, lat type 9). Universes are shifted to (x0, y0) in xy only.
+        if (type === 9) {
+            const x0 = Number(t[3]);
+            const y0 = Number(t[4]);
+            const nl = parseInt(t[5] ?? '', 10);
+            if (![x0, y0].every(Number.isFinite) || !(nl > 0) || t.length < 6 + 2 * nl) {
+                warnings.push(`lat ${uName}: vertical stack (type 9) needs x0 y0 NL and NL (z, universe) pairs; not expanded.`);
+                placeholderUniverse(uName, `lat ${uName} (type 9, not expanded)`, 0);
+                continue;
+            }
+            const uid = universeId(uName);
+            const zs: number[] = [];
+            const fills: string[] = [];
+            for (let n = 0; n < nl; n++) {
+                zs.push(Number(t[6 + 2 * n]));
+                fills.push(t[7 + 2 * n]);
+            }
+            if (!zs.every(Number.isFinite)) {
+                warnings.push(`lat ${uName}: vertical stack has a non-numeric z; not expanded.`);
+                placeholderUniverse(uName, `lat ${uName} (type 9, not expanded)`, 0);
+                continue;
+            }
+            const zPlane = (z: number): number => {
+                const id = nextSynthSurface++;
+                surfaces.set(id, { id, mnemonic: 'pz', shape: { kind: 'plane', n: [0, 0, 1], d: z }, tr: null, boundary: 'none' });
+                return id;
+            };
+            const planeIds = zs.map(zPlane);
+            const tr: Transform | null = Math.abs(x0) > 1e-12 || Math.abs(y0) > 1e-12
+                ? { o: [x0, y0, 0], m: null, origin: 1 }
+                : null;
+            for (let n = 0; n < nl; n++) {
+                const tokens = [`${planeIds[n]}`];
+                if (n + 1 < nl) tokens.push(`-${planeIds[n + 1]}`);
+                const { region, order } = parseRegionExpression(tokens);
+                names.cells.set(nextCell, `lat ${uName} layer ${n + 1} (z ≥ ${zs[n]})`);
+                cells.set(nextCell, {
+                    id: nextCell++,
+                    material: 0, density: null, region,
+                    universe: uid,
+                    fill: { universe: universeId(fills[n]), grid: null, tr },
+                    lat: 0, trcl: null, surfaceOrder: order, likeButOf: null,
+                });
+            }
             continue;
         }
+
+        if (type !== 1 && type !== 2 && type !== 3) {
+            warnings.push(`lat ${uName}: lattice type ${type} is not expanded by the engine (types 1/2/3 and the type-9 vertical stack are).`);
+            placeholderUniverse(uName, `lat ${uName} (type ${type}, not expanded)`, 0);
+            continue;
+        }
+
+        // lat <u> <type> <x0> <y0> <nx> <ny> <pitch> <entries…>
         const x0 = Number(t[3]);
         const y0 = Number(t[4]);
         const nx = parseInt(t[5] ?? '', 10);
         const ny = parseInt(t[6] ?? '', 10);
         const pitch = Number(t[7]);
         const entries = t.slice(8);
-        if (![x0, y0, pitch].every(Number.isFinite) || !(nx > 0) || !(ny > 0)) continue;
+        if (![x0, y0, pitch].every(Number.isFinite) || !(nx > 0) || !(ny > 0)) {
+            warnings.push(`lat ${uName}: could not read x0 y0 nx ny pitch; not expanded.`);
+            placeholderUniverse(uName, `lat ${uName} (not expanded)`, type === 1 ? 1 : 2);
+            continue;
+        }
         if (nx * ny > 5_000_000) {
             warnings.push(`lat ${uName}: ${nx}×${ny} is too large to expand; skipped.`);
+            placeholderUniverse(uName, `lat ${uName} (too large)`, type === 1 ? 1 : 2);
             continue;
         }
 
@@ -330,7 +424,8 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
         if (synth) { cells.set(synth.id, synth); names.cells.set(synth.id, `lat ${uName}`); }
     }
 
-    // Universe index.
+    // Universe index. Only universes that own a cell are listed: a `fill`
+    // naming a universe no card defines must stay a dangling-fill warning.
     const universes = new Map<number, number[]>();
     for (const cell of cells.values()) {
         if (!universes.has(cell.universe)) universes.set(cell.universe, []);
@@ -426,6 +521,9 @@ function buildSerpentShape(type: string, p: number[], name: string, warnings: st
                 ],
             };
         }
+        case 'rect':
+            warnings.push(`Surface ${name} (rect): Serpent's surface type is cuboid, not rect; treating this card as cuboid.`);
+            // fall through
         case 'cuboid': {
             if (!need(6)) return null;
             const [x1, x2, y1, y2, z1, z2] = p;

@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<geometry>
+  <surface id="1" type="z-cylinder" coeffs="0 0 0.4"/>
+  <surface id="2" type="z-cylinder" coeffs="0 0 0.45"/>
+  <surface id="3" type="z-cylinder" coeffs="0 0 6.0" boundary="vacuum"/>
+  <cell id="1" universe="1" material="1" region="-1"/>
+  <cell id="2" universe="1" material="2" region="1 -2"/>
+  <cell id="3" universe="1" material="2" region="2"/>
+  <cell id="4" universe="2" material="2"/>
+  <cell id="10" region="-3" fill="5"/>
+  <hex_lattice id="5" n_rings="3" name="hex-core">
+    <center>0.0 0.0</center>
+    <pitch>1.26</pitch>
+    <outer>2</outer>
+    <universes>
+          1
+        1   1
+      1   1   1
+        1   1
+      1   1   1
+        1   1
+      1   1   1
+        1   1
+          1
+    </universes>
+  </hex_lattice>
+</geometry>

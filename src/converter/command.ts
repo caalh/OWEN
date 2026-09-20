@@ -10,6 +10,7 @@ import {
 } from './index';
 import { showRosettaDiff } from './rosettaView';
 import { deckSourceOf } from '../util/deckSource';
+import { resolveDeckProject } from '../util/loadModel';
 
 const TARGET_LABELS: Record<TargetLanguage, string> = {
     mcnp: 'MCNP input deck',
@@ -25,9 +26,11 @@ export function registerConvertDeck(context: vscode.ExtensionContext): vscode.Di
             vscode.window.showWarningMessage('OWEN: open the deck you want to convert first.');
             return;
         }
-        // A notebook cell converts the whole notebook's model.
+        // A notebook cell converts the whole notebook's model. File decks
+        // join Serpent include / MCNP READ so pins in a second file convert.
         const nbSrc = deckSourceOf(editor.document);
-        const text = nbSrc?.fromNotebook ? nbSrc.text : editor.document.getText();
+        const project = nbSrc ? resolveDeckProject(nbSrc) : null;
+        const text = project?.text ?? (nbSrc?.fromNotebook ? nbSrc.text : editor.document.getText());
 
         let source: SourceLanguage | null = null;
         const langId = editor.document.languageId;

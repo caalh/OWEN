@@ -201,7 +201,7 @@ export interface FoundCell {
     latticeIndices: [number, number, number][];
 }
 
-interface LatticeBasis {
+export interface LatticeBasis {
     origin: Vec3;   // center of element (0,0,0)
     a: Vec3[];      // index basis vectors (1–3 of them)
     /**
@@ -220,7 +220,7 @@ interface LatticeBasis {
  */
 const latticeBasisCache = new WeakMap<McnpGeometryModel, Map<number, LatticeBasis | null>>();
 
-function cachedLatticeBasis(model: McnpGeometryModel, cell: McnpCell): LatticeBasis | null {
+export function cachedLatticeBasis(model: McnpGeometryModel, cell: McnpCell): LatticeBasis | null {
     let perModel = latticeBasisCache.get(model);
     if (!perModel) {
         perModel = new Map();

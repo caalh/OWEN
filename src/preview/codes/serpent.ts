@@ -563,7 +563,9 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     }
     if (cylinders.length === 0) {
         const csg = trySerpentCsg(text, warnings, notes);
-        if (csg) return csg;
+        // Keep the pin count the fast path measured: the LOD budget and the
+        // legend still describe this deck as N pins, drawn by the exact engine.
+        if (csg) return { ...csg, fidelity: { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial } };
         if (/\bsurf\b/.test(text) || /\bcell\b/.test(text)) {
             warnings.push('Could not expand any `pin`, `lat`, or `cell`/`surf` geometry into drawable cylinders. Check that pins reference `cyl` surfaces and lattices reference defined universes.');
         } else {
@@ -579,7 +581,13 @@ function trySerpentCsg(text: string, warnings: string[], notes: string[]): Parse
     try {
         const model = parseSerpentGeometry(text);
         if (model.cells.size === 0) return null;
-        const scene = buildCsgScene(model, new Map());
+        // Real material names → layer categories (Fuel/Clad/Moderator/…), so
+        // an instanced lattice does not collapse into one "Structure" color.
+        const matLookup = new Map<number, { name: string; component: ComponentId }>();
+        for (const [id, name] of model.names?.materials ?? []) {
+            matLookup.set(id, { name, component: materialComponent(name) });
+        }
+        const scene = buildCsgScene(model, matLookup);
         if (scene.cylinders.length === 0) return null;
         for (const w of model.warnings) warnings.push(w);
         for (const w of scene.warnings) warnings.push(w);

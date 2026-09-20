@@ -239,10 +239,14 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
                 const um = fillRaw.match(/u<\s*(\d+)\s*>/);
                 if (um) rootFill = parseInt(um[1], 10);
                 else if (fillRaw) {
-                    // Root filled with a bare material: a single-medium world.
+                    // Root filled with a bare material: a single-medium world
+                    // (Jezebel, Godiva). The outside of the border is the same
+                    // void cell the u<N> form gets, so box corners beyond a
+                    // spherical border are "outside", not lost.
                     const mid = materialId(fillRaw.trim());
                     const tokens = rootBorder !== null ? [`-${rootBorder}`] : [`-${infSurface()}`];
                     const parsed = parseRegionExpression(tokens);
+                    names.cells.set(nextSynthCell, 'rootUniverse');
                     cells.set(nextSynthCell, {
                         id: nextSynthCell++,
                         material: mid,
@@ -255,6 +259,15 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
                         surfaceOrder: parsed.order,
                         likeButOf: null,
                     });
+                    if (rootBorder !== null) {
+                        const { region: outRegion } = parseRegionExpression([`${rootBorder}`]);
+                        names.cells.set(nextSynthCell, 'outside border');
+                        cells.set(nextSynthCell, {
+                            id: nextSynthCell++,
+                            material: 0, density: null, region: outRegion, universe: 0,
+                            fill: null, lat: 0, trcl: null, surfaceOrder: [rootBorder], likeButOf: null,
+                        });
+                    }
                 }
                 continue;
             }
@@ -387,6 +400,19 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
         }
     }
 
+    // The rootUniverse border is the problem boundary: geometry { boundary
+    // (x- x+ y- y+ z- z+) } gives 0 = vacuum, 1 = reflective, 2 = periodic per
+    // face. The engine only needs to know the border is a boundary (points
+    // beyond it are outside the problem, not lost), so all-zero is vacuum and
+    // anything else is treated as reflecting.
+    if (rootBorder !== null) {
+        const border = surfaces.get(rootBorder);
+        const bcRaw = parenList(geomBody, 'boundary').map(Number).filter(Number.isFinite);
+        if (border) {
+            border.boundary = bcRaw.length > 0 && bcRaw.every((v) => v === 0) ? 'vacuum' : 'reflecting';
+        }
+    }
+
     // --- Root → universe 0 ----------------------------------------------------
     if (rootFill !== null) {
         const borderTokens = rootBorder !== null ? [`-${rootBorder}`] : [`-${infSurface()}`];
@@ -406,6 +432,7 @@ export function parseSconeGeometry(text: string): McnpGeometryModel {
         });
         if (rootBorder !== null) {
             const { region: outRegion } = parseRegionExpression([`${rootBorder}`]);
+            names.cells.set(nextSynthCell, 'outside border');
             cells.set(nextSynthCell, {
                 id: nextSynthCell++,
                 material: 0,

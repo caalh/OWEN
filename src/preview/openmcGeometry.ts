@@ -71,6 +71,19 @@ function innerXml(xml: string, name: string): string {
     return m ? m[1] : xml;
 }
 
+/**
+ * OpenMC's `get_elem_list` / `get_text` accept a lattice field either as an
+ * attribute on the opening tag or as a child element. The regression-test
+ * decks write `pitch="1.265 1.2"` as an attribute; `export_to_xml` writes a
+ * child. Returns undefined when neither is present (never the whole block).
+ */
+function field(open: string, block: string, name: string): string | undefined {
+    const a = attr(open, name);
+    if (a !== undefined) return a;
+    const m = block.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}\\s*>`, 'i'));
+    return m ? m[1] : undefined;
+}
+
 /** OpenMC `|` `&` `~` → the MCNP region tokens parseRegionExpression knows. */
 export function rewriteOpenmcRegion(region: string): string {
     let s = region.trim();
@@ -244,11 +257,11 @@ export function parseOpenmcGeometryXml(text: string): McnpGeometryModel {
         const latId = parseInt(attr(open, 'id') ?? '', 10);
         if (!Number.isFinite(latId)) continue;
         const lname = attr(open, 'name');
-        const pitch = nums(innerXml(block, 'pitch'));
-        const dim = nums(innerXml(block, 'dimension')).map((v) => Math.round(v));
-        const lower = nums(innerXml(block, 'lower_left'));
-        const uniIds = nums(innerXml(block, 'universes')).map((v) => Math.round(v));
-        const outer = nums(innerXml(block, 'outer'));
+        const pitch = nums(field(open, block, 'pitch') ?? '');
+        const dim = nums(field(open, block, 'dimension') ?? '').map((v) => Math.round(v));
+        const lower = nums(field(open, block, 'lower_left') ?? '');
+        const uniIds = nums(field(open, block, 'universes') ?? '').map((v) => Math.round(v));
+        const outer = nums(field(open, block, 'outer') ?? '');
         if (pitch.length < 2 || dim.length < 2 || lower.length < 2) {
             warnings.push(`OpenMC lattice ${latId}: missing pitch/dimension/lower_left; skipped.`);
             continue;
@@ -324,9 +337,195 @@ export function parseOpenmcGeometryXml(text: string): McnpGeometryModel {
             likeButOf: null,
         });
         names.cells.set(cellId, lname ? `lattice ${lname}` : `lattice ${latId}`);
+        if (lname) names.universes.set(latId, lname);
         const bucket = universes.get(latId) ?? [];
         bucket.push(cellId);
         universes.set(latId, bucket);
+    }
+
+    // <hex_lattice> is a universe id, same as <lattice>. It becomes one
+    // synthesized hex-window lattice cell whose fill grid is indexed in
+    // OpenMC's own skewed basis, so the shared lattice math places every ring
+    // element. Conventions are taken from openmc/lattice.py (HexLattice):
+    //   orientation 'y' (default): element (x, α) sits at
+    //       center + (√¾·p·x, (½·x + α)·p)  → basis 30° and 90°
+    //   orientation 'x': element (α, y) sits at
+    //       center + ((α + ½·y)·p, √¾·p·y)  → basis 0° and 60°
+    //   The <universes> text is the visual diagram in raster order (top row
+    //   first, left to right), NOT ring order; from_xml_element walks the
+    //   diagram row by row, and that walk is reproduced here verbatim.
+    //   Axial level 0 is the bottom: iz = floor(z/pz + ½·n_axial).
+    const hexBlocks = geom.match(/<hex_lattice\b[^>]*>[\s\S]*?<\/hex_lattice\s*>/gi) ?? [];
+    for (const block of hexBlocks) {
+        const open = block.match(/<hex_lattice\b[^>]*>/i)![0];
+        const latId = parseInt(attr(open, 'id') ?? '', 10);
+        if (!Number.isFinite(latId)) continue;
+        const lname = attr(open, 'name');
+        const orientation = (field(open, block, 'orientation') ?? 'y').trim().toLowerCase() === 'x' ? 'x' : 'y';
+        const nRings = parseInt((field(open, block, 'n_rings') ?? '0').trim() || '0', 10);
+        const nAxialRaw = field(open, block, 'n_axial');
+        const nAxial = nAxialRaw !== undefined ? parseInt(nAxialRaw.trim(), 10) : 1;
+        const uniIds = nums(field(open, block, 'universes') ?? '').map((v) => Math.round(v));
+        const pitch = nums(field(open, block, 'pitch') ?? '');
+        const center = nums(field(open, block, 'center') ?? '');
+        const outerRaw = nums(field(open, block, 'outer') ?? '');
+        const outerUniverse = outerRaw.length > 0 && Number.isFinite(outerRaw[0]) ? Math.round(outerRaw[0]) : undefined;
+        const p = pitch[0] ?? 0;
+        const pz = pitch[1] ?? 0;
+        const cx = center[0] ?? 0;
+        const cy = center[1] ?? 0;
+        const cz = center[2] ?? 0;
+        const perLevel = nRings >= 1 ? 1 + 3 * nRings * (nRings - 1) : 0;
+        const registerOnly = (why: string): void => {
+            warnings.push(`OpenMC hex_lattice ${latId}: ${why} The lattice id is registered so fills are not unknown universes.`);
+            const cellId = ++synthId;
+            cells.set(cellId, {
+                id: cellId, material: 0, density: null, region: null, universe: latId,
+                fill: null, lat: 2, trcl: null, surfaceOrder: [], likeButOf: null,
+            });
+            names.cells.set(cellId, `hex_lattice ${lname ?? latId} (not expanded)`);
+            names.universes.set(latId, lname ?? `hex_lattice ${latId}`);
+            const b = universes.get(latId) ?? [];
+            b.push(cellId);
+            universes.set(latId, b);
+        };
+        if (!(nRings >= 1) || !(p > 0) || !(nAxial >= 1)) {
+            registerOnly('missing n_rings / pitch; not expanded.');
+            continue;
+        }
+        if (nAxial > 1 && !(pz > 0)) {
+            registerOnly(`n_axial=${nAxial} needs an axial pitch; not expanded.`);
+            continue;
+        }
+        if (uniIds.length < perLevel * nAxial) {
+            registerOnly(`${uniIds.length} universe entries for ${nRings} ring(s) × ${nAxial} level(s) (${perLevel * nAxial} expected); not expanded.`);
+            continue;
+        }
+
+        const R = nRings;
+        const span = 2 * R - 1;
+        const i1 = -(R - 1);
+        const total = span * span * nAxial;
+        const entries: FillEntry[] = new Array(total);
+        for (let e = 0; e < total; e++) entries[e] = { universe: outerUniverse ?? 0, tr: null };
+        const valid = (u: number, v: number): boolean => Math.max(Math.abs(u), Math.abs(v), Math.abs(-u - v)) < R;
+        const set = (u: number, v: number, z: number, uni: number): void => {
+            entries[(u - i1) + span * ((v - i1) + span * z)] = { universe: uni, tr: null };
+        };
+        let j = 0;
+        for (let z = 0; z < nAxial; z++) {
+            if (orientation === 'y') {
+                let x = 0, alpha = R - 1;
+                for (;;) {
+                    set(x, alpha, z, uniIds[j]);
+                    x += 2; alpha -= 1;
+                    if (!valid(x, alpha)) {
+                        alpha += x - 1; x = 1 - x;
+                        if (!valid(x, alpha)) {
+                            x += 2; alpha -= 1;
+                            if (!valid(x, alpha)) { j += 1; break; }
+                        }
+                    }
+                    j += 1;
+                }
+            } else {
+                let alpha = 1 - R, y = R - 1;
+                for (;;) {
+                    set(alpha, y, z, uniIds[j]);
+                    alpha += 1;
+                    if (!valid(alpha, y)) {
+                        alpha = 1 - R; y -= 1;
+                        if (y === -R) { j += 1; break; }
+                        while (!valid(alpha, y)) alpha += 1;
+                    }
+                    j += 1;
+                }
+            }
+        }
+
+        // Window: three flat pairs about `center`. The first pair's normal is
+        // the idx0 step, the second the idx1 step (§5.5.5 order the shared
+        // basis math expects); the third only closes the hexagon.
+        const start = orientation === 'y' ? 30 : 0;
+        const mkHexPlane = (n: Vec3, d: number): number => {
+            const id = ++synthId;
+            surfaces.set(id, { id, mnemonic: 'p', shape: plane(n, d), tr: null, boundary: 'none' });
+            return id;
+        };
+        const order: number[] = [];
+        const regionToks: string[] = [];
+        for (const angDeg of [start, start + 60, start + 120]) {
+            const a = (angDeg * Math.PI) / 180;
+            const hx = Math.cos(a), hy = Math.sin(a);
+            const d = hx * cx + hy * cy;
+            const hi = mkHexPlane([hx, hy, 0], d + p / 2);
+            const lo = mkHexPlane([hx, hy, 0], d - p / 2);
+            order.push(hi, lo);
+            regionToks.push(`-${hi}`, `${lo}`);
+        }
+        const element0: Vec3 = [cx, cy, 0];
+        if (nAxial > 1) {
+            const z0 = cz - 0.5 * nAxial * pz;
+            const zHi = mkHexPlane([0, 0, 1], z0 + pz);
+            const zLo = mkHexPlane([0, 0, 1], z0);
+            order.push(zHi, zLo);
+            regionToks.push(`-${zHi}`, `${zLo}`);
+            element0[2] = z0 + pz / 2;
+        }
+        const hexParsed = parseRegionExpression(tokenizeRegion(regionToks.join(' ')));
+        const hexCellId = ++synthId;
+        const fillTr = Math.abs(element0[0]) > 1e-12 || Math.abs(element0[1]) > 1e-12 || Math.abs(element0[2]) > 1e-12
+            ? { o: element0, m: null, origin: 1 as const }
+            : null;
+        cells.set(hexCellId, {
+            id: hexCellId,
+            material: 0,
+            density: null,
+            region: hexParsed.region,
+            universe: latId,
+            fill: {
+                universe: null,
+                grid: { i1, i2: R - 1, j1: i1, j2: R - 1, k1: 0, k2: nAxial - 1, entries, outer: outerUniverse },
+                tr: fillTr,
+            },
+            lat: 2,
+            trcl: null,
+            surfaceOrder: order,
+            likeButOf: null,
+        });
+        names.cells.set(hexCellId, lname ? `hex_lattice ${lname}` : `hex_lattice ${latId}`);
+        names.universes.set(latId, lname ?? `hex_lattice ${latId}`);
+        const hexBucket = universes.get(latId) ?? [];
+        hexBucket.push(hexCellId);
+        universes.set(latId, hexBucket);
+    }
+
+    for (const tag of scanTags(geom, 'dagmc_universe')) {
+        const id = parseInt(attr(tag, 'id') ?? '', 10);
+        const file = attr(tag, 'filename') ?? 'dagmc.h5m';
+        warnings.push(
+            `DAGMC universe ${Number.isFinite(id) ? id : '?'} (${file}) is CAD/mesh geometry. ` +
+            'OWEN does not tessellate DAGMC; the CSG part of the model is shown. Use OpenMC\'s plotter for the mesh.',
+        );
+        if (!Number.isFinite(id)) continue;
+        const dagCellId = ++synthId;
+        cells.set(dagCellId, {
+            id: dagCellId,
+            material: 0,
+            density: null,
+            region: null,
+            universe: id,
+            fill: null,
+            lat: 0,
+            trcl: null,
+            surfaceOrder: [],
+            likeButOf: null,
+        });
+        names.cells.set(dagCellId, `dagmc ${file} (not rendered)`);
+        names.universes.set(id, `dagmc ${file}`);
+        const dagBucket = universes.get(id) ?? [];
+        dagBucket.push(dagCellId);
+        universes.set(id, dagBucket);
     }
 
     if (cells.size === 0) {

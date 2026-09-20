@@ -143,12 +143,15 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         }
 
         const single = fuelTemplate ?? defaultTemplate('fuel');
-        const cyls = emitLayers(single.radii, single.components, 0, 0, 0, height, 'pin', undefined, single.materials);
         if (hasLattice) {
-            warnings.push('A lattice was declared but its universe map could not be expanded (it is likely built by a function or comprehension OWEN does not execute). Showing a single representative pin.');
-        } else {
-            warnings.push(OPENMC_PLACEHOLDER_WARNING);
+            warnings.push(
+                'A lattice was declared but its universe map could not be expanded (it is likely built by a function or comprehension OWEN does not execute). ' +
+                'Not drawing a placeholder pin — use sibling geometry.xml / model.xml, or "OWEN: Render with OpenMC".',
+            );
+            return { cylinders: [], warnings, notes, fidelity };
         }
+        const cyls = emitLayers(single.radii, single.components, 0, 0, 0, height, 'pin', undefined, single.materials);
+        warnings.push(OPENMC_PLACEHOLDER_WARNING);
         return { cylinders: cyls, warnings, notes, fidelity };
     }
 

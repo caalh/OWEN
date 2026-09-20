@@ -1,0 +1,26 @@
+% Hex lattice (type 2) with nx ny pitch — the form the Serpent tutorial uses.
+pin F
+UO2    0.40
+Zirc   0.45
+water
+
+surf outer hexxc 0.0 0.0 4.0
+
+cell world 0 fill 10 -outer
+cell grave 0 outside outer
+
+lat 10 2 0.0 0.0 3 3 1.26
+F F F
+F F F
+F F F
+
+mat UO2   -10.4
+  92235.80c  0.04
+  92238.80c  0.96
+  8016.80c   2.00
+mat Zirc  -6.55
+  40090.80c  1.0
+mat water -0.74
+  1001.80c   2.0
+  8016.80c   1.0
+set pop 200 20 50

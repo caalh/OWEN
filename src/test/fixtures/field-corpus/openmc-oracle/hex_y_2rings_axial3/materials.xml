@@ -1,0 +1,95 @@
+<?xml version='1.0' encoding='utf-8'?>
+<materials>
+  <material id="8" name="world">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="9" name="outer">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="100" name="m100">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="101" name="m101">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="102" name="m102">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="103" name="m103">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="104" name="m104">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="105" name="m105">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="106" name="m106">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="107" name="m107">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="108" name="m108">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="109" name="m109">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="110" name="m110">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="111" name="m111">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="112" name="m112">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="113" name="m113">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="114" name="m114">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="115" name="m115">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="116" name="m116">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="117" name="m117">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="118" name="m118">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="119" name="m119">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+  <material id="120" name="m120">
+    <density value="1.0" units="g/cm3"/>
+    <nuclide name="H1" ao="1.0"/>
+  </material>
+</materials>

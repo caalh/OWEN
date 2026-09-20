@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<materials>
+  <material id="1" name="fuel">
+    <density value="10.4" units="g/cm3"/>
+    <nuclide name="U235" ao="0.04"/>
+    <nuclide name="U238" ao="0.96"/>
+    <nuclide name="O16" ao="2.0"/>
+  </material>
+  <material id="2" name="water">
+    <density value="0.74" units="g/cm3"/>
+    <nuclide name="H1" ao="2.0"/>
+    <nuclide name="O16" ao="1.0"/>
+  </material>
+</materials>

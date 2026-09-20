@@ -587,6 +587,15 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         }
     }
 
+    // The pin fast path found blocks but placed nothing (a lattice of
+    // cellUniverses, a homogenised checkerboard, a stack the pin resolver
+    // cannot follow): draw from the exact model instead of an empty stage.
+    if (cylinders.length === 0) {
+        const csg = trySconeCsg(rawText, warnings, notes);
+        if (csg) return { ...csg, fidelity: { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial } };
+        warnings.push('pinUniverse / latUniverse blocks were found but none resolved to drawable pins, and the exact-geometry engine drew nothing either.');
+    }
+
     const fidelity: FidelityState = { detail: plan.detail, axial: axialOn, autoDetail, totalPins, hasAxial };
     return { cylinders, warnings, notes, fidelity, capped };
 }
@@ -723,7 +732,13 @@ function trySconeCsg(text: string, warnings: string[], notes: string[]): ParseRe
     try {
         const model = parseSconeGeometry(text);
         if (model.cells.size === 0) return null;
-        const scene = buildCsgScene(model, new Map());
+        // Real material names → layer categories (Fuel/Clad/Moderator/…), so
+        // an instanced lattice does not collapse into one "Structure" color.
+        const matLookup = new Map<number, { name: string; component: ComponentId }>();
+        for (const [id, name] of model.names?.materials ?? []) {
+            matLookup.set(id, { name, component: materialComponent(name) });
+        }
+        const scene = buildCsgScene(model, matLookup);
         if (scene.cylinders.length === 0) return null;
         for (const w of model.warnings) warnings.push(w);
         for (const w of scene.warnings) warnings.push(w);

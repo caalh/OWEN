@@ -1,0 +1,16 @@
+% Serpent split-file pin lattice — pins live in an include.
+% OWEN Cell Map / Check Geometry / 3D used to miss universe F because they
+% read only this file.
+include "pins.sss"
+
+surf outer cuboid -1.89 1.89 -1.89 1.89 -10 10
+
+cell world 0 fill core -outer
+cell grave 0 outside outer
+
+lat core 1 0.0 0.0 3 3 1.26
+F F F
+F F F
+F F F
+
+set pop 200 20 50

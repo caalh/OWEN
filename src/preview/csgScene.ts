@@ -34,7 +34,7 @@ import {
     Transform,
     Vec3,
 } from './mcnpGeometry';
-import { Bounds, cellContains, rootUniverseId, worldBounds } from './mcnpEvaluate';
+import { Bounds, cachedLatticeBasis, cellContains, rootUniverseId, worldBounds } from './mcnpEvaluate';
 
 export interface MaterialLookup {
     name: string;
@@ -961,34 +961,182 @@ export interface BuildCsgOptions {
     skipCells?: Set<number>;
     /** Triangle ceiling for meshed cells (default DEFAULT_MAX_CSG_TRIANGLES). */
     maxTriangles?: number;
+    /** Lattice elements to instance before stopping (default DEFAULT_MAX_LATTICE_ELEMENTS). */
+    maxLatticeElements?: number;
+}
+
+const DEFAULT_MAX_LATTICE_ELEMENTS = 6000;
+
+/** One drawable material cell, placed: universe-frame cell + world offset + clip box. */
+interface Placement {
+    cellId: number;
+    /** Translation from the cell's universe frame to the world. */
+    offset: Vec3;
+    /** World-space box the drawn region is clipped to (null = world bounds). */
+    clip: Bounds | null;
+    depth: number;
+}
+
+interface PlacementStats {
+    elements: number;
+    capped: boolean;
+    skippedLattices: string[];
+}
+
+const vadd = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+
+function intersectBounds(a: Bounds | null, b: Bounds | null): Bounds | null {
+    if (!a) return b;
+    if (!b) return a;
+    return {
+        min: [Math.max(a.min[0], b.min[0]), Math.max(a.min[1], b.min[1]), Math.max(a.min[2], b.min[2])],
+        max: [Math.min(a.max[0], b.max[0]), Math.min(a.max[1], b.max[1]), Math.min(a.max[2], b.max[2])],
+    };
+}
+
+/** Box around one lattice element from its index basis; axes the basis does not span stay open. */
+function elementBox(basisA: Vec3[], center: Vec3): Bounds {
+    const half: Vec3 = [0, 0, 0];
+    for (const a of basisA) for (let ax = 0; ax < 3; ax++) half[ax] += Math.abs(a[ax]) / 2;
+    // A rhombic (hex) basis under-bounds the corner-to-corner width; the
+    // circumradius p/√3 of a flat-to-flat pitch p is the honest in-plane half.
+    if (basisA.length >= 2) {
+        const dot = basisA[0][0] * basisA[1][0] + basisA[0][1] * basisA[1][1] + basisA[0][2] * basisA[1][2];
+        const n0 = Math.hypot(...basisA[0]);
+        const n1 = Math.hypot(...basisA[1]);
+        if (n0 > 0 && n1 > 0 && Math.abs(dot) / (n0 * n1) > 0.3) {
+            const r = Math.max(n0, n1) / Math.sqrt(3);
+            for (let ax = 0; ax < 3; ax++) {
+                if (Math.abs(basisA[0][ax]) > 1e-9 || Math.abs(basisA[1][ax]) > 1e-9) half[ax] = Math.max(half[ax], r);
+            }
+        }
+    }
+    const INF = Number.POSITIVE_INFINITY;
+    return {
+        min: [half[0] > 1e-9 ? center[0] - half[0] : -INF, half[1] > 1e-9 ? center[1] - half[1] : -INF, half[2] > 1e-9 ? center[2] - half[2] : -INF],
+        max: [half[0] > 1e-9 ? center[0] + half[0] : INF, half[1] > 1e-9 ? center[1] + half[1] : INF, half[2] > 1e-9 ? center[2] + half[2] : INF],
+    };
 }
 
 /**
- * Material cells the CSG path should mesh. Start at the unfilled root
- * (any id — MCNP 0, OpenMC XML 1+, Serpent named universes, SCONE remapped
- * 0) and walk uniform `fill=` / `fill="N"` / SCONE `rootUniverse fill u<N>`.
- * Lattice fills stay on the pin fast path. Without this walk, a world that
- * is only a fill wrapper draws zero primitives even though the nested cells
- * parsed.
+ * Conservative AABB of a cell's region from its axis-aligned plane
+ * constraints only (curved constraints ignored, so the box is a superset).
+ * Union over DNF terms. Null when the region cannot be expanded, carries a
+ * trcl, or no plane bounds any axis. Local (universe) frame.
+ *
+ * This is what clips a filled universe to the *cell* that fills it: a Serpent
+ * `lat … 9` layer cell (z ≥ 5, z < 45) filling a pin universe of infinite
+ * cylinders must not draw those cylinders over the full column height.
  */
-function csgDrawableCellIds(model: McnpGeometryModel): number[] {
-    const out: number[] = [];
-    const seenUni = new Set<number>();
-    const walk = (uid: number, depth: number): void => {
-        if (depth > 16 || seenUni.has(uid)) return;
-        seenUni.add(uid);
+function cellRegionBox(model: McnpGeometryModel, cellId: number): Bounds | null {
+    const cell = model.cells.get(cellId);
+    if (!cell || !cell.region || cell.trcl) return null;
+    const dnf = toDnf(cell.region, false, { model, stack: new Set([cellId]) });
+    if (!dnf || dnf.length === 0) return null;
+    const INF = Number.POSITIVE_INFINITY;
+    const huge: Bounds = { min: [-INF, -INF, -INF], max: [INF, INF, INF] };
+    const box: Bounds = { min: [INF, INF, INF], max: [-INF, -INF, -INF] };
+    for (const term of dnf) {
+        const bk = newBuckets();
+        for (const lit of term) {
+            const surf = resolveSurface(model, lit.surface);
+            if (!surf) continue;
+            let shape: Shape = surf.surface.shape;
+            if (lit.facet > 0) {
+                if (shape.kind === 'body' && shape.facets[lit.facet - 1]) shape = shape.facets[lit.facet - 1];
+                else continue;
+            }
+            bucketShape(bk, shape, lit.sense, surf.tr, `surface ${lit.surface}`);
+        }
+        for (let ai = 0; ai < 3; ai++) {
+            const axis: Axis = ai === 0 ? 'x' : ai === 1 ? 'y' : 'z';
+            const w = axialWindow(bk.planes, axis, huge);
+            box.min[ai] = Math.min(box.min[ai], w.lo);
+            box.max[ai] = Math.max(box.max[ai], w.hi);
+        }
+    }
+    if (box.min[0] > box.max[0] || box.min[1] > box.max[1] || box.min[2] > box.max[2]) return null;
+    if (box.min.every((v) => v === -INF) && box.max.every((v) => v === INF)) return null;
+    return box;
+}
+
+/**
+ * Material cells the CSG path should mesh, with where each instance sits.
+ * Start at the unfilled root (any id — MCNP 0, OpenMC XML 1+, Serpent named
+ * universes, SCONE remapped 0) and walk uniform `fill=` / `fill="N"` / SCONE
+ * `rootUniverse fill u<N>` and lattice fill grids. Lattice elements are
+ * instanced by translation (the same index basis findCell uses), each
+ * clipped to its element box so an infinite "everything else" cell in a pin
+ * universe does not smear across the core. PWR pin lattices normally never
+ * reach this path (the instanced fast path draws them); this is what makes an
+ * OpenMC XML lattice, a Serpent vertical stack, or a SCONE lattice of
+ * cellUniverses draw at all instead of an empty stage.
+ */
+function csgPlacements(model: McnpGeometryModel, maxElements: number, stats: PlacementStats, worldClip: Bounds): Placement[] {
+    const out: Placement[] = [];
+    const regionBoxCache = new Map<number, Bounds | null>();
+    const regionBoxOf = (cellId: number): Bounds | null => {
+        if (!regionBoxCache.has(cellId)) regionBoxCache.set(cellId, cellRegionBox(model, cellId));
+        return regionBoxCache.get(cellId) ?? null;
+    };
+    const walk = (uid: number, offset: Vec3, clip: Bounds | null, depth: number, path: Set<number>): void => {
+        if (depth > 12 || path.has(uid)) return;
+        const nextPath = new Set(path);
+        nextPath.add(uid);
         for (const cellId of model.universes.get(uid) ?? []) {
             const cell = model.cells.get(cellId);
             if (!cell) continue;
-            if (cell.lat !== 0 || cell.fill?.grid) continue;
-            if (cell.fill && cell.fill.universe !== null) {
-                walk(cell.fill.universe, depth + 1);
+            if (cell.lat !== 0 && cell.fill?.grid) {
+                const g = cell.fill.grid;
+                const basis = cachedLatticeBasis(model, cell);
+                if (!basis) {
+                    stats.skippedLattices.push(`cell ${cellId}: lattice window has no analyzable plane pairs`);
+                    continue;
+                }
+                const nx = g.i2 - g.i1 + 1;
+                const ny = g.j2 - g.j1 + 1;
+                const fillO: Vec3 = cell.fill.tr && cell.fill.tr.origin === 1 ? cell.fill.tr.o : [0, 0, 0];
+                for (let k = g.k1; k <= g.k2; k++) {
+                    for (let j = g.j1; j <= g.j2; j++) {
+                        for (let i = g.i1; i <= g.i2; i++) {
+                            const entry = g.entries[(i - g.i1) + nx * ((j - g.j1) + ny * (k - g.k1))];
+                            if (!entry || entry.universe === 0 || entry.universe === uid) continue;
+                            if (stats.elements >= maxElements) { stats.capped = true; return; }
+                            stats.elements++;
+                            let shift: Vec3 = [0, 0, 0];
+                            const idx = [i, j, k];
+                            for (let b = 0; b < basis.a.length; b++) {
+                                const kv = idx[b] ?? 0;
+                                shift = vadd(shift, [basis.a[b][0] * kv, basis.a[b][1] * kv, basis.a[b][2] * kv]);
+                            }
+                            const entryO: Vec3 = entry.tr && entry.tr.origin === 1 ? entry.tr.o : [0, 0, 0];
+                            const elementCenter = vadd(vadd(offset, basis.origin), shift);
+                            // A 2D lattice is open along z; close the element with the
+                            // world box so a homogeneous element still has a height.
+                            const box = intersectBounds(intersectBounds(clip, elementBox(basis.a, elementCenter)), worldClip);
+                            walk(entry.universe, vadd(vadd(offset, shift), vadd(fillO, entryO)), box, depth + 1, nextPath);
+                        }
+                    }
+                }
                 continue;
             }
-            out.push(cellId);
+            if (cell.lat !== 0) continue;
+            if (cell.fill && cell.fill.universe !== null) {
+                const o: Vec3 = cell.fill.tr && cell.fill.tr.origin === 1 ? cell.fill.tr.o : [0, 0, 0];
+                // The filled universe shows through this cell's region only.
+                // Clip descendants to the region's plane box (world frame),
+                // so a z-banded layer cell does not draw its pin full-height.
+                const rb = regionBoxOf(cellId);
+                const cellClip = rb
+                    ? intersectBounds(clip, { min: vadd(rb.min, offset), max: vadd(rb.max, offset) })
+                    : clip;
+                walk(cell.fill.universe, vadd(offset, o), cellClip, depth + 1, nextPath);
+                continue;
+            }
+            out.push({ cellId, offset, clip, depth });
         }
     };
-    walk(rootUniverseId(model), 0);
+    walk(rootUniverseId(model), [0, 0, 0], null, 0, new Set());
     return out;
 }
 
@@ -1032,16 +1180,29 @@ export function buildCsgScene(
         bounds.max[2] + 13 * Math.max(1, bounds.max[2] - bounds.min[2]),
     ];
 
-    const drawable = csgDrawableCellIds(model).filter((id) => {
-        const cell = model.cells.get(id);
-        return !!(cell && cell.region && !opts.skipCells?.has(id) && !cell.fill && cell.lat === 0);
+    const maxElements = opts.maxLatticeElements && opts.maxLatticeElements > 0 ? opts.maxLatticeElements : DEFAULT_MAX_LATTICE_ELEMENTS;
+    const placeStats: PlacementStats = { elements: 0, capped: false, skippedLattices: [] };
+    const placements = csgPlacements(model, maxElements, placeStats, bounds).filter((pl) => {
+        const cell = model.cells.get(pl.cellId);
+        return !!(cell && cell.region && !opts.skipCells?.has(pl.cellId) && !cell.fill && cell.lat === 0);
     });
-    const materialIds = drawable.filter((id) => (model.cells.get(id)?.material ?? 0) !== 0);
-    const voidIds = drawable.filter((id) => (model.cells.get(id)?.material ?? 0) === 0);
+    // Void cells only at the top level: inside a lattice element they are the
+    // coolant "everything else" and would bury the pins in translucent boxes.
+    const materialPlacements = placements.filter((pl) => (model.cells.get(pl.cellId)?.material ?? 0) !== 0);
+    const voidPlacements = placements.filter((pl) => pl.depth === 0 && (model.cells.get(pl.cellId)?.material ?? 0) === 0);
+    if (placeStats.elements > 0) {
+        notes.push(`Expanded ${placeStats.elements.toLocaleString()} lattice element(s) through the exact model.`);
+    }
+    if (placeStats.capped) {
+        warnings.push(`Lattice instancing stopped at ${maxElements.toLocaleString()} elements; the rest of the lattice is not drawn (2D slices are still exact).`);
+    }
+    for (const s of placeStats.skippedLattices) warnings.push(`${s}; its elements are not drawn.`);
     let materialExtent = 0;
     let budgetWarned = false;
+    const exteriorNoted = new Set<number>();
 
-    const emitCell = (cellId: number, asVoid: boolean): void => {
+    const emitCell = (pl: Placement, asVoid: boolean): void => {
+        const { cellId, offset } = pl;
         if (out.length >= maxPrims) {
             if (!budgetWarned) {
                 warnings.push(`CSG primitive budget (${maxPrims}) reached; remaining cells were not drawn.`);
@@ -1051,17 +1212,49 @@ export function buildCsgScene(
         }
         const cell = model.cells.get(cellId);
         if (!cell || !cell.region) return;
-        if (cellContains(model, cellId, far)) {
-            notes.push(`Cell ${cellId} is the exterior/graveyard — not drawn.`);
-            return;
-        }
-
         const matInfo = materials.get(cell.material) ?? {
             name: asVoid ? 'void' : `m${cell.material}`,
             component: asVoid ? Component.Void : Component.Structure,
         };
+        if (cellContains(model, cellId, far)) {
+            // A universe that is one unbounded material cell (a homogenised
+            // lattice element, a SCONE pinUniverse with radii (0.0)) is the
+            // whole element: draw the element box in that material. Inside a
+            // pin universe the unbounded cell is the coolant remainder and is
+            // left out so the pins stay visible.
+            const soleCell = pl.depth > 0 && (model.universes.get(cell.universe)?.length ?? 0) === 1;
+            if (soleCell && pl.clip && !asVoid && pl.clip.min.every(Number.isFinite) && pl.clip.max.every(Number.isFinite)) {
+                const c = pl.clip;
+                out.push({
+                    x: (c.min[0] + c.max[0]) / 2, y: (c.min[1] + c.max[1]) / 2, z: (c.min[2] + c.max[2]) / 2,
+                    radius: (c.max[0] - c.min[0]) / 2,
+                    halfX: (c.max[0] - c.min[0]) / 2, halfY: (c.max[1] - c.min[1]) / 2,
+                    height: Math.max(0.01, c.max[2] - c.min[2]),
+                    shape: 'box',
+                    color: materialColor(matInfo.name), component: matInfo.component, material: matInfo.name,
+                    label: `cell ${cellId} (element)`,
+                });
+                census.exact++;
+                return;
+            }
+            if (!exteriorNoted.has(cellId)) {
+                exteriorNoted.add(cellId);
+                notes.push(pl.depth === 0
+                    ? `Cell ${cellId} is the exterior/graveyard — not drawn.`
+                    : `Cell ${cellId} is the unbounded remainder of its universe — not drawn inside lattice elements.`);
+            }
+            return;
+        }
+        // Clip to the element box in the cell's own frame (the box is in
+        // world space; the emitted specs are shifted back out afterwards).
+        const localClip: Bounds = pl.clip
+            ? {
+                min: [Math.max(bounds.min[0], pl.clip.min[0] - offset[0]), Math.max(bounds.min[1], pl.clip.min[1] - offset[1]), Math.max(bounds.min[2], pl.clip.min[2] - offset[2])],
+                max: [Math.min(bounds.max[0], pl.clip.max[0] - offset[0]), Math.min(bounds.max[1], pl.clip.max[1] - offset[1]), Math.min(bounds.max[2], pl.clip.max[2] - offset[2])],
+            }
+            : bounds;
         const ctx: EmitCtx = {
-            bounds,
+            bounds: localClip,
             color: asVoid ? componentColor(Component.Void) : materialColor(matInfo.name),
             materialName: asVoid ? 'void' : matInfo.name,
             component: asVoid ? Component.Void : matInfo.component,
@@ -1121,6 +1314,21 @@ export function buildCsgScene(
                 worstDetail = 'trcl rotation applied to positions only';
             }
         }
+        if (offset[0] !== 0 || offset[1] !== 0 || offset[2] !== 0) {
+            for (const s of cellSpecs) { s.x += offset[0]; s.y += offset[1]; s.z += offset[2]; }
+        }
+        // Inside a lattice element a cell that only got a translucent
+        // bounding box is filler (coolant around the pin, an open annulus);
+        // one such box per element hides the pins, so the census records it
+        // and nothing is drawn.
+        if (pl.depth > 0 && worst === 'failed') {
+            census.failed++;
+            if (!exteriorNoted.has(cellId)) {
+                exteriorNoted.add(cellId);
+                census.details.push(`cell ${cellId}: not drawn inside lattice elements (${worstDetail ?? 'unresolved constraints'})`);
+            }
+            return;
+        }
 
         if (asVoid) {
             const biggest = cellSpecs.reduce((m, s) => Math.max(m, specSize(s)), 0);
@@ -1143,7 +1351,10 @@ export function buildCsgScene(
         if (worst === 'exact') census.exact++;
         else if (worst === 'approximated') {
             census.approximated++;
-            census.details.push(`cell ${cellId}: approximated (${worstDetail ?? 'see notes'})`);
+            if (pl.depth === 0 || !exteriorNoted.has(cellId)) {
+                census.details.push(`cell ${cellId}: approximated (${worstDetail ?? 'see notes'})`);
+                if (pl.depth > 0) exteriorNoted.add(cellId);
+            }
         } else {
             census.failed++;
             census.details.push(`cell ${cellId}: failed (${worstDetail ?? 'unresolved constraints'})`);
@@ -1151,8 +1362,8 @@ export function buildCsgScene(
         }
     };
 
-    for (const id of materialIds) emitCell(id, false);
-    for (const id of voidIds) emitCell(id, true);
+    for (const pl of materialPlacements) emitCell(pl, false);
+    for (const pl of voidPlacements) emitCell(pl, true);
 
     const total = census.exact + census.approximated + census.failed;
     if (total > 0) {

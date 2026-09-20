@@ -11,7 +11,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import {
-    detectOpenmcXmlKind, validateOpenmcXml, OpenmcXmlContext,
+    detectOpenmcXmlKind, validateOpenmcXml, normalizeXmlId, OpenmcXmlContext,
 } from './openmcXml';
 import { PlainDiagnostic } from './types';
 
@@ -46,7 +46,7 @@ export function registerOpenmcXmlDiagnostics(context: vscode.ExtensionContext): 
                 const ids = new Set<string>();
                 const re = /<material\b[^>]*?\bid\s*=\s*["']([^"']+)["']/g;
                 let m: RegExpExecArray | null;
-                while ((m = re.exec(matText)) !== null) ids.add(m[1]);
+                while ((m = re.exec(matText)) !== null) ids.add(normalizeXmlId(m[1]));
                 if (ids.size > 0) ctx.materialIds = ids;
             } catch {
                 // No sibling materials.xml — skip the cross-file check.

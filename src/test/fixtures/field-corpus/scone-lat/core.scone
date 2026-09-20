@@ -1,0 +1,38 @@
+// Tiny SCONE square lattice. Map entries are universe ids (2), not u<2>.
+type eigenPhysicsPackage;
+pop      200;
+active   20;
+inactive 5;
+XSdata   ce;
+dataType ce;
+collisionOperator { neutronCE { type neutronCEstd; } }
+transportOperator { type transportOperatorDT; }
+inactiveTally {}
+activeTally {}
+geometry {
+  type geometryStd;
+  boundary (0 0 0 0 0 0);
+  graph { type shrunk; }
+  surfaces {
+    boundingBox { id 1; type box; origin (0.0 0.0 0.0); halfwidth (1.89 1.89 10.0); }
+  }
+  cells {}
+  universes {
+    root { id 1; type rootUniverse; border 1; fill u<3>; }
+    pinFuel { id 2; type pinUniverse;
+      radii (0.40 0.45 0.0);
+      fills (UO2 Zirc Water); }
+    core { id 3; type latUniverse; origin (0 0 0); pitch (1.26 1.26 0);
+      shape (3 3 0); padMat Water; map ( 2 2 2 2 2 2 2 2 2 ); }
+  }
+}
+nuclearData {
+  handles {
+    ce { type aceNeutronDatabase; aceLibrary /path/to/ace; }
+  }
+  materials {
+    UO2 { temp 300; composition { 92235.03 1.0; } }
+    Zirc { temp 300; composition { 40090.03 1.0; } }
+    Water { temp 300; composition { 1001.03 2.0; 8016.03 1.0; } }
+  }
+}

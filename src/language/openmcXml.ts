@@ -45,6 +45,16 @@ export interface OpenmcXmlContext {
     materialIds?: Set<string>;
 }
 
+/**
+ * OpenMC reads ids as integers, so `id="01"` and `material="1"` are the same
+ * material. Normalize numeric ids before any set membership test — comparing
+ * the raw attribute strings flags legal decks (seen on a VVER-1000 whose
+ * materials.xml zero-padded its ids).
+ */
+export function normalizeXmlId(id: string): string {
+    return /^\d+$/.test(id) ? String(parseInt(id, 10)) : id;
+}
+
 interface Element {
     name: string;
     attrs: Map<string, { value: string; offset: number }>;
@@ -121,11 +131,12 @@ function validateMaterials(text: string, diags: PlainDiagnostic[]): Set<string> 
                 '<material> is missing the id attribute.', 'error', 'openmc-xml.material-no-id');
             continue;
         }
-        if (ids.has(id.value)) {
+        const key = normalizeXmlId(id.value);
+        if (ids.has(key)) {
             pushAt(diags, text, id.offset, id.value.length + 5,
                 `Duplicate material id "${id.value}".`, 'error', 'openmc-xml.duplicate-id');
         }
-        ids.add(id.value);
+        ids.add(key);
     }
 
     for (const den of scanElements(text, 'density')) {
@@ -185,11 +196,12 @@ function validateGeometry(text: string, diags: PlainDiagnostic[], ctx: OpenmcXml
     for (const surf of scanElements(text, 'surface')) {
         const id = surf.attrs.get('id');
         if (id) {
-            if (surfaceIds.has(id.value)) {
+            const key = normalizeXmlId(id.value);
+            if (surfaceIds.has(key)) {
                 pushAt(diags, text, id.offset, id.value.length + 5,
                     `Duplicate surface id "${id.value}".`, 'error', 'openmc-xml.duplicate-id');
             }
-            surfaceIds.add(id.value);
+            surfaceIds.add(key);
         }
         const type = surf.attrs.get('type');
         if (type && !SURFACE_TYPES.has(type.value)) {
@@ -235,7 +247,7 @@ function validateGeometry(text: string, diags: PlainDiagnostic[], ctx: OpenmcXml
         }
         if (material && ctx.materialIds) {
             for (const tok of material.value.split(/\s+/).filter(Boolean)) {
-                if (tok !== 'void' && !ctx.materialIds.has(tok)) {
+                if (tok !== 'void' && !ctx.materialIds.has(normalizeXmlId(tok))) {
                     pushAt(diags, text, material.offset, material.value.length + 11,
                         `Cell references material "${tok}" which is not defined in materials.xml.`,
                         'error', 'openmc-xml.unknown-material');
@@ -246,7 +258,7 @@ function validateGeometry(text: string, diags: PlainDiagnostic[], ctx: OpenmcXml
         if (region && surfaceIds.size > 0) {
             for (const tok of region.value.split(/[\s()|~]+/).filter(Boolean)) {
                 const surfId = tok.replace(/^[-+]/, '');
-                if (/^\d+$/.test(surfId) && !surfaceIds.has(surfId)) {
+                if (/^\d+$/.test(surfId) && !surfaceIds.has(normalizeXmlId(surfId))) {
                     pushAt(diags, text, region.offset, region.value.length + 9,
                         `Region references surface ${surfId} which is not defined.`,
                         'error', 'openmc-xml.unknown-surface');

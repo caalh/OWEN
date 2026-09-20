@@ -82,8 +82,8 @@ async function semanticDiff(provider: CanonicalProvider): Promise<void> {
     const [la, lb] = await Promise.all([loadGeometryModel(a), loadGeometryModel(b)]);
     if (!isLoaded(la)) { vscode.window.showWarningMessage(`OWEN: ${baseName(a)}: ${la.reason}`); return; }
     if (!isLoaded(lb)) { vscode.window.showWarningMessage(`OWEN: ${baseName(b)}: ${lb.reason}`); return; }
-    const ta = canonicalDeck(la.model, a.language, a.text);
-    const tb = canonicalDeck(lb.model, b.language, b.text);
+    const ta = canonicalDeck(la.model, a.language, la.text);
+    const tb = canonicalDeck(lb.model, b.language, lb.text);
     const stamp = Date.now().toString(36);
     const ua = provider.set(`${stamp}-a/${baseName(a)}.canonical`, ta);
     const ub = provider.set(`${stamp}-b/${baseName(b)}.canonical`, tb);
@@ -162,8 +162,8 @@ async function compareDecks(): Promise<void> {
             if (!isLoaded(lb)) return { error: `${baseName(b)}: ${lb.reason}` };
             progress.report({ message: 'sampling' });
             await new Promise((r) => setTimeout(r, 30));
-            const ca = classifyModel(la.model, a.language, a.text, baseName(a));
-            const cb = classifyModel(lb.model, b.language, b.text, baseName(b));
+            const ca = classifyModel(la.model, a.language, la.text, baseName(a));
+            const cb = classifyModel(lb.model, b.language, lb.text, baseName(b));
             return { report: compareGeometry(ca, cb) };
         },
     );

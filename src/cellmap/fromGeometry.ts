@@ -76,6 +76,9 @@ function fillTargets(cell: McnpCell): Map<number, number> {
         for (const e of cell.fill.grid.entries) {
             out.set(e.universe, (out.get(e.universe) ?? 0) + 1);
         }
+        // OpenMC <outer>: tiled beyond the declared grid, so it is placed.
+        const outer = cell.fill.grid.outer;
+        if (outer !== undefined && !out.has(outer)) out.set(outer, 1);
     }
     if (cell.fill?.universe != null && !out.has(cell.fill.universe)) {
         out.set(cell.fill.universe, 1);
@@ -187,6 +190,9 @@ export function buildCellMapFromGeometry(
 
     const edges: CellEdge[] = [];
     const filledBy = new Map<number, number[]>();
+    // A universe the parser registered without cells (a DAGMC mesh, a Serpent
+    // construct it names but does not expand) is declared, not dangling.
+    const knownUniverses = new Set<number>([...cellsByUniverse.keys(), ...geom.universes.keys()]);
 
     const names = geom.names;
     const cells: CellNode[] = cellsList.map((cell) => {
@@ -222,7 +228,7 @@ export function buildCellMapFromGeometry(
             const parents = filledBy.get(uid) ?? [];
             parents.push(cell.id);
             filledBy.set(uid, parents);
-            if (!cellsByUniverse.has(uid)) {
+            if (!knownUniverses.has(uid)) {
                 warnings.push(`Cell ${cell.id} fills with u=${uid}, but no cell declares that universe.`);
             }
         }
