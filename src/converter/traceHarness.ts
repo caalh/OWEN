@@ -340,13 +340,66 @@ class _Box(object):
         self.lo = [float(v) for v in lower_left]
         self.hi = [float(v) for v in upper_right]
 
+# --- energy distributions (energies in eV) ---
+class _Discrete(object):
+    def __init__(self, x, p, **kw):
+        self.x = [float(v) for v in x]
+        self.p = [float(v) for v in p]
+
+class _Uniform(object):
+    def __init__(self, a=0.0, b=1.0, **kw):
+        self.a = float(a); self.b = float(b)
+
+class _Watt(object):
+    def __init__(self, a=0.988e6, b=2.249e-6, **kw):
+        self.a = float(a); self.b = float(b)
+
+class _Maxwell(object):
+    def __init__(self, theta=1.2895e6, **kw):
+        self.theta = float(theta)
+
+# --- angular distributions ---
+class _Isotropic(object):
+    def __init__(self, *a, **k):
+        pass
+
+class _Monodirectional(object):
+    def __init__(self, reference_uvw=(0.0, 0.0, 1.0), **kw):
+        try:
+            self.uvw = [float(v) for v in reference_uvw]
+        except TypeError:
+            self.uvw = [0.0, 0.0, 1.0]
+
+class _StatGeneric(object):
+    """Any other openmc.stats.* distribution — captured, not interpreted."""
+    def __init__(self, *a, **k):
+        pass
+
 stats = types.ModuleType('openmc.stats')
 stats.Point = _Point
 stats.Box = _Box
+stats.Discrete = _Discrete
+stats.Uniform = _Uniform
+stats.Watt = _Watt
+stats.Maxwell = _Maxwell
+stats.Isotropic = _Isotropic
+stats.Monodirectional = _Monodirectional
+stats.PolarAzimuthal = _StatGeneric
+stats.Normal = _StatGeneric
+stats.Tabular = _StatGeneric
+stats.PowerLaw = _StatGeneric
+stats.Mixture = _StatGeneric
+stats.Muir = _StatGeneric
+stats.CartesianIndependent = _StatGeneric
+stats.SphericalIndependent = _StatGeneric
+stats.CylindricalIndependent = _StatGeneric
 
 class IndependentSource(object):
-    def __init__(self, space=None, **kw):
+    def __init__(self, space=None, energy=None, angle=None, strength=1.0, **kw):
         self.space = space
+        self.energy = energy
+        self.angle = angle
+        self.strength = strength
 
 Source = IndependentSource
 
@@ -484,6 +537,19 @@ def _lattice_json(lat):
         out['rings'] = [[_uid(u) for u in ring] for ring in rings]
     return out
 
+def _energy_json(en):
+    if en is None:
+        return None
+    if isinstance(en, _Discrete):
+        return {'kind': 'discrete', 'eV': en.x, 'probs': en.p}
+    if isinstance(en, _Watt):
+        return {'kind': 'watt', 'a': en.a, 'b': en.b}
+    if isinstance(en, _Maxwell):
+        return {'kind': 'maxwell', 'theta': en.theta}
+    if isinstance(en, _Uniform):
+        return {'kind': 'uniform', 'lo': en.a, 'hi': en.b}
+    return {'kind': 'other', 'repr': type(en).__name__}
+
 def _settings_json():
     s = STATE['settings']
     out = {'sourcePoints': [], 'sourceBox': None}
@@ -495,13 +561,29 @@ def _settings_json():
         out['inactive'] = int(s.inactive)
     if s.particles is not None:
         out['particles'] = int(s.particles)
+    if getattr(s, 'run_mode', None):
+        out['runMode'] = s.run_mode
     sources = s.source if isinstance(s.source, (list, tuple)) else ([s.source] if s.source else [])
     for src in sources:
+        if src is None:
+            continue
+        out['hasSource'] = True
         sp = getattr(src, 'space', None)
         if isinstance(sp, _Point):
             out['sourcePoints'].append(sp.xyz)
         elif isinstance(sp, _Box):
             out['sourceBox'] = {'lo': sp.lo, 'hi': sp.hi}
+        if out.get('sourceEnergy') is None:
+            out['sourceEnergy'] = _energy_json(getattr(src, 'energy', None))
+        an = getattr(src, 'angle', None)
+        if an is not None and out.get('sourceAngle') is None:
+            if isinstance(an, _Isotropic):
+                out['sourceAngle'] = 'isotropic'
+            elif isinstance(an, _Monodirectional):
+                out['sourceAngle'] = 'monodirectional'
+                out['sourceDir'] = an.uvw
+            else:
+                out['sourceAngle'] = 'other'
     return out
 
 def _tally_json(t):

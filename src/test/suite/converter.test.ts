@@ -204,6 +204,122 @@ suite('OWEN converter — OpenMC → MCNP round trip', () => {
     });
 });
 
+suite('OWEN converter — reported issue regressions', () => {
+    // Issue #9: static OpenMC→MCNP wrote densities below 0.001 g/cm3 as -0
+    // (scientific-notation values failed the numeric guard and became 0).
+    test('#9 static path keeps scientific-notation densities', () => {
+        const script = [
+            'import openmc',
+            'z0 = openmc.ZPlane(0.0, boundary_type="vacuum")',
+            'z1 = openmc.ZPlane(1.0)',
+            'z2 = openmc.ZPlane(2.0)',
+            "m0 = openmc.Material(name='a')",
+            "m0.set_density('g/cm3', 5.02e-4)",
+            "m0.add_nuclide('He3', 1.0, 'ao')",
+            "m1 = openmc.Material(name='b')",
+            "m1.set_density('g/cm3', 2.5e-5)",
+            "m1.add_nuclide('He3', 1.0, 'ao')",
+            'c0 = openmc.Cell(fill=m0, region=+z0 & -z1)',
+            'c1 = openmc.Cell(fill=m1, region=+z1 & -z2)',
+            'geometry = openmc.Geometry([c0, c1])',
+            'materials = openmc.Materials([m0, m1])',
+            'model = openmc.Model(geometry, materials)',
+        ].join('\n');
+        const r = openmcToMcnp(script);
+        assert.ok(/-0\.000502\b/.test(r.output), 'density 5.02e-4 must be -0.000502, not -0');
+        assert.ok(/-0\.000025\b/.test(r.output), 'density 2.5e-5 must be -0.000025, not -0');
+        assert.ok(!/\s-0\s/.test(r.output), 'no cell should carry a bare -0 density');
+    });
+
+    // Issue #8: a fixed-source OpenMC model came out as a default kcode deck —
+    // run mode, source position and energy were dropped with issues: 0.
+    test('#8 fixed source → nps + sdef, not kcode', () => {
+        const script = [
+            'import openmc',
+            "sphere = openmc.Sphere(r=10.0, boundary_type='vacuum')",
+            "mat = openmc.Material(name='water')",
+            "mat.set_density('g/cm3', 1.0)",
+            "mat.add_nuclide('H1', 2.0)",
+            'cell = openmc.Cell(fill=mat, region=-sphere)',
+            'geometry = openmc.Geometry([cell])',
+            'source = openmc.IndependentSource()',
+            'source.space = openmc.stats.Point((0, 0, 0))',
+            'source.angle = openmc.stats.Isotropic()',
+            'source.energy = openmc.stats.Discrete([14.1e6], [1.0])',
+            'settings = openmc.Settings()',
+            "settings.run_mode = 'fixed source'",
+            'settings.particles = 1000',
+            'settings.batches = 10',
+            'settings.source = source',
+            'model = openmc.Model(geometry, openmc.Materials([mat]), settings)',
+        ].join('\n');
+        const r = openmcToMcnp(script);
+        assert.ok(!/\bkcode\b/.test(r.output), 'fixed-source deck must not emit kcode');
+        assert.ok(/\bnps 10000\b/.test(r.output), 'nps = particles * batches');
+        assert.ok(/sdef[^\n]*pos=0 0 0/.test(r.output), 'SDEF carries the point source position');
+        assert.ok(/erg=14\.1\b/.test(r.output), 'discrete 14.1 MeV energy (eV→MeV) on the SDEF');
+    });
+
+    // Issue #7: a rectangular lattice whose element is bounded by an RPP
+    // macrobody left the holder universe undefined — the script referenced
+    // u_N without defining it (NameError on load).
+    test('#7 RPP lattice element converts; no dangling universe', () => {
+        const deck = [
+            'tiny 2x2 rectangular lattice, element given as an RPP macrobody',
+            '1 0 -10 fill=2 imp:n=1',
+            '2 0 -25 u=2 lat=1 fill=0:1 0:1 0:0 1 1 1 1 imp:n=1',
+            '3 1 -1.0 -1 u=1 imp:n=1',
+            '4 0 1 u=1 imp:n=1',
+            '5 0 10 imp:n=0',
+            '',
+            '1 CZ 0.4',
+            '25 RPP -1 1 -1 1 -5 5',
+            '10 RPP -2 2 -2 2 -5 5',
+            '',
+            'm1 1001 2 8016 1',
+            'mt1 lwtr.20t',
+            'nps 100',
+        ].join('\n');
+        const r = mcnpToOpenmc(deck);
+        assert.ok(/u_2 = openmc\.Universe\(/.test(r.output), 'holder universe u_2 is defined');
+        assert.ok(/cell_1\.fill = u_2\b/.test(r.output), 'cell 1 fills with u_2');
+        assert.ok(/openmc\.RectLattice/.test(r.output), 'the RPP-bounded lattice converts');
+        assert.ok(!r.issues.some((i) => /window not derivable/.test(i.message)),
+            'the RPP gives the element window — no "not derivable" issue');
+        // every `u_N` referenced must be assigned somewhere in the script.
+        const assigned = new Set([...r.output.matchAll(/^(u_\d+) =/gm)].map((m) => m[1]));
+        for (const ref of r.output.matchAll(/\.fill = (u_\d+)\b/g)) {
+            assert.ok(assigned.has(ref[1]), `${ref[1]} referenced but never defined`);
+        }
+    });
+
+    // Issue #7 (robustness): a lattice whose window truly cannot be derived
+    // must degrade to a TODO, not a dangling fill reference.
+    test('#7 undecodable lattice falls back to a TODO, not a NameError', () => {
+        const deck = [
+            'lattice with a non-axis element window',
+            '1 0 -10 fill=2 imp:n=1',
+            '2 0 -1 u=2 lat=1 fill=0:1 0:1 0:0 1 1 1 1 imp:n=1',
+            '3 1 -1.0 -3 u=1 imp:n=1',
+            '4 0 3 u=1 imp:n=1',
+            '5 0 10 imp:n=0',
+            '',
+            '1 p 1 1 0 1',
+            '3 cz 0.4',
+            '10 rpp -2 2 -2 2 -5 5',
+            '',
+            'm1 1001 2 8016 1',
+            'nps 100',
+        ].join('\n');
+        const r = mcnpToOpenmc(deck);
+        const assigned = new Set([...r.output.matchAll(/^(u_\d+) =/gm)].map((m) => m[1]));
+        for (const ref of r.output.matchAll(/\.fill = (u_\d+)\b/g)) {
+            assert.ok(assigned.has(ref[1]), `${ref[1]} referenced but never defined`);
+        }
+        assert.ok(r.output.includes(TODO_MARK), 'an un-derivable lattice window leaves a TODO');
+    });
+});
+
 suite('OWEN converter — direction detection', () => {
     test('detects MCNP and OpenMC sources', () => {
         assert.strictEqual(detectConversionSource(PIN_CELL_MCNP), 'mcnp');

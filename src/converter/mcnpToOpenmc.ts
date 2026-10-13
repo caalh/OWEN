@@ -622,24 +622,74 @@ interface RectWindow {
     zmin: number | null; zmax: number | null;
 }
 
-/** Recover the lattice element window from the lat cell's region (axis planes). */
+/**
+ * Axis-aligned bounding box of an RPP, or of a BOX whose edge vectors are all
+ * axis-aligned (the only BOX forms that give a finite lattice window). Returns
+ * null for an off-axis or semi-infinite body.
+ */
+function axisAlignedBoxBounds(
+    s: McnpSurface,
+): { xmin: number; xmax: number; ymin: number; ymax: number; zmin: number; zmax: number } | null {
+    const p = s.params.map(parseFloat);
+    if (p.some((x) => !Number.isFinite(x))) return null;
+    if (s.type === 'rpp') {
+        if (p.length < 6) return null;
+        return {
+            xmin: Math.min(p[0], p[1]), xmax: Math.max(p[0], p[1]),
+            ymin: Math.min(p[2], p[3]), ymax: Math.max(p[2], p[3]),
+            zmin: Math.min(p[4], p[5]), zmax: Math.max(p[4], p[5]),
+        };
+    }
+    if (s.type === 'box') {
+        // A 9-entry BOX is infinite along a1 × a2 — not a closed window.
+        if (p.length !== 12) return null;
+        const base = p.slice(0, 3);
+        const vecs = [p.slice(3, 6), p.slice(6, 9), p.slice(9, 12)];
+        for (const vec of vecs) if (vec.filter((x) => x !== 0).length !== 1) return null;
+        let [xmin, ymin, zmin] = base;
+        let [xmax, ymax, zmax] = base;
+        for (const vec of vecs) {
+            xmin = Math.min(xmin, base[0] + vec[0]); xmax = Math.max(xmax, base[0] + vec[0]);
+            ymin = Math.min(ymin, base[1] + vec[1]); ymax = Math.max(ymax, base[1] + vec[1]);
+            zmin = Math.min(zmin, base[2] + vec[2]); zmax = Math.max(zmax, base[2] + vec[2]);
+        }
+        return { xmin, xmax, ymin, ymax, zmin, zmax };
+    }
+    return null;
+}
+
+/** Recover the lattice element window from the lat cell's region (axis planes
+ * or an inside-sense RPP/BOX macrobody — MCNP allows either). */
 function extractWindow(node: RegionNode | null, surfaces: Map<number, McnpSurface>): RectWindow {
     const w: RectWindow = { xmin: null, xmax: null, ymin: null, ymax: null, zmin: null, zmax: null };
     const visit = (n: RegionNode) => {
         if (n.kind === 'half') {
             const s = surfaces.get(n.surface);
             if (!s) return;
-            const val = parseFloat(s.params[0]);
-            if (!Number.isFinite(val)) return;
-            if (s.type === 'px') {
-                if (n.sense === 1) w.xmin = w.xmin === null ? val : Math.max(w.xmin, val);
-                else w.xmax = w.xmax === null ? val : Math.min(w.xmax, val);
-            } else if (s.type === 'py') {
-                if (n.sense === 1) w.ymin = w.ymin === null ? val : Math.max(w.ymin, val);
-                else w.ymax = w.ymax === null ? val : Math.min(w.ymax, val);
-            } else if (s.type === 'pz') {
-                if (n.sense === 1) w.zmin = w.zmin === null ? val : Math.max(w.zmin, val);
-                else w.zmax = w.zmax === null ? val : Math.min(w.zmax, val);
+            if (s.type === 'px' || s.type === 'py' || s.type === 'pz') {
+                const val = parseFloat(s.params[0]);
+                if (!Number.isFinite(val)) return;
+                if (s.type === 'px') {
+                    if (n.sense === 1) w.xmin = w.xmin === null ? val : Math.max(w.xmin, val);
+                    else w.xmax = w.xmax === null ? val : Math.min(w.xmax, val);
+                } else if (s.type === 'py') {
+                    if (n.sense === 1) w.ymin = w.ymin === null ? val : Math.max(w.ymin, val);
+                    else w.ymax = w.ymax === null ? val : Math.min(w.ymax, val);
+                } else {
+                    if (n.sense === 1) w.zmin = w.zmin === null ? val : Math.max(w.zmin, val);
+                    else w.zmax = w.zmax === null ? val : Math.min(w.zmax, val);
+                }
+            } else if ((s.type === 'rpp' || s.type === 'box') && n.sense === -1) {
+                // Inside an RPP/BOX: the element window is the body itself.
+                const bx = axisAlignedBoxBounds(s);
+                if (bx) {
+                    w.xmin = w.xmin === null ? bx.xmin : Math.max(w.xmin, bx.xmin);
+                    w.xmax = w.xmax === null ? bx.xmax : Math.min(w.xmax, bx.xmax);
+                    w.ymin = w.ymin === null ? bx.ymin : Math.max(w.ymin, bx.ymin);
+                    w.ymax = w.ymax === null ? bx.ymax : Math.min(w.ymax, bx.ymax);
+                    w.zmin = w.zmin === null ? bx.zmin : Math.max(w.zmin, bx.zmin);
+                    w.zmax = w.zmax === null ? bx.zmax : Math.min(w.zmax, bx.zmax);
+                }
             }
         } else if (n.kind === 'and') {
             n.children.forEach(visit);
@@ -1101,8 +1151,13 @@ export function mcnpToOpenmc(mcnpText: string): ConversionResult {
             if (!ready) continue;
             progressed = true;
             pendingLats.delete(uid);
-            emitLattice(lc, uid, deck, surfById, cellById, matVarByKey, surfTable, definedUniverses, ids, out, issues);
+            const ok = emitLattice(lc, uid, deck, surfById, cellById, matVarByKey, surfTable, definedUniverses, ids, out, issues);
             emittedUniverses.add(uid);
+            // When a lattice could not be emitted, its holder universe u_<uid>
+            // was never defined. Drop it from the defined set so the deferred
+            // fill loop writes a TODO instead of a dangling `cell.fill = u_<uid>`
+            // reference that would crash the generated script with a NameError.
+            if (!ok) definedUniverses.delete(uid);
         }
         if (!progressed) {
             for (const [uid, lc] of pendingLats) {
@@ -1232,18 +1287,18 @@ function emitLattice(
     ids: { nextCell: () => number; nextUniv: () => number },
     out: string[],
     issues: ConversionIssue[],
-): void {
+): boolean {
     const universeVar = (id: number) => `u_${id}`;
     const latVar = `lat_${lc.id}`;
     const w = extractWindow(lc.region, surfById);
 
     const missing: string[] = [];
-    if (w.xmin === null || w.xmax === null) missing.push('x (px pair)');
-    if (w.ymin === null || w.ymax === null) missing.push('y (py pair)');
+    if (w.xmin === null || w.xmax === null) missing.push('x (px pair or RPP)');
+    if (w.ymin === null || w.ymax === null) missing.push('y (py pair or RPP)');
     if (missing.length && lc.lattice === 1) {
         issues.push({ sourceLine: lc.line, message: `Lattice cell ${lc.id}: element window not derivable — missing ${missing.join(', ')} bounding planes` });
         out.push(`# ${TODO_MARK}: lattice cell ${lc.id} (u=${uid}) window not derivable from region '${lc.regionRaw}'.`);
-        return;
+        return false;
     }
 
     // Self-filled elements (fill entry == lattice's own universe id) get a
@@ -1270,7 +1325,7 @@ function emitLattice(
         if (!lf) {
             issues.push({ sourceLine: lc.line, message: `Hex lattice cell ${lc.id} without a fill array is not converted` });
             out.push(`# ${TODO_MARK}: hex lattice cell ${lc.id} (u=${uid}) has no fill array.`);
-            return;
+            return false;
         }
         // pitch from the RHP surface in the region, or from the window
         let pitch: number | null = null;
@@ -1290,13 +1345,13 @@ function emitLattice(
         if (pitch === null) {
             issues.push({ sourceLine: lc.line, message: `Hex lattice cell ${lc.id}: no RHP surface found in its region to derive the pitch` });
             out.push(`# ${TODO_MARK}: hex lattice cell ${lc.id} (u=${uid}) pitch not derivable (expected an RHP element surface).`);
-            return;
+            return false;
         }
         const rings = hexFillToRings(lf.universes, lf.imin, lf.imax, lf.jmin, lf.jmax);
         if (!rings) {
             issues.push({ sourceLine: lc.line, message: `Hex lattice cell ${lc.id}: fill array is not a complete centered hexagon — build openmc.HexLattice manually` });
             out.push(`# ${TODO_MARK}: hex lattice cell ${lc.id} (u=${uid}) fill array is not a complete centered hexagon.`);
-            return;
+            return false;
         }
         out.push(`${latVar} = openmc.HexLattice(lattice_id=${ids.nextUniv()}, name='mcnp cell ${lc.id} (lat=2, u=${uid})')`);
         out.push(`${latVar}.center = (${fmt(center[0])}, ${fmt(center[1])})`);
@@ -1312,7 +1367,7 @@ function emitLattice(
             out.push(`${latVar}.outer = ${uref(edge)}  # heuristic: majority universe on the fill-array boundary`);
         }
         out.push(`${universeVar(uid)} = openmc.Universe(universe_id=${uid}, cells=[openmc.Cell(cell_id=${ids.nextCell()}, name='lat ${lc.id} holder', fill=${latVar})])`);
-        return;
+        return true;
     }
 
     // ---- lat=1 rectangular ----
@@ -1327,7 +1382,7 @@ function emitLattice(
         if (w.zmin === null || w.zmax === null) {
             issues.push({ sourceLine: lc.line, message: `3D lattice cell ${lc.id}: no pz bounding pair for the z pitch` });
             out.push(`# ${TODO_MARK}: 3D lattice cell ${lc.id} (u=${uid}) has no pz pair.`);
-            return;
+            return false;
         }
         pitchZ = w.zmax - w.zmin;
         cz = (w.zmax + w.zmin) / 2;
@@ -1341,7 +1396,7 @@ function emitLattice(
                 message: `Lattice cell ${lc.id}: fill array has ${lf.universes.length} entries, expected ${lf.nx * lf.ny * lf.nz}`,
             });
             out.push(`# ${TODO_MARK}: lattice cell ${lc.id} (u=${uid}) fill array is incomplete.`);
-            return;
+            return false;
         }
         arr = { imin: lf.imin, jmin: lf.jmin, kmin: lf.kmin, nx: lf.nx, ny: lf.ny, nz: lf.nz, universes: lf.universes };
     } else if (lc.fillUniverse !== null) {
@@ -1357,7 +1412,7 @@ function emitLattice(
     } else {
         issues.push({ sourceLine: lc.line, message: `Lattice cell ${lc.id} has lat=1 but no fill specification` });
         out.push(`# ${TODO_MARK}: lattice cell ${lc.id} (u=${uid}) has no fill.`);
-        return;
+        return false;
     }
 
     // Which coordinate axis each MCNP index runs along, and which way (§3.3.1.5.2
@@ -1468,5 +1523,6 @@ function emitLattice(
         out.push(`${latVar}.outer = ${uref(edge)}  # heuristic: majority universe on the fill-array boundary`);
     }
     out.push(`${universeVar(uid)} = openmc.Universe(universe_id=${uid}, cells=[openmc.Cell(cell_id=${ids.nextCell()}, name='lat ${lc.id} holder', fill=${latVar})])`);
+    return true;
 }
 

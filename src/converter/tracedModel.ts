@@ -69,12 +69,27 @@ export interface TLattice {
     orientation?: string;
 }
 
+/** Source energy distribution. Energies are in eV (OpenMC's unit). */
+export type TSourceEnergy =
+    | { kind: 'discrete'; eV: number[]; probs: number[] }
+    | { kind: 'watt'; a: number; b: number }
+    | { kind: 'maxwell'; theta: number }
+    | { kind: 'uniform'; lo: number; hi: number }
+    | { kind: 'other'; repr: string };
+
 export interface TSettings {
     batches?: number;
     inactive?: number;
     particles?: number;
     sourcePoints: number[][];
     sourceBox?: { lo: number[]; hi: number[] } | null;
+    /** 'eigenvalue' (default) or 'fixed source'. */
+    runMode?: string;
+    sourceEnergy?: TSourceEnergy | null;
+    sourceAngle?: 'isotropic' | 'monodirectional' | 'other' | null;
+    sourceDir?: number[] | null;
+    /** A source object was present in the deck (even if partly unconvertible). */
+    hasSource?: boolean;
 }
 
 export interface TTally {
@@ -280,6 +295,92 @@ function materialToCards(mat: TMaterial, issues: ConversionIssue[]): string[] {
 }
 
 interface SynthSurface { id: number; card: string }
+
+/** eV -> MeV, MCNP's energy unit. */
+const eVtoMeV = (eV: number): string => fmt(Number((eV / 1e6).toPrecision(8)));
+
+/**
+ * Fixed-source data cards: NPS plus an SDEF built from the traced source.
+ * The eigenvalue path (kcode/ksrc) silently ignored run_mode and the source
+ * energy; a fixed-source model came out as a default kcode deck. Anything the
+ * SDEF cannot express exactly is left as a TODO with a logged issue instead of
+ * being dropped.
+ */
+function emitFixedSource(st: TSettings, dataCards: string[], issues: ConversionIssue[]): void {
+    const histories = st.particles !== undefined
+        ? st.particles * (st.batches ?? 1)
+        : 10000;
+    dataCards.push(`nps ${histories}`);
+
+    const sdef: string[] = ['sdef'];
+    const pos = st.sourcePoints[0]
+        ?? (st.sourceBox ? st.sourceBox.lo.map((v, i) => (v + st.sourceBox!.hi[i]) / 2) : null);
+    const extra: string[] = [];
+    if (st.sourceBox) {
+        // A box volume maps to SDEF x/y/z uniform distributions (d1..d3);
+        // energy, if any, uses d4 below.
+        const { lo, hi } = st.sourceBox;
+        sdef.push('x=d1 y=d2 z=d3');
+        extra.push(`si1 ${fmt(lo[0])} ${fmt(hi[0])}`, 'sp1 0 1');
+        extra.push(`si2 ${fmt(lo[1])} ${fmt(hi[1])}`, 'sp2 0 1');
+        extra.push(`si3 ${fmt(lo[2])} ${fmt(hi[2])}`, 'sp3 0 1');
+    } else if (pos) {
+        sdef.push(`pos=${pos.map(fmt).join(' ')}`);
+    } else {
+        sdef.push('pos=0 0 0');
+        if (st.hasSource) {
+            issues.push({ sourceLine: -1, message: 'Fixed-source: no source position found — SDEF placed at the origin; set POS by hand.' });
+        }
+    }
+    if (st.sourceAngle === 'monodirectional' && st.sourceDir && st.sourceDir.length >= 3) {
+        sdef.push(`vec=${st.sourceDir.map(fmt).join(' ')} dir=1`);
+    }
+
+    // Energy distribution number: d4 when x/y/z took d1..d3, else d1.
+    const en = st.sourceBox ? 4 : 1;
+    const e = st.sourceEnergy;
+    if (e) {
+        switch (e.kind) {
+            case 'discrete':
+                if (e.eV.length === 1) {
+                    sdef.push(`erg=${eVtoMeV(e.eV[0])}`);
+                } else if (e.eV.length > 1) {
+                    sdef.push(`erg=d${en}`);
+                    extra.push(`si${en} L ${e.eV.map(eVtoMeV).join(' ')}`);
+                    extra.push(`sp${en} ${e.probs.map(fmt).join(' ')}`);
+                }
+                break;
+            case 'maxwell':
+                sdef.push(`erg=d${en}`);
+                extra.push(`c NOTE: Maxwell fission spectrum (eV->MeV converted).`);
+                extra.push(`sp${en} -2 ${eVtoMeV(e.theta)}`);
+                break;
+            case 'watt':
+                sdef.push(`erg=d${en}`);
+                extra.push(`c NOTE: Watt fission spectrum (a eV->MeV, b 1/eV->1/MeV converted).`);
+                extra.push(`sp${en} -3 ${eVtoMeV(e.a)} ${fmt(Number((e.b * 1e6).toPrecision(8)))}`);
+                break;
+            case 'uniform':
+                sdef.push(`erg=d${en}`);
+                extra.push(`si${en} ${eVtoMeV(e.lo)} ${eVtoMeV(e.hi)}`);
+                extra.push(`sp${en} 0 1`);
+                break;
+            case 'other':
+                issues.push({ sourceLine: -1, message: `Fixed-source: energy distribution '${e.repr}' has no direct SDEF form — ERG left unset (MCNP default). Set it by hand.` });
+                extra.push(`c ${TODO_MARK}: source energy '${e.repr}' not converted — add ERG/SI/SP by hand.`);
+                break;
+        }
+    } else if (st.hasSource) {
+        issues.push({ sourceLine: -1, message: 'Fixed-source: no energy distribution found — MCNP SDEF defaults to 14 MeV. Add ERG if that is wrong.' });
+        extra.push(`c ${TODO_MARK}: source has no energy distribution; MCNP SDEF defaults to 14 MeV.`);
+    } else {
+        issues.push({ sourceLine: -1, message: 'Fixed-source run mode but no source was found — SDEF is a bare point at the origin. Define the source by hand.' });
+        extra.push(`c ${TODO_MARK}: fixed-source run mode but no openmc source found.`);
+    }
+
+    dataCards.push(sdef.join(' '));
+    dataCards.push(...extra);
+}
 
 /**
  * Emit an MCNP deck from a traced OpenMC model.
@@ -562,22 +663,26 @@ export function emitMcnpFromTrace(model: TracedModel): ConversionResult {
     for (const mat of model.materials) dataCards.push(...materialToCards(mat, issues));
 
     const st = model.settings;
-    dataCards.push(`kcode ${st.particles ?? 10000} 1.0 ${st.inactive ?? 10} ${st.batches ?? 100}`);
-    if (st.sourcePoints.length) {
-        const pts = st.sourcePoints.map((p) => p.map(fmt).join(' ')).join('  ');
-        dataCards.push(`ksrc ${pts}`);
-    } else if (st.sourceBox) {
-        const { lo, hi } = st.sourceBox;
-        const mid = lo.map((v, i) => (v + hi[i]) / 2);
-        const qx = (hi[0] - lo[0]) / 4;
-        const qy = (hi[1] - lo[1]) / 4;
-        dataCards.push('c NOTE: OpenMC Box source converted to ksrc points inside the box.');
-        dataCards.push(
-            `ksrc ${fmt(mid[0] + qx)} ${fmt(mid[1])} ${fmt(mid[2])}  ${fmt(mid[0] - qx)} ${fmt(mid[1])} ${fmt(mid[2])}` +
-            `  ${fmt(mid[0])} ${fmt(mid[1] + qy)} ${fmt(mid[2])}  ${fmt(mid[0])} ${fmt(mid[1] - qy)} ${fmt(mid[2])}`,
-        );
+    if (/fixed/i.test(st.runMode ?? '')) {
+        emitFixedSource(st, dataCards, issues);
     } else {
-        dataCards.push('ksrc 0 0 0');
+        dataCards.push(`kcode ${st.particles ?? 10000} 1.0 ${st.inactive ?? 10} ${st.batches ?? 100}`);
+        if (st.sourcePoints.length) {
+            const pts = st.sourcePoints.map((p) => p.map(fmt).join(' ')).join('  ');
+            dataCards.push(`ksrc ${pts}`);
+        } else if (st.sourceBox) {
+            const { lo, hi } = st.sourceBox;
+            const mid = lo.map((v, i) => (v + hi[i]) / 2);
+            const qx = (hi[0] - lo[0]) / 4;
+            const qy = (hi[1] - lo[1]) / 4;
+            dataCards.push('c NOTE: OpenMC Box source converted to ksrc points inside the box.');
+            dataCards.push(
+                `ksrc ${fmt(mid[0] + qx)} ${fmt(mid[1])} ${fmt(mid[2])}  ${fmt(mid[0] - qx)} ${fmt(mid[1])} ${fmt(mid[2])}` +
+                `  ${fmt(mid[0])} ${fmt(mid[1] + qy)} ${fmt(mid[2])}  ${fmt(mid[0])} ${fmt(mid[1] - qy)} ${fmt(mid[2])}`,
+            );
+        } else {
+            dataCards.push('ksrc 0 0 0');
+        }
     }
 
     let fmeshN = 4;

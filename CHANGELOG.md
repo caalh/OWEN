@@ -5,6 +5,36 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.9] - 2026-10-12
+
+Three converter bugs reported by John (`bluetyde`) running OWEN 1.4.8 from the
+command line — thank you for the clean, reproducible decks.
+
+### Fixed
+
+- **OpenMC → MCNP (static): small densities no longer collapse to `-0`.**
+  A density written in scientific notation (`5.02e-4`, `2.5e-5` g/cm3) failed the
+  static parser's numeric guard — the exponent `e` was mistaken for a variable
+  name — so the value silently became `0` and the cell card read `-0`. Scientific
+  notation now evaluates, so a 4 atm He-3 detector gas converts to `-0.000502`
+  as it should. The fix also restores scientific-notation energies, radii and
+  any other such value in literal scripts. ([#9](https://github.com/caalh/owen/issues/9))
+- **OpenMC → MCNP: a fixed-source model is no longer silently turned into a
+  default `kcode` deck.** `settings.run_mode = "fixed source"` now emits `nps`
+  plus an `SDEF` built from the source — point/box position, and a discrete,
+  Watt, Maxwell or uniform energy (converted eV → MeV). Anything the SDEF cannot
+  express exactly is left as a logged issue and a `TODO(owen-convert)` marker
+  instead of being dropped. The trace harness gained the missing
+  `openmc.stats` stubs (`Isotropic`, `Monodirectional`, `Discrete`, `Uniform`,
+  `Watt`, `Maxwell`, and the rest), so the traced path reaches the whole deck
+  instead of stopping at the source with an `AttributeError`. ([#8](https://github.com/caalh/owen/issues/8))
+- **MCNP → OpenMC: a lattice element bounded by an `RPP`/`BOX` macrobody now
+  converts** — the element window is read from the body's six bounds. When a
+  lattice window genuinely cannot be derived, the holder universe is no longer
+  referenced without being defined, so the generated script loads and runs
+  (with a `TODO`) instead of crashing with `NameError: name 'u_N' is not
+  defined`. ([#7](https://github.com/caalh/owen/issues/7))
+
 ## [1.4.8] - 2026-09-20
 
 This release exists because people ran OWEN on their real decks and told us

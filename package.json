@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Write, check, convert, and run MCNP, OpenMC, Serpent, and SCONE in VS Code or Cursor. Language-server diagnostics, 3D geometry preview, converters between the four codes, results viewer, lattice and input builders, and the 411-material PNNL compendium — fully offline.",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",

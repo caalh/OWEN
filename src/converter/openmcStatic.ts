@@ -10,6 +10,7 @@
 
 import {
     TracedModel, TSurface, TMaterial, TCell, TUniverse, TLattice, TRegion, TSettings, TTally,
+    TSourceEnergy,
 } from './tracedModel';
 
 interface StaticParseResult {
@@ -127,7 +128,15 @@ class NumEnv {
             e = e.replace(new RegExp(`\\b${n}\\b`, 'g'), `(${this.vars.get(n)})`);
         }
         e = e.replace(/math\.sqrt\(/g, 'Math.sqrt(').replace(/math\.pi/g, 'Math.PI');
-        if (!/^[-+*/()\d.eE\sMathsqrtPI,]*$/.test(e) || /[a-zA-Z_]\w*/.test(e.replace(/Math\.(sqrt|PI)/g, ''))) {
+        // Strip numeric literals (including scientific notation like 5.02e-4 or
+        // 1.2E5) before scanning for stray identifiers, so an exponent 'e'/'E'
+        // is not mistaken for a variable name and the whole value rejected.
+        // Without this, densities/energies written in scientific form evaluated
+        // to null and silently became 0 (e.g. a g/cm3 density came out as -0).
+        const bare = e
+            .replace(/Math\.(sqrt|PI)/g, '')
+            .replace(/(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g, '');
+        if (!/^[-+*/()\d.eE\sMathsqrtPI,]*$/.test(e) || /[a-zA-Z_]/.test(bare)) {
             return null;
         }
         try {
@@ -193,6 +202,14 @@ const inter = (c: TRegion[]): TRegion => ({ k: '&', c });
  * Value bound to a script variable: a primitive surface (supports -x/+x), a
  * composite (inside/outside region templates), or an already-built region.
  */
+interface SourceAccum {
+    point?: number[];
+    box?: { lo: number[]; hi: number[] };
+    energy?: TSourceEnergy | null;
+    angle?: 'isotropic' | 'monodirectional' | 'other';
+    dir?: number[];
+}
+
 type BoundValue =
     | { kind: 'surface'; surface: TSurface }
     | { kind: 'composite'; inside: TRegion }
@@ -202,7 +219,8 @@ type BoundValue =
     | { kind: 'universe'; id: number }
     | { kind: 'lattice'; id: number }
     | { kind: 'mesh'; mesh: { dimension: number[]; lowerLeft: number[]; upperRight: number[] } }
-    | { kind: 'tally'; tally: TTally };
+    | { kind: 'tally'; tally: TTally }
+    | { kind: 'source'; src: SourceAccum };
 
 function makeSurfaceValue(
     cls: string,
@@ -529,11 +547,12 @@ export function parseOpenmcStatic(text: string): StaticParseResult {
                 if (attr === 'batches') { const v = env.eval(value); if (v !== null) settings.batches = v; continue; }
                 if (attr === 'inactive') { const v = env.eval(value); if (v !== null) settings.inactive = v; continue; }
                 if (attr === 'particles') { const v = env.eval(value); if (v !== null) settings.particles = v; continue; }
+                if (attr === 'run_mode') { settings.runMode = value.replace(/['"]/g, ''); continue; }
                 if (attr === 'source') {
-                    parseSources(value, env, settings);
+                    applySourceToSettings(value, bindings, env, settings);
                     continue;
                 }
-                continue; // run_mode / temperature / etc.
+                continue; // temperature / etc.
             }
             const bound = bindings.get(name);
             if (!bound) {
@@ -621,6 +640,18 @@ export function parseOpenmcStatic(text: string): StaticParseResult {
                     bound.tally.scores = scores;
                 } else if (attr === 'filters') {
                     parseTallyFilters(value, bindings, bound.tally, cellById);
+                }
+                continue;
+            }
+            if (bound.kind === 'source') {
+                if (attr === 'space') {
+                    const sp = parseStatSpace(value, env);
+                    if (sp) { bound.src.point = sp.point; bound.src.box = sp.box; }
+                } else if (attr === 'energy') {
+                    bound.src.energy = parseStatEnergy(value, env);
+                } else if (attr === 'angle') {
+                    const an = parseStatAngle(value, env);
+                    if (an) { bound.src.angle = an.angle; bound.src.dir = an.dir; }
                 }
                 continue;
             }
@@ -813,9 +844,9 @@ export function parseOpenmcStatic(text: string): StaticParseResult {
                     case 'Model': continue;
                     case 'IndependentSource':
                     case 'Source': {
-                        // bound later via settings.source = name — parse space now
-                        parseSources(rhs, env, settings, /*dryRun*/ true);
-                        bindings.set(name, { kind: 'region', region: { k: 'h', s: -1, side: 1 } });
+                        // Accumulate space/energy/angle; linked to settings when
+                        // settings.source = <name> (or an inline constructor) runs.
+                        bindings.set(name, { kind: 'source', src: buildSourceFromArgs(args, env) });
                         continue;
                     }
                     default: {
@@ -904,21 +935,105 @@ function resolveRectArray(
     return out;
 }
 
-function parseSources(value: string, env: NumEnv, settings: TSettings, dryRun = false): void {
-    const points = [...value.matchAll(/openmc\.stats\.Point\(\s*\(([^)]*)\)\s*\)/g)];
-    for (const p of points) {
-        const nums = splitArgs(p[1]).map((x) => env.eval(x));
-        if (nums.length >= 3 && nums.every((n) => n !== null)) {
-            if (!dryRun || settings.sourcePoints.length === 0) {
-                settings.sourcePoints.push(nums as number[]);
-            }
-        }
+/** Parse an openmc.stats spatial distribution (Point or Box). */
+function parseStatSpace(expr: string, env: NumEnv): { point?: number[]; box?: { lo: number[]; hi: number[] } } | null {
+    const pm = /openmc\.stats\.Point\(\s*\(([^)]*)\)/.exec(expr);
+    if (pm) {
+        const nums = splitArgs(pm[1]).map((x) => env.eval(x));
+        if (nums.length >= 3 && nums.every((n) => n !== null)) return { point: nums as number[] };
     }
-    const box = /openmc\.stats\.Box\(\s*(\[[^\]]*\])\s*,\s*(\[[^\]]*\])/.exec(value);
-    if (box) {
-        const lo = env.evalTuple(box[1]);
-        const hi = env.evalTuple(box[2]);
-        if (lo && hi) settings.sourceBox = { lo, hi };
+    const bm = /openmc\.stats\.Box\(\s*(\[[^\]]*\])\s*,\s*(\[[^\]]*\])/.exec(expr);
+    if (bm) {
+        const lo = env.evalTuple(bm[1]);
+        const hi = env.evalTuple(bm[2]);
+        if (lo && hi) return { box: { lo, hi } };
+    }
+    return null;
+}
+
+/** Parse an openmc.stats energy distribution. Energies stay in eV. */
+function parseStatEnergy(expr: string, env: NumEnv): TSourceEnergy | null {
+    let m = /openmc\.stats\.Discrete\(\s*(\[[^\]]*\])\s*,\s*(\[[^\]]*\])/.exec(expr);
+    if (m) {
+        const eV = env.evalTuple(m[1]);
+        const probs = env.evalTuple(m[2]);
+        if (eV && probs) return { kind: 'discrete', eV, probs };
+    }
+    m = /openmc\.stats\.Watt\(([^)]*)\)/.exec(expr);
+    if (m) {
+        const a = parseCallArgs(m[1]);
+        const av = a.positional[0] ? env.eval(a.positional[0]) : (a.kw.has('a') ? env.eval(a.kw.get('a')!) : 0.988e6);
+        const bv = a.positional[1] ? env.eval(a.positional[1]) : (a.kw.has('b') ? env.eval(a.kw.get('b')!) : 2.249e-6);
+        if (av !== null && bv !== null) return { kind: 'watt', a: av, b: bv };
+    }
+    m = /openmc\.stats\.Maxwell\(([^)]*)\)/.exec(expr);
+    if (m) {
+        const a = parseCallArgs(m[1]);
+        const tv = a.positional[0] ? env.eval(a.positional[0]) : (a.kw.has('theta') ? env.eval(a.kw.get('theta')!) : null);
+        if (tv !== null) return { kind: 'maxwell', theta: tv };
+    }
+    m = /openmc\.stats\.(?:Uniform|PowerLaw)\(([^)]*)\)/.exec(expr);
+    if (m && /Uniform/.test(expr)) {
+        const a = parseCallArgs(m[1]);
+        const lo = a.positional[0] ? env.eval(a.positional[0]) : (a.kw.has('a') ? env.eval(a.kw.get('a')!) : null);
+        const hi = a.positional[1] ? env.eval(a.positional[1]) : (a.kw.has('b') ? env.eval(a.kw.get('b')!) : null);
+        if (lo !== null && hi !== null) return { kind: 'uniform', lo, hi };
+    }
+    if (/openmc\.stats\./.test(expr)) return { kind: 'other', repr: expr.slice(0, 80) };
+    return null;
+}
+
+/** Parse an openmc.stats angular distribution. */
+function parseStatAngle(expr: string, env: NumEnv): { angle: 'isotropic' | 'monodirectional' | 'other'; dir?: number[] } | null {
+    if (/openmc\.stats\.Isotropic\(/.test(expr)) return { angle: 'isotropic' };
+    if (/openmc\.stats\.Monodirectional\(/.test(expr)) {
+        const m = /openmc\.stats\.Monodirectional\(\s*[([]([^)\]]*)[)\]]/.exec(expr);
+        const dir = m ? env.evalTuple(`[${m[1]}]`) : null;
+        return { angle: 'monodirectional', dir: dir ?? undefined };
+    }
+    if (/openmc\.stats\./.test(expr)) return { angle: 'other' };
+    return null;
+}
+
+/** Build a source accumulator from an IndependentSource/Source call's kwargs. */
+function buildSourceFromArgs(args: CallArgs, env: NumEnv): SourceAccum {
+    const src: SourceAccum = {};
+    const spaceArg = args.kw.get('space');
+    if (spaceArg) { const sp = parseStatSpace(spaceArg, env); if (sp) { src.point = sp.point; src.box = sp.box; } }
+    const energyArg = args.kw.get('energy');
+    if (energyArg) src.energy = parseStatEnergy(energyArg, env);
+    const angleArg = args.kw.get('angle');
+    if (angleArg) { const an = parseStatAngle(angleArg, env); if (an) { src.angle = an.angle; src.dir = an.dir; } }
+    return src;
+}
+
+/** Resolve settings.source = <var | inline | list> onto the settings object. */
+function applySourceToSettings(
+    value: string,
+    bindings: Map<string, BoundValue>,
+    env: NumEnv,
+    settings: TSettings,
+): void {
+    const trimmed = value.trim();
+    const listM = /^\[([\s\S]*)\]$/.exec(trimmed);
+    const items = listM ? splitArgs(listM[1]) : [trimmed];
+    for (const item of items) {
+        let src: SourceAccum | null = null;
+        const bound = bindings.get(item);
+        if (bound?.kind === 'source') {
+            src = bound.src;
+        } else {
+            const c = /openmc\.(?:IndependentSource|Source)\(([\s\S]*)\)$/.exec(item);
+            if (c) src = buildSourceFromArgs(parseCallArgs(c[1]), env);
+        }
+        if (!src) continue;
+        settings.hasSource = true;
+        if (src.point) settings.sourcePoints.push(src.point);
+        if (src.box) settings.sourceBox = src.box;
+        if (src.energy !== undefined && (settings.sourceEnergy === undefined || settings.sourceEnergy === null)) {
+            settings.sourceEnergy = src.energy;
+        }
+        if (src.angle) { settings.sourceAngle = src.angle; settings.sourceDir = src.dir ?? null; }
     }
 }
 
