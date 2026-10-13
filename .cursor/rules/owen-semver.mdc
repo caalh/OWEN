@@ -43,3 +43,15 @@ Not listings, leave them alone: `## [1.4.4] - …` history in `CHANGELOG.md`, "s
 6. Site: edit **only** `src/lib/owenVersion.ts` (`OWEN_VERSION` = new; `OWEN_MARKETPLACE_VERSION` stays at the store's number until the maintainer publishes), then `npm run sync:owen-version` and `npm run verify:owen-version` there. If this release changed `src/preview`, `src/converter`, or `src/compare/canonical.ts`, also `npm run sync:owen-vendor` in the site repo.
 7. `node scripts/verify-version-listings.mjs --release` here must exit 0. That is the definition of "the version is updated everywhere".
 8. Marketplace / Open VSX publish is the maintainer's manual step. When the stores catch up, set `OWEN_MARKETPLACE_VERSION` equal on the site and re-run its verify.
+
+# Credit the person who opened the issue
+
+A release that fixes a reported bug names that person in three places. A "fixed" line with no name is not done.
+
+- `CHANGELOG.md` for that version — name, GitHub login, issue link, what broke.
+- The GitHub release notes — the same names. Do not shorten a reported fix to "various fixes".
+- `README.md` section "Thanks to the people who reported real problems" — name, login link, one line on what they reported.
+
+The site changelog names them too when `reactor-monte-carlo-guide` records the ship.
+
+**Owed before the next release can ship.** John ([bluetyde](https://github.com/bluetyde)) opened [#7](https://github.com/caalh/owen/issues/7), [#8](https://github.com/caalh/owen/issues/8), and [#9](https://github.com/caalh/owen/issues/9). 1.4.9 named him in `CHANGELOG.md` and the GitHub release notes, and did not add him to the README thanks list. Do not cut a release only to add the line. Do not ship the next release without that thanks line, plus credit for whoever opened issues fixed in that release.
