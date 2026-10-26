@@ -422,6 +422,28 @@ export function emitMcnpFromTrace(model: TracedModel): ConversionResult {
     const rootU = model.rootUniverse;
     const mcnpU = (uid: number): number | null => (uid === rootU ? null : uid);
 
+    // OpenMC puts a lattice universe's origin at the element centre.
+    // MCNP puts it at the coordinate origin of the element window, so a pin
+    // drawn at (0,0) would sit on the corner. Shift those universes by
+    // lower_left + pitch/2. The same shift repeats with every element.
+    const latticeUniverseShift = new Map<number, [number, number, number]>();
+    for (const lat of model.lattices) {
+        if (lat.kind !== 'rect' || !lat.lowerLeft || lat.pitch.length < 2 || !lat.universes) continue;
+        const shift: [number, number, number] = [
+            lat.lowerLeft[0] + lat.pitch[0] / 2,
+            lat.lowerLeft[1] + lat.pitch[1] / 2,
+            lat.pitch.length > 2 ? (lat.lowerLeft[2] ?? 0) + lat.pitch[2] / 2 : 0,
+        ];
+        for (const plane of lat.universes) {
+            for (const row of plane) {
+                for (const uid of row) {
+                    const mc = mcnpU(uid);
+                    if (mc !== null && !latticeUniverseShift.has(mc)) latticeUniverseShift.set(mc, shift);
+                }
+            }
+        }
+    }
+
     // ---- cell cards --------------------------------------------------------
     const cellCards: string[] = [];
     const emittedCells = new Set<number>();
@@ -435,12 +457,23 @@ export function emitMcnpFromTrace(model: TracedModel): ConversionResult {
             ? ` tmp=${(cell.temperature * BOLTZMANN_MEV_PER_K).toExponential(4)}`
             : '';
         let trclPart = '';
-        if (cell.translation && cell.translation.some((x) => x !== 0)) {
+        const latShift = universeId !== null ? latticeUniverseShift.get(universeId) : undefined;
+        const translation = cell.translation ? [...cell.translation] : null;
+        if (latShift && latShift.some((v) => Math.abs(v) > 1e-12)) {
+            const base = translation && translation.some((v) => v !== 0) ? translation : [0, 0, 0];
+            while (base.length < 3) base.push(0);
+            for (let i = 0; i < 3; i++) base[i] += latShift[i];
+            if (cell.rotation) {
+                trclPart = ` trcl=(${base.map(fmt).join(' ')} ${cell.rotation.flat().map(fmt).join(' ')})`;
+            } else {
+                trclPart = ` trcl=(${base.map(fmt).join(' ')})`;
+            }
+        } else if (translation && translation.some((x) => x !== 0)) {
             if (cell.rotation) {
                 const flat = cell.rotation.flat().map(fmt).join(' ');
-                trclPart = ` trcl=(${cell.translation.map(fmt).join(' ')} ${flat})`;
+                trclPart = ` trcl=(${translation.map(fmt).join(' ')} ${flat})`;
             } else {
-                trclPart = ` trcl=(${cell.translation.map(fmt).join(' ')})`;
+                trclPart = ` trcl=(${translation.map(fmt).join(' ')})`;
             }
         } else if (cell.rotation) {
             trclPart = ` trcl=(0 0 0 ${cell.rotation.flat().map(fmt).join(' ')})`;
@@ -509,11 +542,14 @@ export function emitMcnpFromTrace(model: TracedModel): ConversionResult {
             const sxmax = synthPlane('px', llx + px);
             const symin = synthPlane('py', lly);
             const symax = synthPlane('py', lly + py);
-            let windowRegion = `${sxmin} -${sxmax} ${symin} -${symax}`;
+            // §5.5.5: element (1,0,0) lies beyond the first listed surface, so the
+            // +x/+y/+z planes come first. Listing the minimum plane first rotates
+            // the fill array 180° relative to OpenMC's +x/+y lattice.
+            let windowRegion = `-${sxmax} ${sxmin} -${symax} ${symin}`;
             if (is3D) {
                 const szmin = synthPlane('pz', llz);
                 const szmax = synthPlane('pz', llz + pz);
-                windowRegion += ` ${szmin} -${szmax}`;
+                windowRegion += ` -${szmax} ${szmin}`;
             }
             // Extend by one ring of `outer` when set, so the MCNP array covers
             // window overhang exactly like OpenMC's outer universe would.

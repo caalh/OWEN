@@ -142,6 +142,16 @@ export function mcnpToSerpent(mcnpText: string): ConversionResult {
     out.push('% --- Surfaces ---');
     const hasReflective = deck.surfaces.some((s) => s.boundary === 'reflective');
     for (const s of deck.surfaces) {
+        // A TR number and a + boundary are captured by the parser. Serpent has
+        // no place they land automatically, so they must be a TODO, not a drop.
+        if (s.transform !== null) {
+            issues.push({ sourceLine: s.line, message: `Surface ${s.id} TR${s.transform} is not applied` });
+            out.push(`% ${TODO_MARK}: surface ${s.id} TR${s.transform} not applied — add a Serpent trans card`);
+        }
+        if (s.boundary === 'periodic') {
+            issues.push({ sourceLine: s.line, message: `Surface ${s.id} + boundary is not applied (MCNP + is white; the parser records it as periodic)` });
+            out.push(`% ${TODO_MARK}: surface ${s.id} white/periodic (+) boundary not applied`);
+        }
         out.push(...surfaceToSerpent(s, issues));
     }
     out.push('');
@@ -150,6 +160,15 @@ export function mcnpToSerpent(mcnpText: string): ConversionResult {
     out.push('% --- Cells ---');
     for (const c of deck.cells) {
         const uni = c.universe ?? 0;
+        if (c.trcl) {
+            issues.push({ sourceLine: c.line, message: `Cell ${c.id} trcl is not converted — Serpent equivalent is a trans card` });
+            out.push(`% ${TODO_MARK}: cell ${c.id} trcl not converted — Serpent uses trans, not trcl`);
+        }
+        if (c.temperatureK !== null) {
+            const kelvin = c.temperatureK.toFixed(1);
+            issues.push({ sourceLine: c.line, message: `Cell ${c.id} tmp (${kelvin} K) is not applied` });
+            out.push(`% ${TODO_MARK}: cell ${c.id} tmp ${kelvin} K not applied — set the Serpent material temperature`);
+        }
         if (c.latticeFill && c.lattice === 1) {
             const pitch = derivePitch(c, deck);
             const lf = c.latticeFill;
@@ -254,6 +273,14 @@ export function mcnpToSerpent(mcnpText: string): ConversionResult {
         out.push(`% ${TODO_MARK}: sdef card not converted: ${st.sdefRaw}`);
     }
     out.push('% Threading: run with "sss2 -omp N" (never "set omp" in the deck).');
+    for (const mt of deck.settings.meshTallies) {
+        issues.push({ sourceLine: mt.line, message: `fmesh ${mt.id} not converted` });
+        out.push(`% ${TODO_MARK}: fmesh ${mt.id} not converted`);
+    }
+    for (const t of deck.settings.cellTallies) {
+        issues.push({ sourceLine: t.line, message: `F${t.kind} tally ${t.id} not converted` });
+        out.push(`% ${TODO_MARK}: F${t.kind} tally ${t.id} not converted`);
+    }
     out.push('');
 
     return { direction: 'mcnp_to_serpent', output: out.join('\n'), issues };

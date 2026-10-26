@@ -120,6 +120,30 @@ suite('Language rules (shared layer) — parity with the old validator', () => {
         assert.ok(diags.some((d) => d.code === 'mcnp.material-sign'));
     });
 
+    test('MCNP: a hot library suffix with no TMP is a warning, and TMP clears it', () => {
+        assert.ok(runLanguageRules('mcnp', 'm1 92235.83c 1').some((d) => d.code === 'mcnp.tmp-absent'));
+        assert.ok(!runLanguageRules('mcnp', 'm1 92235.83c 1\ntmp 1.034e-7').some((d) => d.code === 'mcnp.tmp-absent'));
+        assert.ok(!runLanguageRules('mcnp', 'm1 92235.80c 1').some((d) => d.code === 'mcnp.tmp-absent'));
+    });
+
+    test('MCNP: DBRC isos= without endf= is an error', () => {
+        assert.ok(runLanguageRules('mcnp', 'dbrc isos=U-238').some((d) => d.code === 'mcnp.dbrc-endf'));
+        assert.ok(!runLanguageRules('mcnp', 'dbrc endf=71 isos=U-238').some((d) => d.code === 'mcnp.dbrc-endf'));
+    });
+
+    test('MCNP: infinite-cylinder F4 needs a volume, a closed cylinder does not', () => {
+        const open = '1 1 -1.0 -1 imp:n=1\n2 0 1 imp:n=0\n\n1 cz 1\n\nf4:n 1\n';
+        assert.ok(runLanguageRules('mcnp', open).some((d) => d.code === 'mcnp.unbounded-tally'));
+        const closed = '1 1 -1.0 -1 2 -3 imp:n=1\n\n1 cz 2\n2 pz -5\n3 pz 5\n\nf4:n 1\n';
+        assert.ok(!runLanguageRules('mcnp', closed).some((d) => d.code === 'mcnp.unbounded-tally'));
+    });
+
+    test('MCNP: a universe-cell tally needs sd', () => {
+        const bare = '2 0 -2 3 -4 u=2 imp:n=1\n\n2 cz 0.4\n3 pz -1\n4 pz 1\n\nf4:n 2\n';
+        assert.ok(runLanguageRules('mcnp', bare).some((d) => d.code === 'mcnp.tally-needs-sd'));
+        assert.ok(!runLanguageRules('mcnp', bare + 'sd4 1\n').some((d) => d.code === 'mcnp.tally-needs-sd'));
+    });
+
     test('MCNP: m0 NLIB= plus bare ZAID weight fractions is not mixed-sign', () => {
         // MCNP §5.6.1: M0 sets default library identifiers; fully specified
         // ZAIDs on Mm override. Bare 5010 with all-negative fractions is a

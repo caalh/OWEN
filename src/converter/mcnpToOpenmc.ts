@@ -1114,10 +1114,12 @@ export function mcnpToOpenmc(mcnpText: string): ConversionResult {
     for (const lc of latticeCells) {
         if (lc.universe === null) {
             issues.push({ sourceLine: lc.line, message: `Lattice cell ${lc.id} has no u= number — a lattice must live in a universe to be filled` });
+            out.push(`# ${TODO_MARK}: lattice cell ${lc.id} (lat=${lc.lattice}) has no u= number — not converted`);
             continue;
         }
         if (latticeByUniverse.has(lc.universe)) {
             issues.push({ sourceLine: lc.line, message: `Universe ${lc.universe} has more than one lattice cell — only cell ${latticeByUniverse.get(lc.universe)!.id} was converted` });
+            out.push(`# ${TODO_MARK}: lattice cell ${lc.id} (lat=${lc.lattice}) shares a universe with cell ${latticeByUniverse.get(lc.universe)!.id} — not converted`);
             continue;
         }
         latticeByUniverse.set(lc.universe, lc);

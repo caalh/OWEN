@@ -457,7 +457,7 @@ async function refreshOpenmcExact(): Promise<void> {
 }
 
 export function registerGeometryPreview(context: vscode.ExtensionContext): vscode.Disposable {
-    return vscode.commands.registerCommand('owen.openGeometryPreview', async () => {
+    const command = vscode.commands.registerCommand('owen.openGeometryPreview', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showWarningMessage('OWEN: open an input file before launching the geometry preview.');
@@ -573,6 +573,20 @@ export function registerGeometryPreview(context: vscode.ExtensionContext): vscod
             );
         }
     });
+    let liveTimer: ReturnType<typeof setTimeout> | undefined;
+    const live = vscode.workspace.onDidChangeTextDocument((event) => {
+        if (!currentPanel) return;
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || event.document.uri.toString() !== editor.document.uri.toString()) return;
+        if (liveTimer) clearTimeout(liveTimer);
+        liveTimer = setTimeout(() => {
+            const current = vscode.window.activeTextEditor;
+            if (!currentPanel || !current) return;
+            lastText = current.document.getText();
+            rebuildScene();
+        }, 300);
+    });
+    return vscode.Disposable.from(command, live);
 }
 
 /** Exported for the test that parses the injected script (see webviewHtml.test.ts). */

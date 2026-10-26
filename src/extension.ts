@@ -21,6 +21,15 @@ import { registerMcnpReferencesView } from './references/referencesView';
 import { startLanguageClient, stopLanguageClient } from './lsp/client';
 import { registerOpenmcXmlDiagnostics } from './language/openmcXmlHost';
 import { registerOpenmcHover } from './language/openmcHover';
+import { registerQuickFixes } from './language/codeActions';
+import { registerCardHover } from './language/cardHover';
+import { registerRunKeff } from './commands/runKeff';
+import { registerFindCritical } from './commands/findCritical';
+import { registerConvertAndCompare } from './commands/convertAndCompare';
+import { registerRunReactor } from './commands/runReactor';
+import { registerRenderCsg } from './commands/renderCsg';
+import { registerPreflightGeometry } from './commands/preflightGeometry';
+import { registerCertifyDeck } from './commands/certifyDeck';
 import { registerConvertDeckAdapter } from './converter/adapterCommand';
 import { openAllenCrossSections } from './allen/panel';
 import { openResultsViewer } from './results/panel';
@@ -52,6 +61,15 @@ export function activate(context: vscode.ExtensionContext) {
     registerOpenmcXmlDiagnostics(context);
     // Nuclide hover for OpenMC Python decks (the LSP covers mcnp/serpent/scone).
     registerOpenmcHover(context);
+    registerQuickFixes(context);
+    registerCardHover(context);
+    context.subscriptions.push(registerRunKeff());
+    context.subscriptions.push(registerFindCritical());
+    context.subscriptions.push(registerConvertAndCompare());
+    context.subscriptions.push(registerRunReactor());
+    context.subscriptions.push(registerRenderCsg());
+    context.subscriptions.push(registerPreflightGeometry());
+    context.subscriptions.push(registerCertifyDeck());
 
     context.subscriptions.push(
         vscode.commands.registerCommand('owen.openLatticeBuilder', () => {

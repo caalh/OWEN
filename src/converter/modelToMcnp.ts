@@ -69,7 +69,9 @@ function emitQuadric(s: Extract<Shape, { kind: 'quadric' }>): string {
 function emitShape(em: Emitter, id: number, shape: Shape, tr: Transform | null, label: string): void {
     if (tr) {
         // A transformed surface would need a TRn card and the n field.
+        // The issue list alone is not enough: the deck the user reads must say so.
         em.issues.push({ sourceLine: -1, message: `Surface ${label}: carries a transform; written untransformed — add a TRn card and the n field by hand.` });
+        em.surfaceCards.push(`c ${TODO_MARK}: surface ${label} transform not applied — add a TRn card`);
     }
     if (shape.kind === 'body') {
         const facets: number[] = [];
@@ -185,6 +187,7 @@ export function modelToMcnp(model: McnpGeometryModel, text: string, opts: ModelT
     }
     if (mats.length) {
         issues.push({ sourceLine: -1, message: `Materials written with .80c (ENDF/B-VII.1) — the source suffixes were temperatures, not evaluations. Pick the library and add TMP cards for hot materials.` });
+        matCards.unshift(`c ${TODO_MARK}: nuclide suffixes written as .80c (ENDF/B-VII.1). Source suffixes are temperatures, not evaluations — add TMP for hot materials.`);
     }
 
     // Model material id → source name → MCNP number.
@@ -239,6 +242,7 @@ export function modelToMcnp(model: McnpGeometryModel, text: string, opts: ModelT
                 parts.push(String(mn));
                 if (dens === null) {
                     parts.push(`-1.0`);
+                    cellCards.push(`c ${TODO_MARK}: cell ${names?.cells.get(cid) ?? cid} density missing (Serpent sum or unset) — -1.0 g/cm3 on the next card is a placeholder`);
                     issues.push({ sourceLine: -1, message: `Cell ${names?.cells.get(cid) ?? cid}: no density in the source (Serpent 'sum' or SCONE atom densities); -1.0 g/cm3 written as a placeholder.` });
                 } else parts.push(fmt(dens));
             }
@@ -269,6 +273,7 @@ export function modelToMcnp(model: McnpGeometryModel, text: string, opts: ModelT
     }
     if (!graveyards) {
         issues.push({ sourceLine: -1, message: 'No outside/graveyard cell could be identified; add a cell with imp:n=0 covering the complement of the problem.' });
+        cellCards.push(`c ${TODO_MARK}: no graveyard cell identified — add imp:n=0 over the complement`);
     }
 
     // --- data block

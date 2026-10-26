@@ -497,7 +497,7 @@ function parseNestedList(expr: string): NestedNames | null {
             pos++;
             return items;
         }
-        const m = /^[\w.]+/.exec(s.slice(pos));
+        const m = /^[-+]?[\w.]+/.exec(s.slice(pos));
         if (!m) return null;
         pos += m[0].length;
         return m[0];

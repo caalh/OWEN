@@ -137,6 +137,84 @@ const SAB_TARGETS: { match: RegExp; label: string; za: RegExp }[] = [
     { match: /^(u-uo2|u-o2)/, label: 'uranium', za: /^92\d{3}$/ },
 ];
 
+// Units digit 1–6 of a LANL neutron suffix (.0Nc, .7Nc, .8Nc) is the
+// temperature step 600/900/1200/2500/0.1/250 K. .N0c is 293.6 K.
+const HOT_NEUTRON_ZAID = /\b(\d{4,6})\.(0[1-6]|7[1-6]|8[1-6])c\b/i;
+const SURFACE_MNEMONIC = /^(cz|c\/z|pz|px|py|so|sph|s|sx|sy|sz|rcc|rpp|rhp|hex|box|sq|cx|cy|c\/x|c\/y|kx|ky|kz)$/;
+
+function flagMcnpLibraryAndTallies(lines: string[], diags: PlainDiagnostic[]): void {
+    const live = lines.map((line) => (isCommentLine(line, 'mcnp') ? '' : line));
+    if (!live.some((line) => /^\s*tmp\b/i.test(line))) {
+        for (let i = 0; i < live.length; i++) {
+            const hit = live[i].match(HOT_NEUTRON_ZAID);
+            if (!hit) continue;
+            pushLine(diags, lines, i,
+                `${hit[0]} is on the LANL temperature ladder past 293.6 K (units digit 1–6 → 600/900/1200/2500/0.1/250 K). ` +
+                'With no TMP card, MCNP de-broadens free-gas scattering back toward room temperature (§5.7.5). Add TMP, one entry per cell.',
+                'warning',
+                'mcnp.tmp-absent');
+            break;
+        }
+    }
+    for (let i = 0; i < live.length; i++) {
+        if (!/^\s*dbrc\b/i.test(live[i]) || !/\bisos\s*=/i.test(live[i]) || /\bendf\s*=/i.test(live[i])) continue;
+        pushLine(diags, lines, i,
+            'DBRC with isos= needs endf= (71 or 80). isos= takes bare targets such as U-238 or 92238, not a table identifier like 92238.80c.',
+            'error',
+            'mcnp.dbrc-endf');
+    }
+
+    const surfaces = new Map<number, string>();
+    for (const line of live) {
+        const surf = line.match(/^\s*\*?(\d+)\s+([a-z][a-z0-9/]*)\b/i);
+        if (!surf) continue;
+        const kind = surf[2].toLowerCase();
+        if (SURFACE_MNEMONIC.test(kind)) surfaces.set(Number(surf[1]), kind);
+    }
+    const hasVol = live.some((line) => /^\s*vol\b/i.test(line));
+    for (let i = 0; i < live.length; i++) {
+        const tally = live[i].match(/^\s*f(\d+):n\b(.*)$/i);
+        if (!tally) continue;
+        const tallyNum = tally[1];
+        const type = Number(tallyNum) % 10;
+        if (type !== 4 && type !== 6 && type !== 7) continue;
+        const hasSd = live.some((line) => new RegExp(`^\\s*sd${tallyNum}\\b`, 'i').test(line));
+        const cellIds = (tally[2].match(/\d+/g) ?? []).map(Number);
+        let needsSd = false;
+        let unbounded = false;
+        for (const cellId of cellIds) {
+            const card = live.find((line) => new RegExp(`^\\s*${cellId}\\s+\\d+\\b`).test(line));
+            if (!card) continue;
+            if (/\b(?:fill|lat|u)\s*=/i.test(card)) needsSd = true;
+            if (type === 4 || type === 7) {
+                const body = card.replace(/\$.*$/, '').trim().split(/\s+/);
+                const start = body[1] === '0' ? 2 : 3;
+                const kinds: string[] = [];
+                for (let t = start; t < body.length; t++) {
+                    const tok = body[t];
+                    if (tok.includes('=')) break;
+                    if (!/^[-+]?\d+$/.test(tok)) continue;
+                    const kind = surfaces.get(Math.abs(Number(tok)));
+                    if (kind) kinds.push(kind);
+                }
+                if (kinds.length > 0 && kinds.every((kind) => kind === 'cz' || kind === 'c/z')) unbounded = true;
+            }
+        }
+        if (needsSd && !hasSd) {
+            pushLine(diags, lines, i,
+                `F${tallyNum} scores a cell that lives in a fill, lattice, or universe. MCNP cannot compute that volume; add sd${tallyNum} or the run is fatal.`,
+                'error',
+                'mcnp.tally-needs-sd');
+        }
+        if (unbounded && !hasSd && !hasVol) {
+            pushLine(diags, lines, i,
+                `F${tallyNum} divides by cell volume, and the tallied cell is an infinite cylinder (cz with no pz). Add vol or sd${tallyNum}, or close the cell.`,
+                'error',
+                'mcnp.unbounded-tally');
+        }
+    }
+}
+
 function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOptions): void {
     const lines = text.split(/\r?\n/);
     let densityNoteIssued = false;
@@ -429,6 +507,8 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
             'mcnp.lattice-index-direction',
         );
     }
+
+    flagMcnpLibraryAndTallies(lines, diags);
 }
 
 function cellContinuesToImp(lines: string[], start: number): boolean {

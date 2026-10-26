@@ -276,6 +276,41 @@
         "category": "OWEN"
       },
       {
+        "command": "owen.runKeff",
+        "title": "OWEN: Run k-eff (one-group)",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.findCritical",
+        "title": "OWEN: Find critical radius (one-group)",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.convertAndCompare",
+        "title": "OWEN: Check MCNP to OpenMC conversion",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.runReactor",
+        "title": "OWEN: Run reactor in OpenMC",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.renderCsg",
+        "title": "OWEN: Ray-trace geometry",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.preflightGeometry",
+        "title": "OWEN: Preflight geometry",
+        "category": "OWEN"
+      },
+      {
+        "command": "owen.certifyDeck",
+        "title": "OWEN: Certify MCNP conversion",
+        "category": "OWEN"
+      },
+      {
         "command": "owen.openTutorial",
         "title": "OWEN: Search ReactorMC (Tutorials & NRDP)",
         "category": "OWEN"
@@ -1090,6 +1125,16 @@
     "verify:h5-bundle": "node ./scripts/verify-h5-bundle.mjs",
     "verify:run": "tsc -p . && node ./scripts/verify-run.mjs",
     "verify:converter": "tsc -p . && node ./scripts/verify-converter.mjs",
+    "verify:quick-fixes": "tsc -p . && node ./scripts/verify-quick-fixes.mjs",
+    "verify:run-keff": "tsc -p . && node ./scripts/verify-run-keff.mjs",
+    "verify:find-critical": "tsc -p . && node ./scripts/verify-find-critical.mjs",
+    "verify:convert-compare": "tsc -p . && node ./scripts/verify-convert-compare.mjs",
+    "verify:run-reactor": "tsc -p . && node ./scripts/verify-run-reactor.mjs",
+    "verify:geo-debug": "tsc -p . && node ./scripts/verify-geo-debug.mjs",
+    "verify:certify-deck": "tsc -p . && node ./scripts/verify-certify-deck.mjs",
+    "verify:card-facts": "tsc -p . && node ./scripts/verify-card-facts.mjs",
+    "verify:live-preview": "node ./scripts/verify-live-preview.mjs",
+    "verify:command-coverage": "node ./scripts/verify-command-coverage.mjs",
     "verify:webview-3d": "tsc -p . && node ./scripts/verify-webview-3d.mjs",
     "field-corpus:fetch": "node ./scripts/field-corpus/fetch.mjs",
     "verify:field-corpus": "tsc -p . && node ./scripts/verify-field-corpus.mjs",

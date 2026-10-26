@@ -141,6 +141,14 @@ export function mcnpToScone(mcnpText: string): ConversionResult {
     // surfaces
     out.push('  surfaces {');
     for (const s of deck.surfaces) {
+        if (s.transform !== null) {
+            issues.push({ sourceLine: s.line, message: `Surface ${s.id} TR${s.transform} is not applied` });
+            out.push(`    ! ${TODO_MARK}: surface ${s.id} TR${s.transform} not applied — SCONE has no surface transform here`);
+        }
+        if (s.boundary === 'periodic') {
+            issues.push({ sourceLine: s.line, message: `Surface ${s.id} + boundary is not applied (MCNP + is white; the parser records it as periodic)` });
+            out.push(`    ! ${TODO_MARK}: surface ${s.id} white/periodic (+) boundary not applied`);
+        }
         out.push('    ' + surfaceToScone(s, issues));
     }
     out.push('  }', '');
@@ -149,6 +157,15 @@ export function mcnpToScone(mcnpText: string): ConversionResult {
     const convertedCells: number[] = [];
     out.push('  cells {');
     for (const c of deck.cells) {
+        if (c.trcl) {
+            issues.push({ sourceLine: c.line, message: `Cell ${c.id} trcl is not converted` });
+            out.push(`    ! ${TODO_MARK}: cell ${c.id} trcl not converted`);
+        }
+        if (c.temperatureK !== null) {
+            const kelvin = c.temperatureK.toFixed(1);
+            issues.push({ sourceLine: c.line, message: `Cell ${c.id} tmp (${kelvin} K) is not applied — materials stay at ${SCONE_TEMP} K` });
+            out.push(`    ! ${TODO_MARK}: cell ${c.id} tmp ${kelvin} K not applied — material temp stays ${SCONE_TEMP}`);
+        }
         if (c === graveyard) continue;
         if (c.latticeFill || c.lattice !== null) continue; // handled under universes
         if (c.fill) {
@@ -245,8 +262,20 @@ export function mcnpToScone(mcnpText: string): ConversionResult {
         out.push('      }');
         out.push('    }');
         issues.push({ sourceLine: mat.line, message: `Material m${mat.id}: composition fractions need renormalization to atom densities` });
+        if (mat.mtRaw.length) {
+            issues.push({ sourceLine: mat.line, message: `Material m${mat.id} S(a,b) ${mat.mtRaw.join(' ')} is not converted` });
+            out.push(`      ! ${TODO_MARK}: mt ${mat.mtRaw.join(' ')} not converted — add the SCONE thermal treatment`);
+        }
     }
     out.push('  }', '}', '');
+    for (const mt of deck.settings.meshTallies) {
+        issues.push({ sourceLine: mt.line, message: `fmesh ${mt.id} not converted` });
+        out.push(`! ${TODO_MARK}: fmesh ${mt.id} not converted`);
+    }
+    for (const t of deck.settings.cellTallies) {
+        issues.push({ sourceLine: t.line, message: `F${t.kind} tally ${t.id} not converted` });
+        out.push(`! ${TODO_MARK}: F${t.kind} tally ${t.id} not converted`);
+    }
 
     // ASCII-only guarantee. The \x00 is the low end of the permitted range,
     // not a control character being matched for its own sake.
