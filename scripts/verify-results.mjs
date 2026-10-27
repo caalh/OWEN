@@ -12,8 +12,7 @@
 //   * OpenMC — a real statepoint, tallies.out and log from OpenMC 0.15.3, with
 //     the expected numbers taken from OpenMC's own Python API.
 //   * MCNP outp — layout copied from production output; if real MCNP output is
-//     present on this machine (OWEN_MCNP_OUTP, or the research-decks research
-//     outputs), it is parsed too and the internal identity
+//     present on this machine (OWEN_MCNP_OUTP), it is parsed too and the internal identity
 //     (Li6 + Li7 + F19 == total) has to hold.
 //   * mctal / Serpent / SCONE — fixtures in the documented layouts; see
 //     src/test/fixtures/README.md for where each layout came from.
@@ -248,14 +247,6 @@ const read = (f) => fs.readFileSync(path.join(FIX, f), 'utf8');
 {
     const candidates = [
         process.env.OWEN_MCNP_OUTP,
-        path.join(
-            path.dirname(repo),
-            'research-decks',
-            'ife-neutron-production',
-            'mcnp',
-            'outputs',
-            '70-30_Base.txt',
-        ),
     ].filter((p) => p && fs.existsSync(p));
 
     if (candidates.length === 0) {

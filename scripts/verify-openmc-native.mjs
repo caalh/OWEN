@@ -11,7 +11,7 @@
  *   model_in_main   model built inside main(), gated on OPENMC_CROSS_SECTIONS,
  *                   exported to a subdirectory, ending in model.run() — this
  *                   is the shape that used to fail with "No OpenMC model
- *                   found" (the IFE/HYLIFE deck in research-decks).
+ *                   found" (an IFE/HYLIFE chamber deck).
  *   module_level    geometry and materials at module scope, no Model.
  *   builder_only    a build_model() with defaults and no __main__ block.
  *   no_model        imports openmc and builds nothing (must fail clearly).

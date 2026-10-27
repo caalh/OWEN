@@ -12,7 +12,7 @@ The public site vendors this engine for:
 - `/belvoirdynamics/converter` ← `src/converter/` (not `command.ts`, `rosettaView.ts`, `adapterCommand.ts`) plus `src/compare/canonical.ts`
 
 **Do not leave the site on an old copy.** After you change any of those files,
-from `C:\Users\me\GitHub\reactor-monte-carlo-guide` run:
+from the reactor-monte-carlo-guide checkout run:
 
 ```
 npm run sync:owen-vendor

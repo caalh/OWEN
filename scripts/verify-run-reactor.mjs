@@ -53,7 +53,7 @@ assert.ok(batch && Math.abs(batch.entropy - 4.58159) < 1e-6 && Math.abs(batch.me
 assert.ok(launchBlocked(['mcnp.unbounded-tally']));
 assert.strictEqual(launchBlocked([]), null);
 assert.ok(DEPLETION_BLOCKED.includes('no chain file'));
-const armed = armOpenmcScript("model = openmc.model.Model(geometry, materials, settings)\n\nif __name__ == '__main__':\n    model.export_to_model_xml()\n", '/home/me/.conda/envs/openmc/bin/openmc');
+const armed = armOpenmcScript("model = openmc.model.Model(geometry, materials, settings)\n\nif __name__ == '__main__':\n    model.export_to_model_xml()\n", '/usr/bin/openmc');
 assert.ok(armed.includes('entropy_mesh') && armed.includes('owen-mesh') && armed.includes('REACTOR_JSON'));
 assert.ok(!armed.includes('export_to_model_xml'));
 assert.strictEqual(meshPeaksInside({ width: 4, height: 4, values: [[0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]] }), true);

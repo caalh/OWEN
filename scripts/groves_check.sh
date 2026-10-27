@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-cp /mnt/c/Users/me/AppData/Local/Temp/beavrs_groves.py /tmp/bg.py
+cp "/mnt/c/Users/${USER}/AppData/Local/Temp/beavrs_groves.py" /tmp/bg.py
 cd /tmp
 timeout 180 /opt/miniconda3/bin/python - <<'EOF'
 import runpy

@@ -108,7 +108,7 @@ suite('OWEN workspace validation — OpenMC XML project', () => {
     });
 
     test('the real IFE spherical-shell run directory validates clean', function () {
-        const dir = 'C:/Users/me/GitHub/research-decks/ife-neutronics/openmc/runs/official/spherical_shells_flinak_5050_target1042_low_estimate_official_2026-07-14_5e6';
+        const dir = process.env.OWEN_IFE_DECK ?? '';
         if (!fs.existsSync(path.join(dir, 'geometry.xml'))) { this.skip(); return; }
         const real: FileSystemLike = {
             exists: (p) => fs.existsSync(p), read: (p) => fs.readFileSync(p, 'utf8'),

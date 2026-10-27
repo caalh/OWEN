@@ -3,7 +3,7 @@
 # Usage: gauntlet.sh <converted_beavrs.py windows-temp name>
 set -u
 PY=/opt/miniconda3/bin/python
-SRC="/mnt/c/Users/me/AppData/Local/Temp/${1:-beavrs_conv.py}"
+SRC="/mnt/c/Users/${USER}/AppData/Local/Temp/${1:-beavrs_conv.py}"
 WORK=/tmp/owen-gauntlet
 mkdir -p "$WORK"
 cp "$SRC" "$WORK/deck.py"
@@ -53,11 +53,13 @@ print('from_model_xml OK; cells:', len(m2.geometry.get_all_cells()),
 EOF
 
 echo "== 4. point sampling vs native deck =="
+OWEN_NATIVE="$(cd "$(dirname "$0")/.." && pwd)/prebuilt-models/beavrs_fullcore_openmc.py"
+export OWEN_NATIVE
 $PY - <<'EOF'
-import runpy, sys, math, random
+import os, runpy, sys, math, random
 sys.path.insert(0, '/tmp/owen-gauntlet')
 conv = runpy.run_path('/tmp/owen-gauntlet/deck.py', run_name='not_main')
-nat = runpy.run_path('/mnt/c/Users/me/GitHub/BD-worktree-converter/owen/prebuilt-models/beavrs_fullcore_openmc.py', run_name='not_main')
+nat = runpy.run_path(os.environ['OWEN_NATIVE'], run_name='not_main')
 gc, gn = conv['geometry'], nat['geometry']
 random.seed(42)
 pts = []

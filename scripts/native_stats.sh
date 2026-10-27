@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -u
 PY=/opt/miniconda3/bin/python
+OWEN_NATIVE="$(cd "$(dirname "$0")/.." && pwd)/prebuilt-models/beavrs_fullcore_openmc.py"
+export OWEN_NATIVE
 $PY - <<'EOF'
-import runpy
-g = runpy.run_path('/mnt/c/Users/me/GitHub/BD-worktree-converter/owen/prebuilt-models/beavrs_fullcore_openmc.py', run_name='not_main')
+import os, runpy
+g = runpy.run_path(os.environ['OWEN_NATIVE'], run_name='not_main')
 geom = g['geometry']
 print('NATIVE cells:', len(geom.get_all_cells()))
 print('NATIVE surfaces:', len(geom.get_all_surfaces()))

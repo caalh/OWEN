@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-cp /mnt/c/Users/me/AppData/Local/Temp/surf_zoo.py /tmp/zoo.py
+cp "/mnt/c/Users/${USER}/AppData/Local/Temp/surf_zoo.py" /tmp/zoo.py
 cd /tmp
 /opt/miniconda3/bin/python - <<'EOF'
 import runpy

@@ -110,7 +110,7 @@
  Combined k-effective        = 1.37223 +/- 0.01037
  Leakage Fraction            = 0.00000 +/- 0.00000
 
-STATEPOINT: /home/me/owen-truth/statepoint.30.h5
+STATEPOINT: /tmp/statepoint.30.h5
 KEFF: 1.372+/-0.010
 N_REALIZATIONS: 20
 TALLY 1 'fuel spectrum' mean.shape=(4, 1, 1)

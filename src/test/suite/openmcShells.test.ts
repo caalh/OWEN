@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { buildOpenmcShellScene } from '../../preview/codes/openmcShells';
 import { parseOpenmc } from '../../preview/codes/openmc';
 
-// Shaped after the IFE/HYLIFE chamber deck in research-decks: module-level scalars
+// Shaped after an IFE/HYLIFE chamber deck: module-level scalars
 // for the dimensions, RightCircularCylinder bodies, a 2000 cm bounding sphere,
 // and a capsule whose radii come from a dataclass field (unresolvable without
 // executing the deck).

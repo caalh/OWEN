@@ -6,12 +6,13 @@
 // Then:          node scripts/viz-check.mjs
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { buildScene } from '../out-test/preview/extractor.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PREBUILT = join(here, '..', 'prebuilt-models');
-const DECKS = 'C:/Users/me/reactor-test-decks';
+const DECKS = join(homedir(), 'reactor-test-decks');
 
 // Disk decks (skipped silently when not present on this machine).
 const diskCases = [

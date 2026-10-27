@@ -17,8 +17,9 @@ import {
     parseReactorResult,
 } from '../mc/reactorLaunch';
 
-const DEFAULT_PYTHON = '/home/me/.conda/envs/openmc/bin/python';
-const DEFAULT_XS = '/home/me/openmc-data-full/cross_sections.xml';
+const wslUser = os.userInfo().username;
+const DEFAULT_PYTHON = `/home/${wslUser}/.conda/envs/openmc/bin/python`;
+const DEFAULT_XS = `/home/${wslUser}/openmc-data-full/cross_sections.xml`;
 
 function toWsl(filePath: string): string {
     const norm = filePath.replace(/\\/g, '/');
@@ -29,7 +30,7 @@ function toWsl(filePath: string): string {
 
 function siblingOpenmc(python: string): string {
     const slash = Math.max(python.lastIndexOf('/'), python.lastIndexOf('\\'));
-    if (slash < 0) return '/home/me/.conda/envs/openmc/bin/openmc';
+    if (slash < 0) return `/home/${wslUser}/.conda/envs/openmc/bin/openmc`;
     return `${python.slice(0, slash).replace(/\\/g, '/')}/openmc`;
 }
 
@@ -92,7 +93,7 @@ export function registerRunReactor(): vscode.Disposable {
         const file = path.join(os.tmpdir(), `owen-reactor-${Date.now()}.py`);
         fs.writeFileSync(file, armed.replace(/\r\n/g, '\n'));
         const wslPath = toWsl(file);
-        const command = `sed -i 's/\\r$//' ${wslPath} && export HOME=/home/me OPENMC_CROSS_SECTIONS=${crossSections} && cd /tmp && ${python} ${wslPath}`;
+        const command = `sed -i 's/\\r$//' ${wslPath} && export HOME=/home/${wslUser} OPENMC_CROSS_SECTIONS=${crossSections} && cd /tmp && ${python} ${wslPath}`;
         show(`OpenMC is running in WSL. A final k appears only after the entropy has flattened.\n${DEPLETION_BLOCKED}`);
 
         const child = spawn('wsl', ['-e', 'bash', '-lc', command], { windowsHide: true });
