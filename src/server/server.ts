@@ -94,6 +94,42 @@ function isMcnpDataLine(doc: TextDocument, line: number): boolean {
     return /^\s*m[t]?\d+\b/i.test(lines[line] ?? '');
 }
 
+/** A token carrying an ACE library / temperature suffix: `.80c`, `.20t`, `.06`. */
+function hasAceSuffix(token: string): boolean {
+    return /\.\d{2,3}[a-z]?$/i.test(token);
+}
+
+/** The logical-card start line for `line`, walking back over MCNP continuations. */
+function mcnpCardStart(lines: string[], line: number): number {
+    let i = Math.min(line, lines.length - 1);
+    while (i > 0) {
+        const cur = (lines[i] ?? '').replace(/\t/g, '        ');
+        const prev = (lines[i - 1] ?? '').replace(/\$.*$/, '');
+        const continues = /^ {5,}\S/.test(cur) || /&\s*$/.test(prev);
+        if (!continues) break;
+        i--;
+    }
+    return i;
+}
+
+/** True when `line` belongs to an MCNP material card (m<id>) — the one place a
+ *  bare (suffix-less) ZAID legitimately appears. */
+function isMcnpMaterialCard(doc: TextDocument, line: number): boolean {
+    const lines = doc.getText().split(/\r?\n/);
+    return /^\s*m\d+\b/i.test(lines[mcnpCardStart(lines, line)] ?? '');
+}
+
+/**
+ * The 5000 in `kcode 5000 …` sits in the data block but is not a ZAID. Treat a
+ * token as a nuclide only when it has a library suffix, or (MCNP only) when it
+ * is on a material card. Serpent/SCONE nuclides always carry a suffix, so a
+ * bare number there is never a nuclide.
+ */
+function zaidHoverAllowed(doc: TextDocument, line: number, lang: string, token: string): boolean {
+    if (hasAceSuffix(token)) return lang !== 'mcnp' || isMcnpDataLine(doc, line);
+    return lang === 'mcnp' && isMcnpDataLine(doc, line) && isMcnpMaterialCard(doc, line);
+}
+
 function toLspDiagnostic(d: PlainDiagnostic): Diagnostic {
     const diag: Diagnostic = {
         range: {
@@ -331,7 +367,7 @@ export function startLanguageServer(connection: Connection, options: ServerOptio
         const lineText = doc.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } })
             .replace(/\r?\n$/, '');
         const tok = tokenAt(lineText, character);
-        if (tok && !(lang === 'mcnp' && !isMcnpDataLine(doc, line))) {
+        if (tok && zaidHoverAllowed(doc, line, lang, tok.text)) {
             const md = zaidHoverMarkdown(tok.text, lang);
             if (md) {
                 return {

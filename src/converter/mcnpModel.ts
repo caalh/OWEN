@@ -251,7 +251,15 @@ function stripComment(line: string): string {
     return (idx !== -1 ? line.slice(0, idx) : line).trim();
 }
 
-/** Merge MCNP continuation lines (indented >= 5 columns or trailing '&') into their parent card. */
+/**
+ * Merge MCNP continuation lines into their parent card. A line continues the
+ * previous card only when columns 1–5 are blank (first content in column 6 or
+ * later) or the previous line ended with `&` — MCNP's actual rule. Tabs advance
+ * to the next 8-column stop, so a leading tab counts as blank columns 1–8.
+ * (Mirrors codes/mcnp.ts::logicalCards and preview/mcnpGeometry.ts — keep in
+ * sync. The earlier `>= 4 leading spaces` test was not tab-aware and missed
+ * tab-indented continuations: the same drift that produced Frank Helk's reports.)
+ */
 function joinContinuationLines(lines: string[], offset: number): LogicalLine[] {
     const merged: LogicalLine[] = [];
     let pendingAmp = false;
@@ -268,7 +276,10 @@ function joinContinuationLines(lines: string[], offset: number): LogicalLine[] {
             hasAmp = true;
             clean = clean.slice(0, -1).trim();
         }
-        const isCont = (pendingAmp || (line[0] === ' ' && line.length - strippedLeft.length >= 4)) && merged.length > 0;
+        // Expand tabs to 8-column stops, then a continuation has >= 5 blank
+        // leading columns (first content in column 6+) or follows a trailing `&`.
+        const expandedLead = line.replace(/\t/g, ' '.repeat(8));
+        const isCont = (pendingAmp || /^ {5,}\S/.test(expandedLead)) && merged.length > 0;
         if (isCont) {
             merged[merged.length - 1].text += ' ' + clean;
         } else {

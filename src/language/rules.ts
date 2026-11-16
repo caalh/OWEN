@@ -232,6 +232,12 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
 
     for (let i = 0; i < lines.length; i++) {
         const raw = lines[i];
+        // Strip the `$` inline comment before reading ZAIDs and fraction signs.
+        // Otherwise a number in a comment — e.g. `6012.00c -1 $ Diamond 3.52
+        // g/cm3` — is read as a positive fraction and the all-weight material
+        // looks sign-mixed (Frank Helk, Nov 2026). Column-based checks below
+        // still use `raw` because a comment never changes the leading indent.
+        const code = raw.replace(/\$.*$/, '');
         const trimmed = raw.trim();
         if (trimmed === '' || isCommentLine(raw, 'mcnp')) {
             if (trimmed === '') activeMat = null;
@@ -273,13 +279,13 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
         if (activeMat) {
             let zm: RegExpExecArray | null;
             ZAID_RE.lastIndex = 0;
-            while ((zm = ZAID_RE.exec(raw)) !== null) {
+            while ((zm = ZAID_RE.exec(code)) !== null) {
                 activeMat.zaids.push(zm[1]);
             }
             // Bare ZAIDs (5010 with NLIB=.81c applying the suffix). Do not
             // treat those integers as +atom fractions — that is what made
             // all-weight cards look mixed (issue: Default Material Library).
-            const toks = raw.trim().split(/\s+/);
+            const toks = code.trim().split(/\s+/);
             for (let t = 0; t < toks.length; t++) {
                 const tok = toks[t];
                 if (t === 0 && MATERIAL_HEADER_RE.test(tok + ' ')) continue;
@@ -414,7 +420,9 @@ function validateMCNP(text: string, diags: PlainDiagnostic[], options: RulesOpti
         // ZAIDs, and absence is not evidence here.
         if (mat.zaids.length === 0) continue;
 
-        for (const sabid of lines[i].trim().split(/\s+/).slice(1)) {
+        // Strip the `$` comment first, same reason as the material loop: a
+        // word in a trailing comment must not be read as an S(α,β) identifier.
+        for (const sabid of lines[i].replace(/\$.*$/, '').trim().split(/\s+/).slice(1)) {
             const target = sabid.toLowerCase().replace(/\.\w+$/, '');
             const known = SAB_TARGETS.find((t) => t.match.test(target));
             if (!known) continue;

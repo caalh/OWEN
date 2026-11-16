@@ -205,6 +205,38 @@ suite('OWEN converter — OpenMC → MCNP round trip', () => {
 });
 
 suite('OWEN converter — reported issue regressions', () => {
+    // Frank Helk (Nov 2026): the converter's joinContinuationLines used a
+    // ">= 4 leading spaces" test that was not tab-aware and required line[0]
+    // to be a space, so a tab-indented or 5-column continuation was mis-joined
+    // — the same divergence from logicalCards that caused the undefined-surface
+    // reports. The rule now matches: >= 5 blank leading columns (tabs expand to
+    // 8-column stops) or a trailing `&`.
+    test('Frank: tab / 5-space surface continuation merges; 2-space does not', () => {
+        const base = [
+            'Continuation regression title',
+            '1 0 -1',
+            '',
+            '1 rpp -10 10 -10 10',
+            '__LEAD__-10 10',
+            '2 so 5',
+            '',
+            'm1 1001 1',
+        ].join('\n');
+        for (const lead of ['\t', '     ']) { // tab, five spaces → one rpp, 6 params
+            const deck = parseMcnpDeck(base.replace('__LEAD__', lead));
+            const s1 = deck.surfaces.find((s) => s.id === 1);
+            assert.ok(s1, `surface 1 missing for lead ${JSON.stringify(lead)}`);
+            assert.strictEqual(s1!.type, 'rpp');
+            assert.strictEqual(s1!.params.length, 6, `rpp needs 6 params for lead ${JSON.stringify(lead)}`);
+            assert.ok(!deck.surfaces.some((s) => s.id === -10), 'continuation must not become a spurious surface');
+        }
+        // A 2-space indent is malformed MCNP (not a continuation) and must not merge.
+        const bad = parseMcnpDeck(base.replace('__LEAD__', '  '));
+        const s1bad = bad.surfaces.find((s) => s.id === 1);
+        assert.ok(s1bad, 'surface 1 still parsed');
+        assert.notStrictEqual(s1bad!.params.length, 6, '2-space indent must not be glued on as a continuation');
+    });
+
     // Issue #9: static OpenMC→MCNP wrote densities below 0.001 g/cm3 as -0
     // (scientific-notation values failed the numeric guard and became 0).
     test('#9 static path keeps scientific-notation densities', () => {

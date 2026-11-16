@@ -111,6 +111,22 @@ mustBeQuiet(
 mustFire('mcnp.cell-imp', 'cell genuinely missing imp:n', '10 1 -10.4 -1');
 mustBeQuiet('mcnp.cell-imp', 'imp:n on a continuation line', '10 1 -10.4 -1\n        imp:n=1');
 
+// 5. Fraction signs ignore the $ comment -----------------------------------
+// A number in a trailing comment must not be read as a fraction. `6012.00c -1
+// $ Diamond 3.52 g/cm3` is an all-weight (negative) material; the 3.52 in the
+// comment is not a positive atom fraction (Frank Helk, Nov 2026).
+mustBeQuiet('mcnp.material-sign', 'density in a $ comment', 'm363 6012.00c -1 $ Diamond 3.52 g/cm3');
+mustBeQuiet(
+  'mcnp.material-sign',
+  'all-weight lunar regolith with comments',
+  [
+    'M1 8016 -0.456 $ Lunar Regolith',
+    '       11023 -0.004     12000 -0.005      13027 -0.176      14000 -0.207',
+    '       20000 -0.136     22000 -0.001      26000 -0.015',
+  ].join('\n'),
+);
+mustFire('mcnp.material-sign', 'genuinely mixed signs', 'm5 1001 0.667 8016 -0.333');
+
 // ---------------------------------------------------------------------------
 
 rmSync(outDir, { recursive: true, force: true });
@@ -125,4 +141,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('[verify-mcnp-rules] OK — 17 cases across macrobodies, S(a,b) targets, and continuation lines.');
+console.log('[verify-mcnp-rules] OK — 20 cases across macrobodies, S(a,b) targets, continuation lines, and fraction signs.');

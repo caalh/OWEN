@@ -1,0 +1,91 @@
+---
+description: Every OWEN bug fix must be treated as a possible symptom of a larger problem — checked across OWEN's duplicated parser layers AND across all four supported languages (MCNP, OpenMC, Serpent, SCONE) before it is called done.
+alwaysApply: true
+---
+
+# A fix is not done until you've asked "where else does this live?"
+
+OWEN parses four input languages, and it parses each of them in **several
+independent places**. The same lexing primitives — comment stripping, line
+continuation, token/keyword tables — are **re-implemented per consumer**, not
+shared. So a bug is almost never confined to the one file where it was reported.
+
+When you fix any parsing, lexing, diagnostic, geometry, or convention bug, do the
+two sweeps below **before** you report the fix. Record the result (even if the
+answer is "checked, not affected") in the changelog entry for the fix.
+
+## Sweep 1 — same bug, other layers of the *same* language
+
+Find every place that re-implements the primitive you just touched and apply the
+same fix (or extract a shared helper). Known duplication as of Nov 2026:
+
+**MCNP line handling** (continuation = blank cols 1–5 or prev line ends `&`;
+`$`/`c` comments; surface-mnemonic table) is duplicated in:
+- `src/preview/codes/mcnp.ts` — `leadingColumns`, `logicalCards`, `SURFACE_MNEMONICS`
+- `src/converter/mcnpModel.ts` — `stripComment`, `joinContinuationLines`
+- `src/language/rules.ts` — the linter card loop
+- `packages/mcnp-workspace/src/mcnpReferences.ts` — cross-reference / undefined-surface index
+- `src/preview/mcnpGeometry.ts`
+
+Frank Helk's Nov 2026 reports (false "undefined surface", wrong material-sign from a
+`$` comment) were a **direct result** of these copies drifting apart. All five now
+agree on the continuation rule (tab-aware, ≥5 blank columns or trailing `&`), the
+comment rule, and the mnemonic table — `mcnpModel.ts` was the last straggler (it used
+a non-tab-aware `≥4 spaces` test). They are still five copies; a shared MCNP lexer is
+the proper fix and remains outstanding.
+
+**Serpent** input comments (`%` to EOL + C-style `/* */` blocks that may span lines,
+per `serpent.tmLanguage.json`; **no `#`**) are now stripped by one shared helper,
+`src/preview/commentStrip.ts::stripSerpentComments`, used by both
+`src/preview/codes/serpent.ts` and `src/preview/serpentGeometry.ts`. Before Nov 2026
+these had drifted: the fast extractor only stripped single-line `/* */`, and the
+geometry parser additionally (wrongly) stripped `#`. The Serpent **results** reader
+`src/results/parsers/serpent.ts` parses MATLAB-format `_res.m` output (quote-aware
+`%`, no blocks) — a different grammar; it keeps its own stripper and must NOT use the
+shared one.
+
+**SCONE** input comments (`//` and `!` to EOL, per `scone.tmLanguage.json`; **no block
+comment**) are now stripped by `stripSconeComments`, used by both
+`src/preview/codes/scone.ts` and `src/preview/sconeGeometry.ts`. Before, the fast
+extractor wrongly stripped `/* */` (not a SCONE comment) while the geometry parser did
+not.
+
+**OpenMC** is XML + Python, not column/comment lexing, but still parsed in more than
+one place (`src/language/openmcXml.ts`, `src/preview/codes/openmc.ts`,
+`src/preview/openmcNative/*`); check them together for XML/attribute bugs.
+
+If the same logic now exists in 3+ copies, prefer **extracting a shared per-language
+helper** (as `src/preview/commentStrip.ts` now does for Serpent and SCONE comments)
+over fixing N copies again. That is the real cure; mirroring is the stopgap.
+
+## Sweep 2 — same *class* of bug, the other three languages
+
+Ask whether the analogous construct in the other codes has the same defect. The four
+languages solve the same problems with different syntax, so a convention bug in one is
+usually latent in the others. Examples of parallel constructs:
+
+- **Comment forms:** MCNP `$`/`c`, Serpent `%` + `/* */`, SCONE `//`/`!` (no block
+  comment), OpenMC XML comments. A "comment not stripped before reading numbers" bug
+  applies to all.
+- **Per-primitive preview metadata** (`CylinderSpec.cell`/`universe`, component,
+  material): a 3D scene comes from five builders — the four `src/preview/codes/*.ts`
+  fast paths and the shared `csgScene.ts` — plus helpers that emit shapes for them
+  (`palette.ts emitLayers`, `radialStructure.ts`, `openmcShells.ts`). A new field is
+  not done until every one of them sets it; `src/test/suite/previewCells.test.ts`
+  covers one deck per language and the CSG path.
+- **Line continuation / token joining:** MCNP cols 1–5 + `&`; Serpent whitespace tokens
+  across lines; SCONE brace blocks; OpenMC XML nesting.
+- **Keyword/type tables being incomplete** (the missing MCNP cone/point-pair surfaces):
+  check Serpent surface types, SCONE surface/universe keywords, OpenMC element names.
+- **Sign / unit conventions** (MCNP density & fraction signs): each code has its own —
+  verify the fix didn't assume MCNP semantics elsewhere.
+
+## What "done" requires
+
+1. Fix applied to **every** sibling copy found in Sweep 1 (or a shared helper extracted).
+2. Sweep 2 performed; any same-class defect in another language either fixed or filed.
+3. A test that reproduces the original report (prefer the reporter's real deck), plus a
+   test for each sibling copy you touched.
+4. A changelog line that states the root cause and the cross-layer / cross-language
+   result — not just "fixed X". If a sweep found nothing, say "swept, not affected".
+5. Reporter credited per `.cursor/rules/owen-semver.mdc` when the fix ships.

@@ -13,6 +13,7 @@ import {
     ComponentSummary,
     MaterialSummary,
     AxialLayerSummary,
+    CellSummary,
     COMPONENT_LABELS,
     Component,
     FidelityOptions,
@@ -115,6 +116,7 @@ export function buildScene(text: string, language: string, opts?: FidelityOption
         components,
         materials,
         axialLayers,
+        cells: summarizeCells(cylinders),
         overlays: extractOverlays(text, language),
         warnings: result.warnings ?? [],
         notes: result.notes ?? [],
@@ -193,6 +195,29 @@ function summarizeComponents(cylinders: CylinderSpec[]): ComponentSummary[] {
         color: colorByComp.get(id) ?? componentColor(id),
         count: counts.get(id) ?? 0,
     }));
+}
+
+function summarizeCells(cylinders: CylinderSpec[]): CellSummary[] {
+    interface Acc { universe?: string; count: number; color: string; mats: Map<string, number> }
+    const byCell = new Map<string, Acc>();
+    for (const c of cylinders) {
+        if (c.cell === undefined) continue;
+        let acc = byCell.get(c.cell);
+        if (!acc) {
+            acc = { universe: c.universe, count: 0, color: c.color ?? '#888888', mats: new Map() };
+            byCell.set(c.cell, acc);
+        }
+        acc.count++;
+        if (c.material) acc.mats.set(c.material, (acc.mats.get(c.material) ?? 0) + 1);
+    }
+    return [...byCell.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+        .map(([id, acc]) => {
+            let material: string | undefined;
+            let best = -1;
+            for (const [m, n] of acc.mats) if (n > best) { best = n; material = m; }
+            return { id, universe: acc.universe, material, color: acc.color, count: acc.count };
+        });
 }
 
 function summarizeMaterials(cylinders: CylinderSpec[]): MaterialSummary[] {

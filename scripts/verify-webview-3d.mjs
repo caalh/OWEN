@@ -11,7 +11,10 @@
 //   4. a full-core-sized scene (>= HEAVY_PRIMITIVES) rebuilds without MSAA and
 //      still draws;
 //   5. a forced WebGL context loss (WEBGL_lose_context) is recovered: a fresh
-//      canvas replaces the dead one and geometry is back on screen.
+//      canvas replaces the dead one and geometry is back on screen;
+//   6. per-cell controls: hiding the cell under the cursor lets the pick reach
+//      the one behind it, see-through draws it in a ghost mesh that cannot be
+//      picked, focus and the filter work, and a click opens the action bar.
 //
 // Run: npm run verify:webview-3d   (tsc -p . first so out/src is current)
 // Puppeteer is resolved from this repo if installed, else from the sibling
@@ -116,16 +119,30 @@ function heavyScene(count) {
   }
   return wrap(cyls, 'openmc', 'disc', cyls.length);
 }
+// The assembly with deck cells stamped on it, plus a can no cell owns.
+function cellScene() {
+  const sc = assemblyScene();
+  const cellOf = { fuel: '1', gap: '2', clad: '3', guide_tube: '10' };
+  for (const c of sc.cylinders) { c.cell = cellOf[c.component]; c.universe = c.component === 'guide_tube' ? '2' : '1'; }
+  sc.cylinders.push({ x: 0, y: 0, z: 0, radius: 12, innerRadius: 11.5, height: 380, component: 'vessel', material: 'SS304', color: '#6c7086', opacity: 0.3 });
+  return wrap(sc.cylinders, 'mcnp', 'layers', 289);
+}
 function wrap(cyls, language, detail, pins) {
-  const comps = new Map(), mats = new Map();
+  const comps = new Map(), mats = new Map(), cells = new Map();
   for (const c of cyls) {
     comps.set(c.component, (comps.get(c.component) || 0) + 1);
     mats.set(c.material, (mats.get(c.material) || 0) + 1);
+    if (c.cell) {
+      const e = cells.get(c.cell) || { id: c.cell, universe: c.universe, material: c.material, color: c.color, count: 0 };
+      e.count++;
+      cells.set(c.cell, e);
+    }
   }
   return {
     language, cylinders: cyls,
     components: [...comps].map(([id, count]) => ({ id, label: id, color: '#ffffff', count })),
     materials: [...mats].map(([name, count]) => ({ name, color: '#ffffff', count })),
+    cells: [...cells.values()],
     axialLayers: [], overlays: [], warnings: [], notes: [],
     primitiveCount: cyls.length,
     fidelity: { detail, axial: false, autoDetail: detail, totalPins: pins, hasAxial: true },
@@ -286,6 +303,86 @@ try {
   // so tolerate that one line here while still failing on any thrown error.
   const recoveryErrs = pageErrors.slice(errsBefore).filter((m) => !/A WebGL context could not be created/.test(m));
   check(recoveryErrs.length === 0, `no uncaught errors during recovery${recoveryErrs.length ? ': ' + recoveryErrs.join(' | ') : ''}`);
+
+  console.log('\n[6] per-cell solid / see-through / hidden');
+  const errs6 = pageErrors.length;
+  await post(cellScene());
+  await sleep(800);
+  const cells = () => page.evaluate(() => window.__owenPreviewCells());
+  const setCell = (id, st) => page.evaluate((a, b) => window.__owenPreviewSetCell(a, b), id, st);
+  const rc = await canvasRect();
+  const cx = rc.x + rc.w * 0.5, cy = rc.y + rc.h * 0.5;
+  const pickCell = () => page.evaluate((x, y) => window.__owenPreviewPickCell(x, y), cx, cy);
+  let cs = await cells();
+  const ids = cs.rows.map((x) => x.id).sort();
+  const sectionShown = await page.evaluate(() => getComputedStyle(document.getElementById('cellsSection')).display !== 'none');
+  check(sectionShown, 'Cells section shown for a scene with cells');
+  check(['', '1', '10', '2', '3'].every((id) => ids.includes(id)), `cell rows ${JSON.stringify(ids)} include 1 2 3 10 and the unowned bucket`);
+  check(cs.listed === cs.rows.length, `every cell listed (${cs.listed})`);
+  check(cs.ghost === 0 && cs.off === 0, 'everything starts solid');
+
+  const front = await pickCell();
+  check(typeof front === 'string' && front !== '', `a cell is under the screen centre (${front})`);
+  // Clad hidden over gap covers the same pixels, so compare colour, not coverage.
+  const centreShot = async () => { await sample(); return page.screenshot({ clip: { x: cx - 30, y: cy - 30, width: 60, height: 60 } }); };
+  const shotBefore = await centreShot();
+  await setCell(front, 'hidden');
+  await sleep(200);
+  const behind = await pickCell();
+  cs = await cells();
+  const hiddenCount = cs.rows.find((x) => x.id === front).count;
+  check(behind !== front, `hiding cell ${front} lets the pick reach what is behind it (${behind})`);
+  check(cs.off === hiddenCount, `hidden cell switched off (${cs.off} == ${hiddenCount})`);
+  const shotHidden = await centreShot();
+  check(!shotBefore.equals(shotHidden), 'the picture at the screen centre changed when the cell was hidden');
+
+  await setCell(front, 'ghost');
+  await sleep(200);
+  cs = await cells();
+  check(cs.ghost === hiddenCount && cs.ghostMeshes > 0, `see-through cell drawn in a ghost mesh (${cs.ghost} instances, ${cs.ghostMeshes} mesh)`);
+  check((await pickCell()) !== front, 'a see-through cell cannot be picked');
+  check((await sample()).lit > 0, 'geometry still on screen with a see-through cell');
+
+  await setCell(front, 'solid');
+  await sleep(200);
+  cs = await cells();
+  check(cs.ghost === 0 && cs.off === 0 && cs.ghostMeshes === 0, 'solid again: no ghosts, nothing off');
+  check((await pickCell()) === front, `cell ${front} pickable again`);
+
+  await page.evaluate(() => window.__owenPreviewFocusCell('1', false));
+  cs = await cells();
+  const fuel = cs.rows.find((x) => x.id === '1').count;
+  check(cs.solid === fuel && cs.off === 0, `focus on cell 1: only its ${fuel} pins solid, the rest see-through (${cs.solid} solid, ${cs.ghost} ghost)`);
+  await page.evaluate(() => window.__owenPreviewFocusCell('1', true));
+  cs = await cells();
+  check(cs.ghost === 0 && cs.off === 0, 'focus again undoes it');
+
+  await page.type('#cellSearch', 'zircaloy');
+  cs = await cells();
+  check(cs.listed === 2, `filter "zircaloy" lists cells 3 and 10 (${cs.listed})`);
+  await page.click('#cellHide');
+  cs = await cells();
+  check(cs.rows.filter((x) => x.state === 'hidden').map((x) => x.id).sort().join(',') === '10,3', 'Hide applies to the listed cells only');
+  await page.click('#cellSolid');
+  await page.evaluate(() => { const s = document.getElementById('cellSearch'); s.value = ''; s.dispatchEvent(new Event('input')); });
+
+  await page.mouse.click(cx, cy);
+  await sleep(200);
+  const bar = await page.evaluate(() => {
+    const b = document.getElementById('cellActions');
+    return { shown: getComputedStyle(b).display !== 'none', text: b.textContent };
+  });
+  check(bar.shown && bar.text.includes('Cell ' + front), `click opens the action bar for cell ${front} ("${bar.text.slice(0, 40)}…")`);
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('#cellActions button')].find((x) => x.textContent === 'Hide');
+    if (b) b.click();
+  });
+  cs = await cells();
+  check(cs.rows.find((x) => x.id === front).state === 'hidden', 'the action bar Hide button hides that cell');
+  const barAfter = await page.evaluate(() => document.getElementById('cellActions').textContent);
+  check(barAfter.includes('Solid'), 'the bar stays up with a Solid button to bring the cell back');
+  const cellErrs = pageErrors.slice(errs6);
+  check(cellErrs.length === 0, `no page errors in the per-cell section${cellErrs.length ? ': ' + cellErrs.join(' | ') : ''}`);
 } catch (err) {
   failures.push(`harness error: ${err && err.message || err}`);
   console.error(err);

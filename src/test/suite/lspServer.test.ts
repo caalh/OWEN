@@ -202,6 +202,37 @@ suite('LSP server — in-process', () => {
         assert.ok(/cz 0\.4096/.test(value), value);
     });
 
+    test('a bare number on a kcode card is not hovered as a ZAID', async () => {
+        const uri = 'file:///kcode.i';
+        const text = [
+            '1 1 -18 -1 imp:n=1',
+            '2 0 1 imp:n=0',
+            '',
+            '1 so 8',
+            '',
+            'm1 92235.80c 1',
+            'kcode 5000 1.0 50 250',
+        ].join('\n');
+        await openDoc(h, uri, 'mcnp', text);
+        await h.waitForDiagnostics(uri);
+        // "kcode 5000 ..." — the 5000 (histories/cycle) starts at col 6; it must
+        // not be read as ZAID 5000 (natural boron).
+        const onNumber = await h.client.sendRequest(HoverRequest.type, {
+            textDocument: { uri },
+            position: { line: 6, character: 7 },
+        });
+        const numVal = onNumber ? ((onNumber.contents as { value: string }).value ?? '') : '';
+        assert.ok(!/boron|natural/i.test(numVal), `5000 must not hover as a ZAID: ${numVal}`);
+        // A suffixed ZAID on the material card still hovers as a nuclide.
+        const onZaid = await h.client.sendRequest(HoverRequest.type, {
+            textDocument: { uri },
+            position: { line: 5, character: 5 },
+        });
+        assert.ok(onZaid, 'expected a hover on the material ZAID');
+        const zVal = (onZaid!.contents as { value: string }).value;
+        assert.ok(/U-235|Z=92/.test(zVal), zVal);
+    });
+
     test('go-to-definition from a surface reference lands on its card', async () => {
         const uri = 'file:///def.i';
         await openDoc(h, uri, 'mcnp', PIN_DECK);

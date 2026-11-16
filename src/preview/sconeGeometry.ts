@@ -23,6 +23,7 @@ import {
     Transform,
     Vec3,
 } from './mcnpGeometry';
+import { stripSconeComments as stripComments } from './commentStrip';
 
 function planeShape(n: Vec3, d: number, insidePoint?: Vec3): Shape {
     const len = Math.hypot(n[0], n[1], n[2]);
@@ -57,12 +58,6 @@ function cylShape(axis: 'x' | 'y' | 'z', u0: number, v0: number, r: number): Sha
 interface Block { name: string; inner: string }
 
 /** Strip ! and // comments (SCONE allows both). */
-function stripComments(text: string): string {
-    return text
-        .split(/\r?\n/)
-        .map((l) => l.replace(/\/\/.*$/, '').replace(/!.*$/, ''))
-        .join('\n');
-}
 
 /** Extract the body of the first `<name> { … }` section (brace-matched). */
 function sectionBody(text: string, name: string): string | null {

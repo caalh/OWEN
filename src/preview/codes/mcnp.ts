@@ -23,7 +23,7 @@
 // cylinders directly, as before.
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
-import { componentColor, emitLayers, materialColor, resolveDetail } from '../palette';
+import { componentColor, emitLayers, materialColor, resolveDetail, tagCell, tagCellsFrom } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import {
     BaffleNeighborhood, bafflePlates, bafflePlatesFromRects, emitMcnpRadialStructure,
@@ -84,6 +84,7 @@ interface PinLayer {
     component: ComponentId;
     material: string;
     color: string;
+    cell: number;
 }
 
 interface PinUniverse {
@@ -97,7 +98,7 @@ interface PinUniverse {
      * spacer — matching the OpenMC column model's `grid` bands — instead of
      * silently reusing the fuel signature.
      */
-    grid?: { outer: number; inner: number; material: string };
+    grid?: { outer: number; inner: number; material: string; cell: number };
 }
 
 interface LatUniverse {
@@ -117,7 +118,11 @@ interface AxialSegment {
 const SURFACE_MNEMONICS = new Set([
     'cz', 'cx', 'cy', 'c/z', 'c/x', 'c/y', 'pz', 'px', 'py', 'p',
     'rpp', 'rcc', 'rhp', 'hex', 'so', 's', 'sx', 'sy', 'sz', 'sph',
-    'kz', 'kx', 'ky', 'gq', 'sq', 'tz', 'tx', 'ty', 'box', 'rec', 'trc', 'ell', 'wed', 'arb',
+    'kz', 'kx', 'ky', 'k/z', 'k/x', 'k/y', 'gq', 'sq', 'tz', 'tx', 'ty',
+    // Axisymmetric surfaces given as point pairs about an axis. Needed so a
+    // `100 z 0 20000 …` card classifies as a surface, not a cell.
+    'x', 'y', 'z',
+    'box', 'rec', 'trc', 'ell', 'wed', 'arb',
 ]);
 
 export function extractMcnpCylinders(text: string): CylinderSpec[] {
@@ -302,7 +307,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
             // exactly like the OpenMC column model's grid bands: the thin gray
             // stripe is the honest content of that elevation.
             if (pin.grid) {
-                cylinders.push({
+                cylinders.push(tagCell({
                     label,
                     radius: Math.min(subPitch * 0.5, pin.grid.outer),
                     height: segHeight,
@@ -311,7 +316,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                     opacity: 1.0,
                     component: Component.Grid,
                     material: pin.grid.material,
-                });
+                }, pin.grid.cell, uid));
                 return;
             }
             // Dominant solid layer drives the colour; component from the pin's
@@ -322,7 +327,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
             if (pin.kind === 'guide') { comp = Component.GuideTube; color = componentColor(comp); }
             else if (pin.kind === 'instrument') { comp = Component.InstrumentTube; color = componentColor(comp); }
             else if (pin.kind === 'absorber') { comp = Component.Absorber; color = componentColor(comp); }
-            cylinders.push({
+            cylinders.push(tagCell({
                 label,
                 radius: Math.min(subPitch * 0.47, Math.max(...pin.layers.map((l) => l.radius))),
                 height: segHeight,
@@ -333,7 +338,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                 opacity: 1.0,
                 component: comp,
                 material: solid.material,
-            });
+            }, solid.cell, uid));
             return;
         }
 
@@ -341,9 +346,10 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         const components = pin.layers.map((l) => l.component);
         const colors = pin.layers.map((l) => l.color);
         const mats = pin.layers.map((l) => l.material);
-        cylinders.push(...emitLayers(radii, components, cx, cy, zCenter, segHeight, label, colors, mats));
+        const cellIds = pin.layers.map((l) => String(l.cell));
+        cylinders.push(...emitLayers(radii, components, cx, cy, zCenter, segHeight, label, colors, mats, cellIds, String(uid)));
         if (pin.grid) {
-            cylinders.push({
+            cylinders.push(tagCell({
                 label: `${label}_grid`,
                 radius: pin.grid.outer,
                 innerRadius: pin.grid.inner,
@@ -353,7 +359,7 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                 opacity: 1.0,
                 component: Component.Grid,
                 material: pin.grid.material,
-            });
+            }, pin.grid.cell, uid));
         }
     };
 
@@ -363,8 +369,20 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
         zCenter: number, segHeight: number, hpX: number, hpY: number): boolean => {
         const rects = mcnpBafflePlateRects(uid, byUniverse, surfaces, materials, hpX, hpY);
         if (rects.length === 0) return false;
-        cylinders.push(...bafflePlatesFromRects(label, cx, cy, rects, { height: segHeight, zCenter }));
+        const plates = bafflePlatesFromRects(label, cx, cy, rects, { height: segHeight, zCenter });
+        plates.forEach((p, i) => tagCell(p, rects[i].cell, uid));
+        cylinders.push(...plates);
         return true;
+    };
+
+    // The heuristic plates cannot say which plate came from which cell, so
+    // they all carry the universe's first steel cell.
+    const baffleCell = (uid: number): number | undefined => {
+        for (const c of byUniverse.get(uid) ?? []) {
+            const m = materials.get(c.material);
+            if (c.material !== 0 && m && (m.component === Component.Structure || m.name.toLowerCase().includes('steel'))) return c.id;
+        }
+        return undefined;
     };
 
     // Place a lattice entry: an axial stack (when axial detail is on) expands
@@ -466,11 +484,13 @@ export function parseMcnp(text: string, opts?: FidelityOptions): ParseResult {
                             se: isAsm(j - 1, i + 1), sw: isAsm(j - 1, i - 1),
                         };
                         const band = mcnpBaffleBand(sub, byUniverse, surfaces, materials);
+                        const from = cylinders.length;
                         cylinders.push(...bafflePlates(
                             `${label}_r${j}c${i}_baffle`, px, py,
                             lat.pitchX / 2, lat.pitchY / 2, nb,
                             { height, zCenter: zmid }, band,
                         ));
+                        tagCellsFrom(cylinders, from, baffleCell(sub), sub);
                         continue;
                     }
                     if (latUniverses.has(sub)) placeUniverse(sub, px, py, `${label}_r${j}c${i}`, depth + 1, nextAncestors);
@@ -596,22 +616,37 @@ function buildAxialStack(cells: MCNPCell[], surfaces: Map<number, MCNPSurface>):
  * Splits a deck into logical cards: strips `$` inline comments and `c` comment
  * cards, joins continuation lines, and normalises whitespace around `=`.
  *
- * Continuation rule (lenient, to match real hand-written decks): a non-blank,
- * non-comment line that begins with *any* leading whitespace — a tab, a couple
- * of spaces, or the classic ≥5 blank columns — continues the previous card, as
- * does a previous line ending in `&`. MCNP itself only treats columns 1–5 blank
- * as a continuation, but real decks (and editors that insert tabs) routinely
- * indent the `fill=` line and the flattened lattice grid with a tab or 2–4
- * spaces. Requiring exactly ≥5 spaces silently split those rows off into bogus
- * "cards", so the lattice `fill` array never assembled and the whole assembly
- * collapsed to the bare-pin fallback (the classic "renders as one cylinder"
- * bug). Since no legitimate MCNP card begins with leading whitespace, treating
- * every indented line as a continuation is safe and strictly more forgiving.
+ * Continuation rule: a non-blank, non-comment line continues the previous card
+ * only when columns 1–5 are blank (first content in column 6 or later), or the
+ * previous line ends in `&` — MCNP's actual rule. A tab advances to the next
+ * 8-column stop, so a leading tab counts as a continuation; 1–4 leading spaces
+ * do not. An earlier version treated *any* leading whitespace as a continuation
+ * to force indented `fill=` rows together, but that is wrong: a surface card
+ * indented 1–4 spaces (Frank Helk's lunar-crater deck, which runs in MCNP 6.3)
+ * was wrongly glued onto the previous card, and the whole surface block parsed
+ * as one giant cell. Decks that actually run in MCNP indent their continuation
+ * rows to column 6+ (or use `&`), so the correct rule assembles them fine; the
+ * linter separately flags a 1–4 space continuation as `mcnp.short-continuation`.
+ * (Duplicated in packages/mcnp-workspace/src/mcnpReferences.ts — keep in sync.)
  */
+function leadingColumns(raw: string): number {
+    let col = 0;
+    for (const ch of raw) {
+        if (ch === ' ') col++;
+        else if (ch === '\t') col += 8 - (col % 8);
+        else break;
+    }
+    return col;
+}
+
 function logicalCards(text: string): string[] {
     const lines = text.split(/\r?\n/);
     const cards: string[] = [];
     let buf = '';
+    // MCNP line 1 is the title card: one line, never a continuation target, even
+    // when the first cell number is right-aligned into columns 1–5. (Mirrors
+    // packages/mcnp-workspace/src/mcnpReferences.ts — keep the two in sync.)
+    let sawTitle = false;
 
     const flush = () => {
         const trimmed = buf.trim();
@@ -623,7 +658,13 @@ function logicalCards(text: string): string[] {
         raw = raw.replace(/\$.*$/, ''); // inline comment
         if (raw.trim() === '') { flush(); continue; }
         if (/^\s{0,4}c(\s|$)/i.test(raw)) continue; // comment card (c in cols 1–5)
-        const isCont = /^\s+\S/.test(raw) || /&\s*$/.test(buf);
+        if (!sawTitle) {
+            flush();
+            cards.push(raw.trim().replace(/\s*=\s*/g, '='));
+            if (!/^\s*message:/i.test(raw)) sawTitle = true;
+            continue;
+        }
+        const isCont = leadingColumns(raw) >= 5 || /&\s*$/.test(buf);
         if (isCont && buf !== '') {
             buf = buf.replace(/&\s*$/, '') + ' ' + raw.trim();
         } else {
@@ -1036,7 +1077,7 @@ function buildPinUniverse(
                         const outerHw = Math.max(...half);
                         const innerHw = Math.min(...half);
                         if (outerHw > 0 && innerHw > 0 && outerHw - innerHw < 0.2) {
-                            grid = { outer: outerHw, inner: innerHw, material: inf.name };
+                            grid = { outer: outerHw, inner: innerHw, material: inf.name, cell: cell.id };
                         }
                     }
                 }
@@ -1049,6 +1090,7 @@ function buildPinUniverse(
             component: info.component,
             material: info.name,
             color: materialColor(info.name),
+            cell: cell.id,
         });
     }
     if (layers.length === 0) return null;

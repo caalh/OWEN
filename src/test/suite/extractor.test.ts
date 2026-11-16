@@ -686,11 +686,21 @@ geometry {
         assert.strictEqual(distinctX(scene.cylinders), 17, `expected 17 lattice columns, got ${distinctX(scene.cylinders)}`);
     });
 
-    test('expands a 2-space-indented 17x17 fill grid identically (lenient continuation)', () => {
-        const scene = buildScene(make17x17('  '), 'mcnp', { detail: 'disc', axial: false });
-        // disc mode = one cylinder per position.
-        assert.strictEqual(scene.primitiveCount, 289, `expected 289 discs, got ${scene.primitiveCount}`);
-        assert.strictEqual(distinctX(scene.cylinders), 17, `expected 17 columns, got ${distinctX(scene.cylinders)}`);
+    test('tab/5-space fill grid expands to 289; a 2-space indent is not a continuation', () => {
+        // Tab and ≥5-blank-column indents are real MCNP continuations: the grid
+        // assembles. (disc mode = one cylinder per position.)
+        for (const prefix of ['\t', '     ']) {
+            const scene = buildScene(make17x17(prefix), 'mcnp', { detail: 'disc', axial: false });
+            assert.strictEqual(scene.primitiveCount, 289, `prefix ${JSON.stringify(prefix)}: expected 289 discs, got ${scene.primitiveCount}`);
+            assert.strictEqual(distinctX(scene.cylinders), 17, `expected 17 columns, got ${distinctX(scene.cylinders)}`);
+        }
+        // A 2-space indent puts content in columns 1–5, so MCNP reads a NEW card
+        // (a fatal error it would flag as mcnp.short-continuation). It must NOT
+        // silently join: that leniency misparsed valid decks whose cards are
+        // indented 1–4 columns, e.g. surface cards right-aligned to column 6
+        // (Frank Helk's lunar-crater deck, Nov 2026).
+        const bad = buildScene(make17x17('  '), 'mcnp', { detail: 'disc', axial: false });
+        assert.notStrictEqual(bad.primitiveCount, 289, 'a 2-space-indented fill grid must not assemble as a continuation');
     });
 
     test('derives the lattice pitch from the cell px/py planes (±0.63 → 1.26 cm)', () => {

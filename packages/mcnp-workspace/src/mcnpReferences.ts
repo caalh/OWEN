@@ -63,7 +63,12 @@ export interface McnpReferenceIndex {
 const SURFACE_MNEMONICS = new Set([
     'cz', 'cx', 'cy', 'c/z', 'c/x', 'c/y', 'pz', 'px', 'py', 'p',
     'rpp', 'rcc', 'rhp', 'hex', 'so', 's', 'sx', 'sy', 'sz', 'sph',
-    'kz', 'kx', 'ky', 'gq', 'sq', 'tz', 'tx', 'ty', 'box', 'rec', 'trc', 'ell', 'wed', 'arb',
+    'kz', 'kx', 'ky', 'k/z', 'k/x', 'k/y', 'gq', 'sq', 'tz', 'tx', 'ty',
+    // Axisymmetric surfaces defined by point pairs about an axis (§ surface
+    // cards). Omitting these made `100 z 0 20000 …` parse as a cell and spray
+    // its coefficients as bogus surface references (Frank Helk, Nov 2026).
+    'x', 'y', 'z',
+    'box', 'rec', 'trc', 'ell', 'wed', 'arb',
 ]);
 
 const defKey = (kind: McnpEntityKind, id: number) => `${kind}:${id}`;
@@ -79,10 +84,32 @@ interface Card {
     firstLine: number;
 }
 
+// MCNP continuation rule: a line continues the previous card only when columns
+// 1–5 are blank (first content in column 6 or later), or the previous line ends
+// with `&`. A number/name beginning in columns 1–5 starts a NEW card — this is
+// why surface cards indented 1–4 spaces (Frank Helk's lunar-crater deck, which
+// runs in MCNP 6.3) must not be glued onto the previous card. Tabs advance to
+// the next 8-column stop, matching MCNP's tab handling. (Duplicated in
+// src/preview/codes/mcnp.ts — keep the two in sync until they share a lexer.)
+function leadingColumns(raw: string): number {
+    let col = 0;
+    for (const ch of raw) {
+        if (ch === ' ') col++;
+        else if (ch === '\t') col += 8 - (col % 8);
+        else break;
+    }
+    return col;
+}
+
 function buildCards(text: string): Card[] {
     const lines = text.split(/\r?\n/);
     const cards: Card[] = [];
     let cur: Card | null = null;
+    // MCNP line 1 is the title card: a single line that is never a continuation
+    // target, even when the first cell card is indented into columns 1–5 (a
+    // single-digit cell number right-aligned to column 6, as in Frank Helk's
+    // deck). Without this, that first cell would be swallowed by the title.
+    let sawTitle = false;
 
     const flush = () => {
         if (cur && cur.text.trim()) cards.push(cur);
@@ -103,8 +130,19 @@ function buildCards(text: string): Card[] {
         if (stripped.trim() === '') { flush(); continue; }
         if (/^\s{0,4}c(\s|$)/i.test(raw)) continue; // comment card (cols 1-5)
 
+        if (!sawTitle) {
+            flush();
+            cur = { text: '', map: [], firstLine: li };
+            append(cur, stripped, li);
+            flush();
+            // A rare `message:` block precedes the title; then the title is the
+            // next card and this line is not yet it.
+            if (!/^\s*message:/i.test(raw)) sawTitle = true;
+            continue;
+        }
+
         const prevEndsAmp = cur ? /&\s*$/.test(cur.text) : false;
-        const isCont = /^\s+\S/.test(raw) || prevEndsAmp;
+        const isCont = prevEndsAmp || leadingColumns(raw) >= 5;
         if (isCont && cur) {
             cur.text += ' ';
             cur.map.push(null);

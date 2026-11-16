@@ -29,7 +29,9 @@ suite('OWEN community library wiring', () => {
             (c) => c.command === 'owen.searchReactorLibrary',
         );
         assert.ok(cmd, 'owen.searchReactorLibrary is not contributed');
-        assert.strictEqual(cmd.title, 'OWEN: Input from Community Library');
+        // The palette prefixes the category, so the title itself carries no "OWEN: ".
+        assert.strictEqual(cmd.title, 'Input from Community Library');
+        assert.strictEqual((cmd as { category?: string }).category, 'OWEN');
         assert.ok(!/Search Reactor Library/.test(cmd.title));
     });
 
@@ -49,13 +51,18 @@ suite('OWEN community library wiring', () => {
         );
     });
 
-    test('openCommunityLibrary appears in both OWEN submenus', () => {
+    test('openCommunityLibrary is reachable from both OWEN menus', () => {
         const menus = loadManifest().contributes.menus;
+        const reaches = (root: string, command: string): boolean => {
+            const entries = menus[root] ?? [];
+            return entries.some(
+                (e) => e.command === command || (e.submenu && reaches(e.submenu, command)),
+            );
+        };
         for (const name of ['owen.editorTitleMenu', 'owen.contextMenu']) {
-            const entries = menus[name] ?? [];
             assert.ok(
-                entries.some((e) => e.command === 'owen.openCommunityLibrary'),
-                `owen.openCommunityLibrary missing from ${name}`,
+                reaches(name, 'owen.openCommunityLibrary'),
+                `owen.openCommunityLibrary not reachable from ${name}`,
             );
         }
     });

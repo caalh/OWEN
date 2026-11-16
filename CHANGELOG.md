@@ -5,6 +5,80 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-11-15
+
+Frank Helk ran OWEN on a real MCNP deck and reported, by email, two parser
+bugs and a missing 3D control. All three are in this release. Thank you, Frank.
+
+### Added
+
+- **Per-cell solid / see-through / hidden in the 3D preview** (requested by
+  Frank Helk, in the spirit of VisEd and GxsView). Every drawn shape now knows
+  the deck cell it came from, in all four languages and on both the lattice
+  fast path and the exact CSG path. A new Cells list in the panel shows each
+  cell with its universe and main material. You can search it, click a row to
+  cycle solid → see-through → hidden, apply one state to every listed cell, or
+  focus one cell (it stays solid, the rest go see-through; shift-click hides
+  them instead). Clicking a shape in the view opens a small bar to hide, ghost,
+  or focus that cell, and the bar stays up so a hidden cell can be brought back.
+  See-through cells cannot be hovered, picked, or measured, so you can reach
+  the fuel through the clad. The hover readout names the cell.
+  Cell names are the deck's own: MCNP cell numbers, Serpent and OpenMC cell
+  names. Rings a code defines without cells (Serpent `pin`, SCONE
+  `pinUniverse`, OpenMC lattice pins) are listed as `<pin> [<material>]`. A few
+  shapes no single cell owns (some vessel shells and heuristic baffle plates)
+  share one "Not tied to one cell" row.
+- **Hover facts for MCNP data cards**: `kcode`, `ksrc`, `mode`, `m`, `mt`,
+  `tmp`, `nps`, `dbrc`, `prdmp`.
+- **Run reactor in OpenMC**: converts the open MCNP deck and runs it in WSL
+  OpenMC, streaming batch k and source entropy. The headline k is withheld
+  until the source entropy has settled, and the run refuses to start on a fatal
+  tally, a preflight finding, or a conversion TODO.
+- **Preflight geometry**: a missing graveyard, a `ksrc` point on a surface or
+  in the graveyard, overlaps, gaps, and stochastic cell volumes, before you
+  spend a run on them.
+- **Ray-trace geometry**: an orthographic ray-march of the exact CSG. Click a
+  pixel to jump to its cell card.
+- **Certify MCNP conversion** and **Check MCNP to OpenMC conversion**: every
+  construct is either translated to OpenMC, Serpent, and SCONE or left as a
+  visible TODO, and the OpenMC result is compared against the source deck.
+- **Run k-eff (one-group)** and **Find critical radius (one-group)**: a small
+  built-in Monte Carlo for teaching-scale problems. It is not a substitute for
+  a production code.
+- **New MCNP checks**: a hot-temperature library suffix with no `TMP` card,
+  `DBRC isos=` without `endf=`, an F4/F7 tally on an unbounded cell with no
+  `vol`/`sd`, and a tally on a universe, fill, or lattice cell without `sd`.
+  Quick fixes add the missing graveyard and tally `sd` where the repair is
+  unambiguous, and say so when it is not.
+
+### Fixed
+
+- **False "Surface N is referenced but never defined" errors** (reported by
+  Frank Helk). Bare surface mnemonics such as `x`, `y`, `z` and `k/x` were
+  missing from the table, and any leading space was treated as a continuation,
+  so indented surface cards were glued onto the card above. A continuation now
+  needs columns 1–5 blank (tabs expanded) or a trailing `&`, the same rule in
+  every MCNP reader OWEN has.
+- **Material-sign warning read out of a `$` comment** (reported by Frank
+  Helk). `m363 6012.00c -1 $ Diamond 3.52 g/cm3` no longer counts `3.52` as a
+  positive fraction.
+- **MCNP converter continuation lines**: a tab-indented continuation was
+  dropped and a four-space one wrongly merged. Same rule as above now.
+- **Serpent and SCONE comments** are stripped by one shared helper for both
+  the 3D preview and the exact geometry. Serpent block comments that span lines
+  no longer leak into the preview, `#` is no longer treated as a Serpent
+  comment, and `/* */` is no longer treated as a SCONE comment.
+- **Hover and click ignore geometry on the cut-away side of every slice plane**
+  (X, Y and Z).
+- **Run reactor in OpenMC** used plain `python` when no interpreter was set,
+  because the setting's default hid OWEN's own WSL conda default. An unset
+  `owen.openmc.pythonExecutable` now falls back to the conda path as intended.
+- **A bare number on a `kcode` line no longer hovers as a nuclide** (`5000`
+  read as natural boron). Bare-number ZAID hovers are limited to MCNP material
+  cards.
+- **Menu labels**: commands no longer repeat "OWEN:" inside the OWEN submenu.
+  The Command Palette still shows the OWEN category.
+
 ## [1.4.9] - 2026-10-12
 
 Three converter bugs reported by John (`bluetyde`) running OWEN 1.4.8 from the

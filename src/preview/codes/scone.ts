@@ -22,13 +22,14 @@
 // than silently drawing one pin.
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
-import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
+import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail, tagCell, tagCellsFrom } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import {
     BaffleNeighborhood, bafflePlates, bafflePlatesFromRects, emitSconeRadialStructure,
     PlateConstraint, PlateRect, plateRectFromConstraints,
 } from '../radialStructure';
 import { parseSconeGeometry } from '../sconeGeometry';
+import { stripSconeComments as stripComments } from '../commentStrip';
 import { buildCsgScene } from '../csgScene';
 
 interface LeafBlock {
@@ -204,10 +205,10 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     // Inconel `…Grid` material on a zSquareCylinder). `resolveToPin` rightly
     // ignores mat-fill cells, so without this the spacer band renders with the
     // fuel signature and the gray grid stripes only appear on the OpenMC path.
-    const gridCache = new Map<number, { outer: number; inner: number; mat: string } | null>();
-    const gridInfo = (uid: number): { outer: number; inner: number; mat: string } | null => {
+    const gridCache = new Map<number, { outer: number; inner: number; mat: string; cell: number } | null>();
+    const gridInfo = (uid: number): { outer: number; inner: number; mat: string; cell: number } | null => {
         if (gridCache.has(uid)) return gridCache.get(uid)!;
-        let out: { outer: number; inner: number; mat: string } | null = null;
+        let out: { outer: number; inner: number; mat: string; cell: number } | null = null;
         for (const cid of cellUniCells.get(uid) ?? []) {
             const mat = cellMaterial.get(cid);
             if (!mat || !/inconel|grid/i.test(mat)) continue;
@@ -219,7 +220,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             if (hws.length) {
                 const outer = Math.max(...hws);
                 const inner = hws.length > 1 ? Math.min(...hws) : outer * 0.97;
-                out = { outer, inner, mat };
+                out = { outer, inner, mat, cell: cid };
                 break;
             }
         }
@@ -262,14 +263,14 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     const baffleBands = new Map<number, [number, number]>();
     // Exact plate rects per baffle universe from the steel cells' halfspaces;
     // missing entry → call site falls back to the neighborhood heuristic.
-    const baffleRects = new Map<number, { cons: PlateConstraint[] }[]>();
+    const baffleRects = new Map<number, { cons: PlateConstraint[]; cell: number }[]>();
     for (const [uid, cids] of cellUniCells) {
         let steel = false;
         let hasXY = false;
         let cyl = false;
         const offs = new Set<number>();
         let rectsOk = true;
-        const cellCons: { cons: PlateConstraint[] }[] = [];
+        const cellCons: { cons: PlateConstraint[]; cell: number }[] = [];
         for (const cid of cids) {
             const mat = cellMaterial.get(cid);
             const isSteel = !!mat && /steel|ss-?304/i.test(mat);
@@ -298,7 +299,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             }
             if (isSteel) {
                 steel = true;
-                if (cons.length > 0) cellCons.push({ cons });
+                if (cons.length > 0) cellCons.push({ cons, cell: cid });
                 else rectsOk = false;
             }
         }
@@ -356,7 +357,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
     };
 
     const placePinAt = (uid: number, cx: number, cy: number, z: number, height: number, label: string,
-        grid: { outer: number; inner: number; mat: string } | null = null): void => {
+        grid: { outer: number; inner: number; mat: string; cell: number } | null = null): void => {
         if (cylinders.length >= maxInstances) { capped = true; return; }
         const pin = pinDefs.get(uid);
         if (!pin) return;
@@ -366,12 +367,14 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
         const isAbsorber = /bp|burn|absorb|poison|control|\bcr\b|rod/.test(nameLow);
         const radii = pin.radii.filter((r) => r > 0);
         if (radii.length === 0) return; // pure-fill pin (water) — nothing to draw
+        // pinUniverse rings are not cells in the deck.
+        const ringCell = (matName: string): string => `${pin.name} [${matName}]`;
 
         if (discMode) {
             // Grid-overlay band: the spacer is the honest content of this
             // elevation — parity with the OpenMC column model's gray bands.
             if (grid) {
-                cylinders.push({
+                cylinders.push(tagCell({
                     label,
                     radius: Math.min(subPinPitch * 0.5, grid.outer),
                     height,
@@ -380,7 +383,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                     opacity: 1.0,
                     component: Component.Grid,
                     material: grid.mat,
-                });
+                }, grid.cell));
                 return;
             }
             let matIdx = 0;
@@ -395,7 +398,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             else if (isInstr) { comp = Component.InstrumentTube; color = componentColor(comp); }
             else if (isAbsorber) { comp = Component.Absorber; color = componentColor(comp); }
             else { comp = refineComponent(pin.name, materialComponent(matName)); color = materialColor(matName); }
-            cylinders.push({
+            cylinders.push(tagCell({
                 label,
                 radius: Math.min(subPinPitch * 0.47, Math.max(...radii)),
                 height,
@@ -406,7 +409,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                 opacity: 1.0,
                 component: comp,
                 material: matName,
-            });
+            }, ringCell(matName), uid));
             return;
         }
 
@@ -424,9 +427,10 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
             colors.push(materialColor(matName));
             mats.push(matName);
         }
-        cylinders.push(...emitLayers(radii, components, cx, cy, z, height, label, colors, mats));
+        cylinders.push(...emitLayers(radii, components, cx, cy, z, height, label, colors, mats,
+            mats.map((m) => ringCell(m ?? 'unknown')), String(uid)));
         if (grid) {
-            cylinders.push({
+            cylinders.push(tagCell({
                 label: `${label}_grid`,
                 radius: grid.outer,
                 innerRadius: grid.inner,
@@ -436,7 +440,7 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                 opacity: 1.0,
                 component: Component.Grid,
                 material: grid.mat,
-            });
+            }, grid.cell));
         }
     };
 
@@ -520,15 +524,17 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                     const cellCons = baffleRects.get(uid);
                     if (cellCons) {
                         const rects: PlateRect[] = [];
-                        for (const { cons } of cellCons) {
+                        for (const { cons, cell } of cellCons) {
                             const rect = plateRectFromConstraints(cons, core.pitch / 2, core.pitch / 2);
-                            if (rect) rects.push(rect);
+                            if (rect) rects.push({ ...rect, cell });
                         }
                         if (rects.length > 0) {
-                            cylinders.push(...bafflePlatesFromRects(
+                            const plates = bafflePlatesFromRects(
                                 `core_r${r}c${c}_baffle`, ax, ay, rects,
                                 { height: coreHeight, zCenter: coreZ },
-                            ));
+                            );
+                            plates.forEach((p, i) => tagCell(p, rects[i].cell, uid));
+                            cylinders.push(...plates);
                             continue;
                         }
                     }
@@ -538,11 +544,15 @@ export function parseScone(rawText: string, opts?: FidelityOptions): ParseResult
                         ne: isAsm(r - 1, c + 1), nw: isAsm(r - 1, c - 1),
                         se: isAsm(r + 1, c + 1), sw: isAsm(r + 1, c - 1),
                     };
+                    const from = cylinders.length;
                     cylinders.push(...bafflePlates(
                         `core_r${r}c${c}_baffle`, ax, ay,
                         core.pitch / 2, core.pitch / 2, nb,
                         { height: coreHeight, zCenter: coreZ }, baffleBands.get(uid),
                     ));
+                    const steelCell = (cellUniCells.get(uid) ?? [])
+                        .find((cid) => /steel|ss-?304/i.test(cellMaterial.get(cid) ?? ''));
+                    tagCellsFrom(cylinders, from, steelCell, uid);
                     continue;
                 }
                 if (latDefs.has(uid)) placeAssembly(uid, ax, ay, `asm_r${r}c${c}`);
@@ -615,12 +625,6 @@ function averagePinLayers(pinDefs: Map<number, PinDef>): number {
 // Block / field parsing
 // ---------------------------------------------------------------------------
 
-function stripComments(text: string): string {
-    return text
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/\/\/[^\n]*/g, ' ')
-        .replace(/!.*$/gm, ' ');
-}
 
 /** Finds every `name { … }` block whose body contains no nested `{`. */
 function findLeafBlocks(text: string): LeafBlock[] {

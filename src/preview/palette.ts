@@ -190,6 +190,8 @@ export function emitLayers(
     labelPrefix: string,
     colors?: (string | undefined)[],
     materials?: (string | undefined)[],
+    cells?: (string | undefined)[],
+    universe?: string,
 ): import('./types').CylinderSpec[] {
     const cyls: import('./types').CylinderSpec[] = [];
     let prevR = 0;
@@ -200,7 +202,7 @@ export function emitLayers(
             continue;
         }
         const comp = components[i] ?? Component.Other;
-        cyls.push({
+        const spec: import('./types').CylinderSpec = {
             label: `${labelPrefix}_L${i}`,
             radius: Math.max(0.02, r),
             height,
@@ -212,8 +214,39 @@ export function emitLayers(
             opacity: 1.0,
             component: comp,
             material: materials?.[i],
-        });
+        };
+        tagCell(spec, cells?.[i], universe);
+        cyls.push(spec);
         prevR = r;
     }
     return cyls;
+}
+
+/**
+ * Records which deck cell a primitive came from. A universe of `0` (or the
+ * empty string) is the root and is left off.
+ */
+export function tagCell(
+    spec: import('./types').CylinderSpec,
+    cell: string | number | null | undefined,
+    universe?: string | number | null,
+): import('./types').CylinderSpec {
+    if (cell === undefined || cell === null || cell === '') return spec;
+    spec.cell = String(cell);
+    if (universe !== undefined && universe !== null && universe !== '' && String(universe) !== '0') {
+        spec.universe = String(universe);
+    }
+    return spec;
+}
+
+/** `tagCell` for every primitive pushed since `from` that has no cell yet. */
+export function tagCellsFrom(
+    specs: import('./types').CylinderSpec[],
+    from: number,
+    cell: string | number | null | undefined,
+    universe?: string | number | null,
+): void {
+    for (let i = from; i < specs.length; i++) {
+        if (specs[i].cell === undefined) tagCell(specs[i], cell, universe);
+    }
 }

@@ -1201,6 +1201,21 @@ export function buildCsgScene(
     let budgetWarned = false;
     const exteriorNoted = new Set<number>();
 
+    // Serpent `pin` and SCONE `pinUniverse` rings are synthesized cells that
+    // all carry the pin's name; the material tells them apart.
+    const nameUses = new Map<string, number>();
+    for (const id of model.cells.keys()) {
+        const n = model.names?.cells.get(id);
+        if (n) nameUses.set(n, (nameUses.get(n) ?? 0) + 1);
+    }
+    const cellKey = (id: number, matName: string): string => {
+        const n = model.names?.cells.get(id);
+        if (!n) return String(id);
+        return (nameUses.get(n) ?? 0) > 1 ? `${n} [${matName}]` : n;
+    };
+    const universeKey = (u: number): string | undefined =>
+        u === 0 ? undefined : model.names?.universes.get(u) ?? String(u);
+
     const emitCell = (pl: Placement, asVoid: boolean): void => {
         const { cellId, offset } = pl;
         if (out.length >= maxPrims) {
@@ -1233,6 +1248,8 @@ export function buildCsgScene(
                     shape: 'box',
                     color: materialColor(matInfo.name), component: matInfo.component, material: matInfo.name,
                     label: `cell ${cellId} (element)`,
+                    cell: cellKey(cellId, matInfo.name),
+                    universe: universeKey(cell.universe),
                 });
                 census.exact++;
                 return;
@@ -1347,6 +1364,12 @@ export function buildCsgScene(
             for (const s of cellSpecs) materialExtent = Math.max(materialExtent, specSize(s));
         }
 
+        const key = cellKey(cellId, asVoid ? 'void' : matInfo.name);
+        const uni = universeKey(cell.universe);
+        for (const s of cellSpecs) {
+            s.cell = key;
+            if (uni !== undefined) s.universe = uni;
+        }
         out.push(...cellSpecs);
         if (worst === 'exact') census.exact++;
         else if (worst === 'approximated') {

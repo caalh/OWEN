@@ -16,7 +16,7 @@
 // Hex lattices are detected but only laid out on a rectangular approximation.
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
-import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail } from '../palette';
+import { componentColor, emitLayers, extractNumbers, materialColor, resolveDetail, tagCell } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import {
     BaffleNeighborhood, PlateConstraint, PlateRect, baffleBox, bafflePlates,
@@ -308,7 +308,17 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
         emitSegment(rep, x, y, collapsedZ, collapsedHeight, label);
     };
 
-    const placePin = (token: string, x: number, y: number, label: string): void => {
+    // This path reads lattice maps, not Cell objects, so a ring answers to the
+    // universe identifier the map used plus its material.
+    const tagRings = (from: number, uni: string | undefined): void => {
+        if (!uni) return;
+        for (let i = from; i < cylinders.length; i++) {
+            const s = cylinders[i];
+            if (s.cell === undefined) tagCell(s, `${uni} [${s.material ?? s.component ?? 'unknown'}]`, uni);
+        }
+    };
+
+    const placePinUntagged = (token: string, x: number, y: number, label: string): void => {
         const role = classifyToken(token, universeMap);
         if (role === 'empty') return;
         if (columnModel) {
@@ -326,6 +336,12 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
             return;
         }
         placePinAt(template, x, y, 0, height, label);
+    };
+
+    const placePin = (token: string, x: number, y: number, label: string): void => {
+        const from = cylinders.length;
+        placePinUntagged(token, x, y, label);
+        tagRings(from, token);
     };
 
     const placeGrid = (lat: NamedLattice | { grid: string[][]; pitch: [number, number]; lowerLeft: [number, number] | null }, cx: number, cy: number, label: string, depth: number): void => {
@@ -443,7 +459,9 @@ export function parseOpenmc(text: string, opts?: FidelityOptions): ParseResult {
                     ));
                     continue;
                 }
+                const from = cylinders.length;
                 placeTree(child, x, y, `${label}_r${r}c${c}`, depth + 1, Math.max(px, py));
+                if (child.kind === 'pin') tagRings(from, child.name ?? child.colKey ?? child.role);
             }
         }
     };
@@ -1311,6 +1329,8 @@ interface ResolvedPin {
      * axial column stack so each band renders its real per-z shells/materials.
      */
     colKey?: string;
+    /** The identifier the deck used for this pin, for the per-cell controls. */
+    name?: string;
 }
 interface ResolvedLattice {
     kind: 'lattice';
@@ -1723,7 +1743,7 @@ function buildGridFromTemplate(
         for (const ch of row) {
             const cellExpr = pick.has(ch) ? pick.get(ch)! : defExpr;
             const key = keyOf(cellExpr);
-            out.push({ kind: 'pin', role: classifyKey(key), colKey: key });
+            out.push({ kind: 'pin', role: classifyKey(key), colKey: key, name: key });
         }
         grid.push(out);
     }
@@ -1803,14 +1823,14 @@ function resolveExpr(expr: string, scope: Scope, depth: number): ResolvedNode {
             } else if (scope.vars.has(t) && scope.vars.get(t) !== t) {
                 const rhs = scope.vars.get(t)!;
                 if (/^openmc\.(Universe|Material)\s*\(/.test(rhs) || /^openmc\./.test(rhs)) {
-                    result = { kind: 'pin', role: classifyKey(t) };
+                    result = { kind: 'pin', role: classifyKey(t), name: t };
                     if (result.role === 'empty') result = { kind: 'skip' };
                 } else {
                     result = resolveExpr(rhs, scope, depth + 1);
                 }
             } else {
                 const role = classifyKey(t);
-                result = role === 'empty' ? { kind: 'skip' } : { kind: 'pin', role };
+                result = role === 'empty' ? { kind: 'skip' } : { kind: 'pin', role, name: t };
             }
         }
         // A call we don't model (e.g. _baffle(...)) stays a skip.

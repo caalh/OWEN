@@ -86,6 +86,27 @@ export interface CylinderSpec {
     axialLayer?: string;
     /** Ordered index of the axial layer (0 = bottom-most), for the slider. */
     axialIndex?: number;
+    /**
+     * The deck cell this primitive was drawn from, written the way the deck
+     * writes it (`1` for MCNP, `fuel_pin` for a Serpent cell). Rings that a
+     * code defines without cells (Serpent `pin`, SCONE `pinUniverse`) are
+     * named `<pin> [<material>]`. Drives per-cell show/hide/see-through.
+     * Undefined when no single cell owns the primitive.
+     */
+    cell?: string;
+    /** Universe that cell sits in, as the deck names it; undefined for the root. */
+    universe?: string;
+}
+
+/** A deck cell the webview can show, hide, or make see-through. */
+export interface CellSummary {
+    /** Same string as `CylinderSpec.cell`. */
+    id: string;
+    universe?: string;
+    /** Most common material among the cell's primitives. */
+    material?: string;
+    color: string;
+    count: number;
 }
 
 /** A logical layer the webview can show/hide, with a representative color. */
@@ -161,6 +182,8 @@ export interface GeometryScene {
     /** Axial layers (z-bands) for the per-layer toggle + slice slider. Empty
      * unless the scene was expanded with axial detail. */
     axialLayers: AxialLayerSummary[];
+    /** Deck cells present in the drawing, for the per-cell controls. */
+    cells: CellSummary[];
     /** Source points/boxes and tally meshes read from the deck's data cards. */
     overlays: SceneOverlay[];
     warnings: string[];

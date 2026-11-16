@@ -2,7 +2,7 @@
   "name": "owen-neutronics",
   "displayName": "OWEN — Open Workspace for Engineered Neutronics",
   "description": "Write, check, convert, and run MCNP, OpenMC, Serpent, and SCONE in VS Code or Cursor. Language-server diagnostics, 3D geometry preview, converters between the four codes, results viewer, lattice and input builders, and the 411-material PNNL compendium — fully offline.",
-  "version": "1.4.9",
+  "version": "1.5.0",
   "publisher": "belvoirdynamics",
   "author": "Aaron W. Calhoun",
   "license": "SEE LICENSE IN LICENSE",
@@ -201,214 +201,214 @@
     "commands": [
       {
         "command": "owen.openAllen",
-        "title": "OWEN: Open ALLEN Cross-Sections",
+        "title": "Open ALLEN Cross-Sections",
         "category": "OWEN",
         "icon": "$(graph-line)"
       },
       {
         "command": "owen.openResults",
-        "title": "OWEN: View Results",
+        "title": "View Results",
         "category": "OWEN",
         "icon": "$(output)"
       },
       {
         "command": "owen.openResultsFile",
-        "title": "OWEN: View Results from This File",
+        "title": "View Results from This File",
         "category": "OWEN",
         "icon": "$(output)"
       },
       {
         "command": "owen.openLatticeBuilder",
-        "title": "OWEN: Open Input Builder (Lattice tab)",
+        "title": "Open Input Builder (Lattice tab)",
         "category": "OWEN"
       },
       {
         "command": "owen.openInputBuilder",
-        "title": "OWEN: Open Input Builder",
+        "title": "Open Input Builder",
         "category": "OWEN"
       },
       {
         "command": "owen.validateInput",
-        "title": "OWEN: Validate Input File",
+        "title": "Validate Input File",
         "category": "OWEN"
       },
       {
         "command": "owen.runSimulation",
-        "title": "OWEN: Run Simulation",
+        "title": "Run Simulation",
         "category": "OWEN"
       },
       {
         "command": "owen.openGeometryPreview",
-        "title": "OWEN: Open 3D Geometry Preview",
+        "title": "Open 3D Geometry Preview",
         "category": "OWEN"
       },
       {
         "command": "owen.renderWithOpenmc",
-        "title": "OWEN: Render with OpenMC (authoritative)",
+        "title": "Render with OpenMC (authoritative)",
         "category": "OWEN",
         "icon": "$(symbol-color)"
       },
       {
         "command": "owen.verifyGeometry",
-        "title": "OWEN: Verify Geometry with OpenMC",
+        "title": "Verify Geometry with OpenMC",
         "category": "OWEN",
         "icon": "$(check)"
       },
       {
         "command": "owen.searchReactorLibrary",
-        "title": "OWEN: Input from Community Library",
+        "title": "Input from Community Library",
         "category": "OWEN"
       },
       {
         "command": "owen.openCommunityLibrary",
-        "title": "OWEN: Open Community Library on reactormc.net",
+        "title": "Open Community Library on reactormc.net",
         "category": "OWEN",
         "icon": "$(link-external)"
       },
       {
         "command": "owen.openPrebuiltModel",
-        "title": "OWEN: Open Prebuilt Model…",
+        "title": "Open Prebuilt Model…",
         "category": "OWEN"
       },
       {
         "command": "owen.insertMaterial",
-        "title": "OWEN: Insert Material from Database",
+        "title": "Insert Material from Database",
         "category": "OWEN"
       },
       {
         "command": "owen.runKeff",
-        "title": "OWEN: Run k-eff (one-group)",
+        "title": "Run k-eff (one-group)",
         "category": "OWEN"
       },
       {
         "command": "owen.findCritical",
-        "title": "OWEN: Find critical radius (one-group)",
+        "title": "Find critical radius (one-group)",
         "category": "OWEN"
       },
       {
         "command": "owen.convertAndCompare",
-        "title": "OWEN: Check MCNP to OpenMC conversion",
+        "title": "Check MCNP to OpenMC conversion",
         "category": "OWEN"
       },
       {
         "command": "owen.runReactor",
-        "title": "OWEN: Run reactor in OpenMC",
+        "title": "Run reactor in OpenMC",
         "category": "OWEN"
       },
       {
         "command": "owen.renderCsg",
-        "title": "OWEN: Ray-trace geometry",
+        "title": "Ray-trace geometry",
         "category": "OWEN"
       },
       {
         "command": "owen.preflightGeometry",
-        "title": "OWEN: Preflight geometry",
+        "title": "Preflight geometry",
         "category": "OWEN"
       },
       {
         "command": "owen.certifyDeck",
-        "title": "OWEN: Certify MCNP conversion",
+        "title": "Certify MCNP conversion",
         "category": "OWEN"
       },
       {
         "command": "owen.openTutorial",
-        "title": "OWEN: Search ReactorMC (Tutorials & NRDP)",
+        "title": "Search ReactorMC (Tutorials & NRDP)",
         "category": "OWEN"
       },
       {
         "command": "owen.runSweep",
-        "title": "OWEN: Run Parameter Sweep",
+        "title": "Run Parameter Sweep",
         "category": "OWEN"
       },
       {
         "command": "owen.viewSweepResults",
-        "title": "OWEN: View Sweep Results (Dashboard)",
+        "title": "View Sweep Results (Dashboard)",
         "category": "OWEN",
         "icon": "$(graph-scatter)"
       },
       {
         "command": "owen.convertDeck",
-        "title": "OWEN: Convert Deck… (MCNP / OpenMC / Serpent / SCONE)",
+        "title": "Convert Deck… (MCNP / OpenMC / Serpent / SCONE)",
         "category": "OWEN",
         "icon": "$(arrow-swap)"
       },
       {
         "command": "owen.convertDeckAdapter",
-        "title": "OWEN: Convert to OpenMC XML (openmc adapters)",
+        "title": "Convert to OpenMC XML (openmc adapters)",
         "category": "OWEN",
         "icon": "$(arrow-right)"
       },
       {
         "command": "owen.chooseHighlightPalette",
-        "title": "OWEN: Choose Highlight Palette",
+        "title": "Choose Highlight Palette",
         "category": "OWEN"
       },
       {
         "command": "owen.toggleInvisibleCharacters",
-        "title": "OWEN: Toggle Invisible Characters",
+        "title": "Toggle Invisible Characters",
         "category": "OWEN"
       },
       {
         "command": "owen.showMcnpReferences",
-        "title": "OWEN: Show MCNP References (Cross-Reference Tracker)",
+        "title": "Show MCNP References (Cross-Reference Tracker)",
         "category": "OWEN",
         "icon": "$(references)"
       },
       {
         "command": "owen.setMcnpProjectRoot",
-        "title": "OWEN: Set MCNP Project Root",
+        "title": "Set MCNP Project Root",
         "category": "OWEN"
       },
       {
         "command": "owen.toggleMcnpLineLimit",
-        "title": "OWEN: Toggle MCNP Line Limit (80/128)",
+        "title": "Toggle MCNP Line Limit (80/128)",
         "category": "OWEN"
       },
       {
         "command": "owen.reportProblem",
-        "title": "OWEN: Report a problem (plain text to help@reactormc.net)",
+        "title": "Report a problem (plain text to help@reactormc.net)",
         "category": "OWEN",
         "icon": "$(mail)"
       },
       {
         "command": "owen.openReference",
-        "title": "OWEN: Reference Documentation...",
+        "title": "Reference Documentation...",
         "category": "OWEN",
         "icon": "$(book)"
       },
       {
         "command": "owen.showMcnpCellMap",
-        "title": "OWEN: Show Cell Map",
+        "title": "Show Cell Map",
         "category": "OWEN",
         "icon": "$(type-hierarchy)"
       },
       {
         "command": "owen.checkGeometry",
-        "title": "OWEN: Check Geometry (overlaps & gaps)",
+        "title": "Check Geometry (overlaps & gaps)",
         "category": "OWEN",
         "icon": "$(checklist)"
       },
       {
         "command": "owen.cellVolumes",
-        "title": "OWEN: Cell Volumes (vol / sd cards)",
+        "title": "Cell Volumes (vol / sd cards)",
         "category": "OWEN",
         "icon": "$(symbol-ruler)"
       },
       {
         "command": "owen.compareGeometry",
-        "title": "OWEN: Compare Geometry with…",
+        "title": "Compare Geometry with…",
         "category": "OWEN",
         "icon": "$(compare-changes)"
       },
       {
         "command": "owen.diffDecks",
-        "title": "OWEN: Semantic Diff with…",
+        "title": "Semantic Diff with…",
         "category": "OWEN",
         "icon": "$(diff)"
       },
       {
         "command": "owen.validateWorkspace",
-        "title": "OWEN: Validate Workspace (files working together)",
+        "title": "Validate Workspace (files working together)",
         "category": "OWEN",
         "icon": "$(references)"
       }
@@ -449,6 +449,34 @@
         "id": "owen.editorTitleMenu",
         "label": "OWEN",
         "icon": "$(beaker)"
+      },
+      {
+        "id": "owen.menu.validate",
+        "label": "Validate & Inspect"
+      },
+      {
+        "id": "owen.menu.geometry",
+        "label": "Geometry"
+      },
+      {
+        "id": "owen.menu.run",
+        "label": "Run & Results"
+      },
+      {
+        "id": "owen.menu.convert",
+        "label": "Convert"
+      },
+      {
+        "id": "owen.menu.build",
+        "label": "Build & Insert"
+      },
+      {
+        "id": "owen.menu.library",
+        "label": "Library & Help"
+      },
+      {
+        "id": "owen.menu.appearance",
+        "label": "Appearance & Settings"
       }
     ],
     "menus": {
@@ -468,146 +496,32 @@
       ],
       "owen.editorTitleMenu": [
         {
-          "command": "owen.openAllen",
-          "group": "1_analyze@0"
+          "submenu": "owen.menu.validate",
+          "group": "1@0"
         },
         {
-          "command": "owen.validateInput",
-          "group": "1_analyze@1",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+          "submenu": "owen.menu.geometry",
+          "group": "1@1"
         },
         {
-          "command": "owen.validateWorkspace",
-          "group": "1_analyze@1",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+          "submenu": "owen.menu.run",
+          "group": "1@2"
         },
         {
-          "command": "owen.insertMaterial",
-          "group": "1_analyze@2",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+          "submenu": "owen.menu.convert",
+          "group": "1@3"
         },
         {
-          "command": "owen.openPrebuiltModel",
-          "group": "1_analyze@3"
+          "submenu": "owen.menu.build",
+          "group": "1@4"
         },
         {
-          "command": "owen.showMcnpReferences",
-          "group": "1_analyze@4",
-          "when": "editorLangId == mcnp"
+          "submenu": "owen.menu.library",
+          "group": "1@5"
         },
         {
-          "command": "owen.showMcnpCellMap",
-          "group": "1_analyze@5",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.checkGeometry",
-          "group": "1_analyze@6",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.cellVolumes",
-          "group": "1_analyze@7",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.compareGeometry",
-          "group": "1_analyze@8",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.diffDecks",
-          "group": "1_analyze@9",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.openInputBuilder",
-          "group": "2_build@0"
-        },
-        {
-          "command": "owen.openLatticeBuilder",
-          "group": "2_build@1"
-        },
-        {
-          "command": "owen.openGeometryPreview",
-          "group": "2_build@2",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.renderWithOpenmc",
-          "group": "2_build@3",
-          "when": "editorLangId == python"
-        },
-        {
-          "command": "owen.verifyGeometry",
-          "group": "2_build@4",
-          "when": "editorLangId == python"
-        },
-        {
-          "command": "owen.convertDeck",
-          "group": "2_build@5",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
-        },
-        {
-          "command": "owen.convertDeckAdapter",
-          "group": "2_build@6",
-          "when": "editorLangId =~ /^(mcnp|serpent)$/"
-        },
-        {
-          "command": "owen.openResults",
-          "group": "3_run@3"
-        },
-        {
-          "command": "owen.runSimulation",
-          "group": "3_run@1",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
-        },
-        {
-          "command": "owen.runSweep",
-          "group": "3_run@2",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
-        },
-        {
-          "command": "owen.viewSweepResults",
-          "group": "3_run@4"
-        },
-        {
-          "command": "owen.toggleInvisibleCharacters",
-          "group": "4_view@1"
-        },
-        {
-          "command": "owen.chooseHighlightPalette",
-          "group": "4_view@2"
-        },
-        {
-          "command": "owen.toggleMcnpLineLimit",
-          "group": "4_view@3",
-          "when": "editorLangId == mcnp"
-        },
-        {
-          "command": "owen.setMcnpProjectRoot",
-          "group": "4_view@4",
-          "when": "editorLangId == mcnp"
-        },
-        {
-          "command": "owen.openReference",
-          "group": "5_help@0"
-        },
-        {
-          "command": "owen.openTutorial",
-          "group": "5_help@1"
-        },
-        {
-          "command": "owen.searchReactorLibrary",
-          "group": "5_help@2"
-        },
-        {
-          "command": "owen.openCommunityLibrary",
-          "group": "5_help@3"
-        },
-        {
-          "command": "owen.reportProblem",
-          "group": "5_help@4"
+          "submenu": "owen.menu.appearance",
+          "group": "1@6"
         }
       ],
       "editor/context": [
@@ -624,140 +538,221 @@
       ],
       "owen.contextMenu": [
         {
-          "command": "owen.openAllen",
-          "group": "1_analyze@0"
+          "submenu": "owen.menu.validate",
+          "group": "1@0"
         },
         {
+          "submenu": "owen.menu.geometry",
+          "group": "1@1"
+        },
+        {
+          "submenu": "owen.menu.run",
+          "group": "1@2"
+        },
+        {
+          "submenu": "owen.menu.convert",
+          "group": "1@3"
+        },
+        {
+          "submenu": "owen.menu.build",
+          "group": "1@4"
+        },
+        {
+          "submenu": "owen.menu.library",
+          "group": "1@5"
+        },
+        {
+          "submenu": "owen.menu.appearance",
+          "group": "1@6"
+        }
+      ],
+      "owen.menu.validate": [
+        {
           "command": "owen.validateInput",
-          "group": "1_analyze@1",
+          "group": "g@0",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.validateWorkspace",
-          "group": "1_analyze@1",
+          "group": "g@1",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
-          "command": "owen.insertMaterial",
-          "group": "1_analyze@2",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
-        },
-        {
-          "command": "owen.openPrebuiltModel",
-          "group": "1_analyze@3"
-        },
-        {
           "command": "owen.showMcnpReferences",
-          "group": "1_analyze@4",
+          "group": "g@2",
           "when": "editorLangId == mcnp"
         },
         {
           "command": "owen.showMcnpCellMap",
-          "group": "1_analyze@5",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.checkGeometry",
-          "group": "1_analyze@6",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.cellVolumes",
-          "group": "1_analyze@7",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
-        },
-        {
-          "command": "owen.compareGeometry",
-          "group": "1_analyze@8",
+          "group": "g@3",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
           "command": "owen.diffDecks",
-          "group": "1_analyze@9",
+          "group": "g@4",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        }
+      ],
+      "owen.menu.geometry": [
+        {
+          "command": "owen.openGeometryPreview",
+          "group": "g@0",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
-          "command": "owen.openInputBuilder",
-          "group": "2_build@0"
+          "command": "owen.renderCsg",
+          "group": "g@1",
+          "when": "editorLangId == mcnp"
         },
         {
-          "command": "owen.openLatticeBuilder",
-          "group": "2_build@1"
+          "command": "owen.checkGeometry",
+          "group": "g@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
-          "command": "owen.openGeometryPreview",
-          "group": "2_build@2",
+          "command": "owen.preflightGeometry",
+          "group": "g@3",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.cellVolumes",
+          "group": "g@4",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
+        },
+        {
+          "command": "owen.compareGeometry",
+          "group": "g@5",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python|xml)$/"
         },
         {
           "command": "owen.renderWithOpenmc",
-          "group": "2_build@3",
+          "group": "g@6",
           "when": "editorLangId == python"
         },
         {
           "command": "owen.verifyGeometry",
-          "group": "2_build@4",
+          "group": "g@7",
           "when": "editorLangId == python"
-        },
-        {
-          "command": "owen.convertDeck",
-          "group": "2_build@5",
-          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
-        },
-        {
-          "command": "owen.convertDeckAdapter",
-          "group": "2_build@6",
-          "when": "editorLangId =~ /^(mcnp|serpent)$/"
-        },
-        {
-          "command": "owen.openResults",
-          "group": "3_run@3"
-        },
+        }
+      ],
+      "owen.menu.run": [
         {
           "command": "owen.runSimulation",
-          "group": "3_run@1",
+          "group": "g@0",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+        },
+        {
+          "command": "owen.runReactor",
+          "group": "g@1",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.runKeff",
+          "group": "g@2",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.findCritical",
+          "group": "g@3"
         },
         {
           "command": "owen.runSweep",
-          "group": "3_run@2",
+          "group": "g@4",
           "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
         },
         {
           "command": "owen.viewSweepResults",
-          "group": "3_run@4"
+          "group": "g@5"
         },
         {
+          "command": "owen.openResults",
+          "group": "g@6"
+        }
+      ],
+      "owen.menu.convert": [
+        {
+          "command": "owen.convertDeck",
+          "group": "g@0",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+        },
+        {
+          "command": "owen.convertDeckAdapter",
+          "group": "g@1",
+          "when": "editorLangId =~ /^(mcnp|serpent)$/"
+        },
+        {
+          "command": "owen.convertAndCompare",
+          "group": "g@2",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.certifyDeck",
+          "group": "g@3",
+          "when": "editorLangId == mcnp"
+        }
+      ],
+      "owen.menu.build": [
+        {
+          "command": "owen.openInputBuilder",
+          "group": "g@0"
+        },
+        {
+          "command": "owen.openLatticeBuilder",
+          "group": "g@1"
+        },
+        {
+          "command": "owen.insertMaterial",
+          "group": "g@2",
+          "when": "editorLangId =~ /^(mcnp|serpent|scone|python)$/"
+        },
+        {
+          "command": "owen.openPrebuiltModel",
+          "group": "g@3"
+        },
+        {
+          "command": "owen.openAllen",
+          "group": "g@4"
+        }
+      ],
+      "owen.menu.library": [
+        {
           "command": "owen.openReference",
-          "group": "4_help@0"
+          "group": "g@0"
         },
         {
           "command": "owen.openTutorial",
-          "group": "4_help@1"
+          "group": "g@1"
         },
         {
           "command": "owen.searchReactorLibrary",
-          "group": "4_help@2"
+          "group": "g@2"
         },
         {
           "command": "owen.openCommunityLibrary",
-          "group": "4_help@3"
+          "group": "g@3"
         },
         {
           "command": "owen.reportProblem",
-          "group": "4_help@4"
-        },
+          "group": "g@4"
+        }
+      ],
+      "owen.menu.appearance": [
         {
           "command": "owen.chooseHighlightPalette",
-          "group": "5_appearance@1"
+          "group": "g@0"
         },
         {
           "command": "owen.toggleInvisibleCharacters",
-          "group": "5_appearance@2"
+          "group": "g@1"
         },
         {
           "command": "owen.toggleMcnpLineLimit",
-          "group": "5_appearance@3",
+          "group": "g@2",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.setMcnpProjectRoot",
+          "group": "g@3",
           "when": "editorLangId == mcnp"
         }
       ],
@@ -805,6 +800,30 @@
         {
           "command": "owen.verifyGeometry",
           "when": "editorLangId == python"
+        },
+        {
+          "command": "owen.renderCsg",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.preflightGeometry",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.runReactor",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.runKeff",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.convertAndCompare",
+          "when": "editorLangId == mcnp"
+        },
+        {
+          "command": "owen.certifyDeck",
+          "when": "editorLangId == mcnp"
         }
       ],
       "view/title": [
@@ -1130,6 +1149,7 @@
     "verify:find-critical": "tsc -p . && node ./scripts/verify-find-critical.mjs",
     "verify:convert-compare": "tsc -p . && node ./scripts/verify-convert-compare.mjs",
     "verify:run-reactor": "tsc -p . && node ./scripts/verify-run-reactor.mjs",
+    "verify:trust-gated": "node ./scripts/verify-trust-gated.mjs",
     "verify:geo-debug": "tsc -p . && node ./scripts/verify-geo-debug.mjs",
     "verify:certify-deck": "tsc -p . && node ./scripts/verify-certify-deck.mjs",
     "verify:card-facts": "tsc -p . && node ./scripts/verify-card-facts.mjs",

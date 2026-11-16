@@ -30,6 +30,7 @@ import {
     Transform,
     Vec3,
 } from './mcnpGeometry';
+import { stripSerpentComments } from './commentStrip';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -124,12 +125,10 @@ export function parseSerpentGeometry(text: string): McnpGeometryModel {
         return id;
     };
 
-    // Strip comments; join into logical lines (Serpent cards are line-based,
-    // but lattice maps continue over following lines until the next keyword).
-    const rawLines = text
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .split(/\r?\n/)
-        .map((l) => l.replace(/%.*$/, '').replace(/#\s.*$/, ''));
+    // Strip comments (shared with the fast extractor); join into logical lines
+    // (Serpent cards are line-based, but lattice maps continue over following
+    // lines until the next keyword).
+    const rawLines = stripSerpentComments(text).split(/\r?\n/);
 
     const KEYWORDS = /^(surf|cell|lat|pin|trans|mat|therm|set|include|plot|mesh|det|nest|pbed|solid|umsh|dtrans|src|wwin|ene|div|branch|coef)\b/i;
     interface Card { kind: string; tokens: string[] }

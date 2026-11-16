@@ -122,6 +122,7 @@ export function buildOpenmcShellScene(text: string): ShellScene | null {
         out.push({
             ...solid,
             label,
+            cell: cell.name ?? `Cell ${cells.indexOf(cell) + 1}`,
             component: classifyComponent(material, cell.name),
             material,
             color: materialColor(material),

@@ -1,0 +1,7 @@
+{
+  "_comment": "Files under src/ that import child_process but are NOT required to call requireTrustedWorkspace themselves, because they are helper modules only ever reached through a command that already gated on trust. Each entry needs a reason. Do NOT add a command handler here to go green — gate it instead. See scripts/verify-trust-gated.mjs.",
+  "allow": {
+    "preview/openmcNative/detect.ts": "Interpreter/cross-section probe. Reached only via the trust-gated Render/Verify commands (preview/openmcNative/panel.ts, verify/panel.ts). Uses execFile with array args (no shell string); the python/crossSections settings it reads are in package.json restrictedConfigurations, so an untrusted workspace cannot supply them.",
+    "preview/openmcNative/exportGeometry.ts": "OpenMC geometry export helper. Reached only via the trust-gated Render command (preview/openmcNative/panel.ts). Uses execFile with array args (no shell string)."
+  }
+}

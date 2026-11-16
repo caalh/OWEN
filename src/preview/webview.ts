@@ -376,6 +376,7 @@ function holdPlaceholderPendingExport(): void {
         components: [],
         materials: [],
         axialLayers: [],
+        cells: [],
         primitiveCount: 0,
         warnings: lastScene.warnings.filter((w) => w !== OPENMC_PLACEHOLDER_WARNING),
         notes: [
@@ -668,6 +669,20 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
   .row:hover .solo { opacity: 0.75; }
   .row .solo:hover { opacity: 1; background: var(--accent); color: #0b1018; border-color: var(--accent); }
   .row .solo.active { opacity: 1; background: var(--accent); color: #0b1018; border-color: var(--accent); }
+  /* Per-cell solid / see-through / hidden. */
+  #cellSearch { width: 100%; box-sizing: border-box; background: #0f1626; color: #cdd6f4; border: 1px solid #2b3a5c; border-radius: 5px; padding: 4px 6px; font-size: 11px; }
+  .row .cstate { font-size: 10px; padding: 1px 6px; border-radius: 4px; border: 1px solid #2b3a5c; background: #16203a; color: #cdd6f4; cursor: pointer; flex: 0 0 auto; min-width: 68px; text-align: center; }
+  .row .cstate.ghost { border-style: dashed; color: #89b4fa; }
+  .row .cstate.hidden { opacity: 0.5; }
+  .row.cell-off .name, .row.cell-off .swatch { opacity: 0.4; }
+  .row .uni { opacity: 0.5; font-size: 10px; flex: 0 0 auto; }
+  #cellsMore { font-size: 11px; opacity: 0.6; margin-top: 4px; }
+  #cellActions {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 16;
+    background: var(--panel-bg); border: 1px solid #2b3a5c; border-radius: 6px;
+    padding: 6px 10px; font-size: 11px; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
+  #cellActions .btnrow { margin: 4px 0 0; }
   /* Measurement tools. */
   #measHint { font-size: 11px; opacity: 0.7; margin: 4px 0; min-height: 14px; }
   #measList { margin-top: 6px; }
@@ -708,6 +723,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
   <button id="toggle" title="Show/hide panel">☰ Layers</button>
   <div id="hud">drag: orbit • scroll: zoom • right-drag: pan • hover: inspect</div>
   <div id="readout"></div>
+  <div id="cellActions"></div>
   <div id="empty"><div class="big" id="emptyMsg"></div></div>
 
   <div id="panel">
@@ -781,6 +797,22 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
           <button id="compNone">None</button>
         </div>
         <div id="components"></div>
+      </div>
+
+      <div class="section" id="cellsSection" style="display:none">
+        <div class="title"><span>Cells</span><span id="cellCount"></span></div>
+        <input type="search" id="cellSearch" placeholder="Filter by cell, universe, or material" />
+        <div class="btnrow">
+          <button id="cellSolid" title="Make every listed cell solid">Solid</button>
+          <button id="cellGhost" title="Make every listed cell see-through">See-through</button>
+          <button id="cellHide" title="Hide every listed cell">Hide</button>
+        </div>
+        <div class="ctrl">
+          <label>See-through opacity <span id="ghostVal">0.18</span></label>
+          <input type="range" id="ghostOpacity" min="0.03" max="0.6" step="0.01" value="0.18" />
+        </div>
+        <div id="cells"></div>
+        <div id="cellsMore"></div>
       </div>
 
       <div class="section" id="materialsSection">
@@ -1025,12 +1057,53 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     let translucentMats = []; // materials whose opacity we scale live
     let compLabels = {};      // component id -> friendly label (for the readout)
     let totalInstances = 0;   // for hover-pick throttling on huge cores
+    // Deck cell -> 'ghost' | 'hidden'; absent means solid. Kept across re-renders
+    // so editing the deck does not undo what the user hid. '' is the bucket for
+    // primitives no single cell owns.
+    let cellState = {};
+    let cellRows = [];        // sc.cells plus the unowned bucket
+    let ghostOpacity = 0.18;
+    let pinnedCell = null;    // the cell the action bar is acting on
 
     const zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
     function disposeAll() {
-      for (const g of groups) { g.mesh.geometry.dispose(); g.mesh.material.dispose(); root.remove(g.mesh); }
+      for (const g of groups) {
+        if (g.ghost) { g.ghost.material.dispose(); root.remove(g.ghost); }
+        g.mesh.geometry.dispose(); g.mesh.material.dispose(); root.remove(g.mesh);
+      }
       groups = []; translucentMats = [];
+      hideCellActions();
+    }
+
+    function currentClipPlanes() {
+      const planes = [];
+      if (document.getElementById('clipOn').checked) planes.push(clipX);
+      if (document.getElementById('clipYOn').checked) planes.push(clipY);
+      if (document.getElementById('clipZOn').checked) planes.push(clipZ);
+      return planes;
+    }
+
+    // A see-through twin of a group: same geometry and colours, drawn
+    // transparent without depth writes so the solids behind it stay visible.
+    // Built on first use; a core nobody ghosts never pays for it.
+    function ensureGhost(g) {
+      if (g.ghost) return g.ghost;
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xffffff, roughness: 0.6, metalness: 0.0,
+        transparent: true, opacity: ghostOpacity, depthWrite: false,
+        side: THREE.DoubleSide, clippingPlanes: currentClipPlanes(),
+      });
+      const ghost = new THREE.InstancedMesh(g.mesh.geometry, mat, g.instances.length);
+      ghost.frustumCulled = false;
+      ghost.renderOrder = 2;
+      if (g.mesh.instanceColor) {
+        ghost.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(g.mesh.instanceColor.array), 3);
+      }
+      for (let i = 0; i < g.instances.length; i++) ghost.setMatrixAt(i, zero);
+      root.add(ghost);
+      g.ghost = ghost;
+      return ghost;
     }
 
     function bucket(o) { return Math.round(Math.min(o, 0.85) * 20) / 20; }
@@ -1260,6 +1333,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
             hx: grp.hx || 0, hy: grp.hy || 0,
             shape: grp.shape, solid: grp.solid, label: c.label || '',
             axIndex: (typeof c.axialIndex === 'number' ? c.axialIndex : null),
+            cell: c.cell || '', uni: c.universe || '',
           });
         });
         mesh.instanceMatrix.needsUpdate = true;
@@ -1358,29 +1432,46 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       renderRows('overlays', rows, (it) => it.id, ovEnabled, false);
     }
 
-    // Single source of truth for "is this instance currently shown" — used by
-    // both the instanced-matrix culling and the raycast pick (so hidden layers
-    // are never selected/measured).
-    function isInstanceVisible(inst) {
-      if (compEnabled[inst.comp] === false) return false;
-      if (inst.mat !== '' && matEnabled[inst.mat] === false) return false;
+    // 'solid', 'ghost', or 'off'. Layer, material, and axial filters switch an
+    // instance off outright; the cell state only chooses between the rest.
+    function instanceMode(inst) {
+      if (compEnabled[inst.comp] === false) return 'off';
+      if (inst.mat !== '' && matEnabled[inst.mat] === false) return 'off';
       // Axial filters only apply to cylinders in an axial layer (vessel/context
       // shells have no ax and stay visible).
       if (inst.ax) {
-        if (axEnabled[inst.ax] === false) return false;
-        if (inst.zc < axWindow.min - 1e-6 || inst.zc > axWindow.max + 1e-6) return false;
+        if (axEnabled[inst.ax] === false) return 'off';
+        if (inst.zc < axWindow.min - 1e-6 || inst.zc > axWindow.max + 1e-6) return 'off';
       }
-      return true;
+      const st = cellState[inst.cell];
+      if (st === 'hidden') return 'off';
+      if (st === 'ghost') return 'ghost';
+      return 'solid';
+    }
+
+    // Single source of truth for "is this instance drawn solid" — used by the
+    // pick, the measure tools, and camera collision, so a hidden or
+    // see-through cell is never selected, measured, or bumped into.
+    function isInstanceVisible(inst) {
+      return instanceMode(inst) === 'solid';
     }
 
     function applyVisibility() {
       for (const g of groups) {
-        let changed = false;
-        g.instances.forEach((inst, i) => {
-          g.mesh.setMatrixAt(i, isInstanceVisible(inst) ? inst.matrix : zero);
-          changed = true;
+        let ghosts = 0;
+        const modes = g.instances.map((inst, i) => {
+          const m = instanceMode(inst);
+          g.mesh.setMatrixAt(i, m === 'solid' ? inst.matrix : zero);
+          if (m === 'ghost') ghosts++;
+          return m;
         });
-        if (changed) g.mesh.instanceMatrix.needsUpdate = true;
+        g.mesh.instanceMatrix.needsUpdate = true;
+        if (ghosts > 0) ensureGhost(g);
+        if (g.ghost) {
+          for (let i = 0; i < modes.length; i++) g.ghost.setMatrixAt(i, modes[i] === 'ghost' ? g.instances[i].matrix : zero);
+          g.ghost.instanceMatrix.needsUpdate = true;
+          g.ghost.visible = ghosts > 0;
+        }
       }
       for (const ch of deckOverlay.children) ch.visible = ovEnabled[ch.userData.ovGroup] !== false;
     }
@@ -1389,12 +1480,16 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       for (const t of translucentMats) t.mat.opacity = Math.min(t.base, shellOpacity);
     }
 
+    function applyGhostOpacity() {
+      for (const g of groups) if (g.ghost) g.ghost.material.opacity = ghostOpacity;
+    }
+
     function applyClipping() {
-      const planes = [];
-      if (document.getElementById('clipOn').checked) planes.push(clipX);
-      if (document.getElementById('clipYOn').checked) planes.push(clipY);
-      if (document.getElementById('clipZOn').checked) planes.push(clipZ);
-      for (const g of groups) g.mesh.material.clippingPlanes = planes;
+      const planes = currentClipPlanes();
+      for (const g of groups) {
+        g.mesh.material.clippingPlanes = planes;
+        if (g.ghost) g.ghost.material.clippingPlanes = planes;
+      }
     }
 
     /**
@@ -1503,8 +1598,145 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       for (const c of (sc.components || [])) compLabels[c.id] = c.label || c.id;
       renderRows('components', (sc.components || []), (item) => item.id, compEnabled, true);
       renderRows('materials', (sc.materials || []), (item) => item.name, matEnabled, false);
+      buildCellsPanel(sc);
       buildAxialPanel(sc.axialLayers || []);
       reflectFidelity(sc.fidelity || {});
+    }
+
+    // --- Per-cell solid / see-through / hidden -----------------------------
+    const UNOWNED = '';
+    const CELL_ROW_LIMIT = 300;
+    const STATE_LABEL = { solid: 'solid', ghost: 'see-through', hidden: 'hidden' };
+    let focusedCell = null;
+
+    function cellLabel(id) { return id === UNOWNED ? 'Not tied to one cell' : id; }
+    function stateOf(id) { return cellState[id] || 'solid'; }
+    function setCellState(id, st) { if (st === 'solid') delete cellState[id]; else cellState[id] = st; }
+
+    function buildCellsPanel(sc) {
+      const cells = Array.isArray(sc.cells) ? sc.cells : [];
+      const owned = cells.reduce((n, c) => n + (c.count || 0), 0);
+      const unowned = Math.max(0, (sc.primitiveCount || 0) - owned);
+      cellRows = cells.slice();
+      if (cells.length && unowned > 0) cellRows.push({ id: UNOWNED, color: '#6c7086', count: unowned });
+      document.getElementById('cellsSection').style.display = cells.length ? 'block' : 'none';
+      document.getElementById('cellCount').textContent = cells.length ? String(cells.length) : '';
+      if (focusedCell !== null && !cellRows.some((c) => c.id === focusedCell)) focusedCell = null;
+      renderCellRows();
+    }
+
+    function listedCells() {
+      const q = document.getElementById('cellSearch').value.trim().toLowerCase();
+      if (!q) return cellRows;
+      const terms = q.split(/\\s+/);
+      const hits = cellRows.filter((c) => {
+        const hay = (cellLabel(c.id) + ' ' + (c.universe || '') + ' ' + (c.material || '')).toLowerCase();
+        return terms.every((t) => hay.indexOf(t) !== -1);
+      });
+      // Typing "1" should put cell 1 above 10, 11, 21 …
+      return hits.sort((a, b) => (a.id.toLowerCase() === q ? 0 : 1) - (b.id.toLowerCase() === q ? 0 : 1));
+    }
+
+    function renderCellRows() {
+      const box = document.getElementById('cells');
+      box.innerHTML = '';
+      const list = listedCells();
+      for (const c of list.slice(0, CELL_ROW_LIMIT)) {
+        const row = document.createElement('div'); row.className = 'row'; row.dataset.key = c.id;
+        const sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = c.color || '#888';
+        const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = cellLabel(c.id);
+        nm.title = cellLabel(c.id) + (c.material ? ' · ' + c.material : '');
+        const uni = document.createElement('span'); uni.className = 'uni'; uni.textContent = c.universe ? 'u ' + c.universe : '';
+        const ct = document.createElement('span'); ct.className = 'count'; ct.textContent = (c.count || 0).toLocaleString();
+        const st = document.createElement('span'); st.className = 'cstate';
+        st.title = 'Click to cycle solid → see-through → hidden';
+        st.addEventListener('click', () => cycleCell(c.id));
+        const focus = document.createElement('span'); focus.className = 'solo'; focus.textContent = 'focus';
+        focus.title = 'This cell solid, every other cell see-through. Shift-click hides the others instead. Click again to undo.';
+        focus.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); focusCell(c.id, e.shiftKey); });
+        row.appendChild(sw); row.appendChild(nm); row.appendChild(uni); row.appendChild(ct); row.appendChild(st); row.appendChild(focus);
+        box.appendChild(row);
+        paintCellRow(row);
+      }
+      document.getElementById('cellsMore').textContent = list.length > CELL_ROW_LIMIT
+        ? 'Showing ' + CELL_ROW_LIMIT + ' of ' + list.length.toLocaleString() + ' cells. Narrow the filter to see the rest.'
+        : '';
+    }
+
+    function paintCellRow(row) {
+      const st = stateOf(row.dataset.key);
+      const b = row.querySelector('.cstate');
+      b.textContent = STATE_LABEL[st];
+      b.className = 'cstate' + (st === 'solid' ? '' : ' ' + st);
+      row.classList.toggle('cell-off', st === 'hidden');
+      const f = row.querySelector('.solo');
+      if (f) f.classList.toggle('active', focusedCell === row.dataset.key);
+    }
+
+    function cellsChanged() {
+      document.querySelectorAll('#cells .row').forEach(paintCellRow);
+      applyVisibility();
+      refreshCellActions();
+    }
+
+    function cycleCell(id) {
+      setCellState(id, { solid: 'ghost', ghost: 'hidden', hidden: 'solid' }[stateOf(id)]);
+      focusedCell = null;
+      cellsChanged();
+    }
+
+    function focusCell(id, hideOthers) {
+      const undo = focusedCell === id;
+      cellState = {};
+      focusedCell = undo ? null : id;
+      if (!undo) for (const c of cellRows) if (c.id !== id) cellState[c.id] = hideOthers ? 'hidden' : 'ghost';
+      cellsChanged();
+    }
+
+    function setListedCells(st) {
+      for (const c of listedCells()) setCellState(c.id, st);
+      focusedCell = null;
+      cellsChanged();
+    }
+
+    // Click-to-inspect action bar. It outlives the pick on purpose: once a
+    // cell is hidden or see-through it can no longer be clicked, so the bar is
+    // where it comes back from.
+    function showCellActions(inst) {
+      if (!inst || !inst.cell) { hideCellActions(); return; }
+      pinnedCell = inst.cell;
+      refreshCellActions();
+    }
+
+    function hideCellActions() {
+      pinnedCell = null;
+      const bar = document.getElementById('cellActions');
+      if (bar) bar.style.display = 'none';
+    }
+
+    function refreshCellActions() {
+      const bar = document.getElementById('cellActions');
+      if (pinnedCell === null) { bar.style.display = 'none'; return; }
+      const row = cellRows.find((c) => c.id === pinnedCell);
+      const st = stateOf(pinnedCell);
+      bar.innerHTML = '';
+      const t = document.createElement('div');
+      t.textContent = 'Cell ' + cellLabel(pinnedCell) + (row && row.universe ? ' · universe ' + row.universe : '') + ' · ' + STATE_LABEL[st];
+      bar.appendChild(t);
+      const br = document.createElement('div'); br.className = 'btnrow';
+      const add = (label, title, fn) => {
+        const b = document.createElement('button'); b.textContent = label; b.title = title;
+        b.addEventListener('click', (e) => { e.stopPropagation(); fn(e); });
+        br.appendChild(b);
+      };
+      const id = pinnedCell;
+      if (st !== 'solid') add('Solid', 'Draw this cell solid again', () => { setCellState(id, 'solid'); focusedCell = null; cellsChanged(); });
+      if (st !== 'ghost') add('See-through', 'Draw this cell see-through', () => { setCellState(id, 'ghost'); focusedCell = null; cellsChanged(); });
+      if (st !== 'hidden') add('Hide', 'Hide this cell', () => { setCellState(id, 'hidden'); focusedCell = null; cellsChanged(); });
+      add(focusedCell === id ? 'Unfocus' : 'Focus', 'This cell solid, every other cell see-through (shift: hidden)', (e) => focusCell(id, e.shiftKey));
+      add('×', 'Close', hideCellActions);
+      bar.appendChild(br);
+      bar.style.display = 'block';
     }
 
     function buildAxialPanel(layers) {
@@ -1604,6 +1836,16 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     document.getElementById('toggle').addEventListener('click', () => document.getElementById('panel').classList.toggle('collapsed'));
     document.getElementById('compAll').addEventListener('click', () => setAll(compEnabled, 'components', true));
     document.getElementById('compNone').addEventListener('click', () => setAll(compEnabled, 'components', false));
+    document.getElementById('cellSearch').addEventListener('input', renderCellRows);
+    document.getElementById('cellSolid').addEventListener('click', () => setListedCells('solid'));
+    document.getElementById('cellGhost').addEventListener('click', () => setListedCells('ghost'));
+    document.getElementById('cellHide').addEventListener('click', () => setListedCells('hidden'));
+    const ghostOp = document.getElementById('ghostOpacity');
+    ghostOp.addEventListener('input', () => {
+      ghostOpacity = parseFloat(ghostOp.value);
+      document.getElementById('ghostVal').textContent = ghostOp.value;
+      applyGhostOpacity();
+    });
     document.getElementById('axAll').addEventListener('click', () => setAll(axEnabled, 'axialLayers', true));
     document.getElementById('axNone').addEventListener('click', () => setAll(axEnabled, 'axialLayers', false));
     const axMin = document.getElementById('axMin'), axMax = document.getElementById('axMax');
@@ -1855,7 +2097,12 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         const inst = groups[gi] && groups[gi].instances[id];
         if (!inst || !isInstanceVisible(inst)) return;
         const t = rayHitInstance(inst, ox, oy, oz, dx, dy, dz);
-        if (t < bestT) { bestT = t; best = { inst, gi, id }; }
+        if (t >= bestT) return;
+        // A slice (X/Y/Z clipping plane) hides geometry on the clipped side, but
+        // the raycaster ignores clipping planes, so reject a hit there — the same
+        // test the camera uses. World point of the hit: (ox+t*dx, oz+t*dz, oy+t*dy).
+        if (isWorldClipped(ox + t * dx, oz + t * dz, oy + t * dy)) return;
+        bestT = t; best = { inst, gi, id };
       };
       walkPickGrid(ox, oy, oz, dx, dy, dz, testPair, () => bestT, true);
       if (!best) return null;
@@ -1870,12 +2117,16 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(ndc, camera);
+      // A slice (X/Y/Z clipping plane) hides geometry on the clipped side, but the
+      // raycaster ignores clipping planes, so reject hits there — the same test the
+      // camera uses, covering all three planes.
       const hits = raycaster.intersectObjects(meshList(), false);
       for (const h of hits) {
         const g = groups[h.object.userData.groupIndex];
         if (!g || h.instanceId == null) continue;
         const inst = g.instances[h.instanceId];
         if (!inst || !isInstanceVisible(inst)) continue;   // never pick a hidden layer
+        if (isWorldClipped(h.point.x, h.point.y, h.point.z)) continue;   // on a clipped-away side
         return { inst, point: h.point, gi: h.object.userData.groupIndex, id: h.instanceId };
       }
       return null;
@@ -2121,6 +2372,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       const zmin = inst.zc - inst.h / 2, zmax = inst.zc + inst.h / 2;
       const rows = ['<div class="rtitle">' + escHtml(inst.label || compLabel) + '</div>'];
       const line = (k, v) => '<div><span class="rk">' + k + ':</span> <span class="rv">' + escHtml(v) + '</span></div>';
+      if (inst.cell) rows.push(line('Cell', inst.cell + (inst.uni ? ' · universe ' + inst.uni : '')));
       rows.push(line('Component', compLabel));
       if (inst.mat) rows.push(line('Material', inst.mat));
       if (inst.axIndex != null) rows.push(line('Axial layer', '#' + inst.axIndex + (inst.ax ? ' · ' + inst.ax : '')));
@@ -2328,6 +2580,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       // Click-to-inspect: pin the readout on the clicked cell (useful when
       // orbiting a full core, or on a touchpad where hovering is fiddly).
       setHover(pick);
+      if (pick) showCellActions(pick.inst); else hideCellActions();
     });
 
     window.addEventListener('resize', () => {
@@ -2376,6 +2629,35 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     };
     window.__owenPreviewPick = function (clientX, clientY) {
       return groups.length ? !!pickAt(clientX, clientY) : false;
+    };
+    window.__owenPreviewPickCell = function (clientX, clientY) {
+      const p = groups.length ? pickAt(clientX, clientY) : null;
+      return p ? p.inst.cell : null;
+    };
+    window.__owenPreviewCells = function () {
+      let solid = 0, ghost = 0, off = 0;
+      for (const g of groups) {
+        for (const inst of g.instances) {
+          const m = instanceMode(inst);
+          if (m === 'solid') solid++; else if (m === 'ghost') ghost++; else off++;
+        }
+      }
+      return {
+        rows: cellRows.map((c) => ({ id: c.id, count: c.count, state: stateOf(c.id) })),
+        listed: document.querySelectorAll('#cells .row').length,
+        solid, ghost, off,
+        ghostMeshes: groups.filter((g) => g.ghost && g.ghost.visible).length,
+      };
+    };
+    window.__owenPreviewSetCell = function (id, st) {
+      setCellState(id, st);
+      focusedCell = null;
+      cellsChanged();
+      return stateOf(id);
+    };
+    window.__owenPreviewFocusCell = function (id, hideOthers) {
+      focusCell(id, !!hideOthers);
+      return focusedCell;
     };
     window.__owenPreviewSample = function (step) {
       if (!renderer || contextLost) return { lit: -1, total: 0 };

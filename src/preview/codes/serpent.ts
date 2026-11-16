@@ -15,7 +15,7 @@
 // reported as warnings/notes rather than silently collapsing to one pin.
 
 import { CylinderSpec, Component, ComponentId, ParseResult, FidelityOptions, FidelityState } from '../types';
-import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail } from '../palette';
+import { emitLayers, materialColor, materialComponent, componentColor, resolveDetail, tagCell, tagCellsFrom } from '../palette';
 import { planRender, DEFAULT_MAX_INSTANCES } from '../budget';
 import {
     BaffleNeighborhood, bafflePlates, bafflePlatesFromRects, emitSerpentRadialStructure,
@@ -23,6 +23,7 @@ import {
 } from '../radialStructure';
 import { pickRootId } from '../rootUniverse';
 import { parseSerpentGeometry } from '../serpentGeometry';
+import { stripSerpentComments } from '../commentStrip';
 import { buildCsgScene } from '../csgScene';
 
 /** Grid-size ceiling shared with the MCNP fill guard (5M cells ≈ full core ×20). */
@@ -77,7 +78,9 @@ export function extractSerpentCylinders(text: string): CylinderSpec[] {
 export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult {
     const warnings: string[] = [];
     const notes: string[] = [];
-    const lines = text.split(/\r?\n/);
+    // Block comments can span lines, so strip them from the whole text before
+    // splitting (the shared stripper also removes `%` to end of line).
+    const lines = stripSerpentComments(text).split(/\r?\n/);
 
     const pins = new Map<string, PinDef>();
     const surfs = new Map<string, SurfDef>();
@@ -126,14 +129,14 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     // px/py halfspaces (the heuristic band + neighborhood guess drew plates
     // on faces the deck leaves open — X/T crossings at BEAVRS' stepped
     // corners). Missing entry → the call site falls back to the heuristic.
-    const baffleRects = new Map<string, { cons: PlateConstraint[] }[]>();
+    const baffleRects = new Map<string, { cons: PlateConstraint[]; cell: string }[]>();
     for (const [uni, cs] of cellsByUniverse) {
         let steel = false;
         let pxpy = false;
         let cyl = false;
         const offs = new Set<number>();
         let rectsOk = true;
-        const cellCons: { cons: PlateConstraint[] }[] = [];
+        const cellCons: { cons: PlateConstraint[]; cell: string }[] = [];
         for (const c of cs) {
             const isSteel = !!c.material && /steel|ss-?304|\bss\b/i.test(c.material);
             const cons: PlateConstraint[] = [];
@@ -156,7 +159,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             }
             if (isSteel) {
                 steel = true;
-                if (cons.length > 0) cellCons.push({ cons });
+                if (cons.length > 0) cellCons.push({ cons, cell: c.name });
                 else rectsOk = false;
             }
         }
@@ -216,13 +219,21 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     // `…g` universes — is split out as `grid` instead of being folded into the
     // concentric list, so those axial bands can render as gray spacers exactly
     // like the OpenMC column model does.
-    interface PinLayerInfo { radii: number[]; materials: string[]; grid?: { outer: number; inner: number; mat: string } }
+    interface PinLayerInfo {
+        radii: number[];
+        materials: string[];
+        /** Owning cell per layer; `pin` rings have none, so `pin <name> [<material>]`. */
+        cells: string[];
+        grid?: { outer: number; inner: number; mat: string; cell: string };
+    }
     const pinLayers = (name: string): PinLayerInfo | null => {
         const pin = pins.get(name);
-        if (pin && pin.radii.length) return { radii: pin.radii, materials: pin.materials };
+        if (pin && pin.radii.length) {
+            return { radii: pin.radii, materials: pin.materials, cells: pin.radii.map((_, i) => `pin ${name} [${pin.materials[i] ?? `mat${i}`}]`) };
+        }
         const cs = cellsByUniverse.get(name);
         if (cs) {
-            const layers: { r: number; mat: string; sq: boolean; sqIn: number }[] = [];
+            const layers: { r: number; mat: string; sq: boolean; sqIn: number; cell: string }[] = [];
             for (const c of cs) {
                 if (!c.material) continue;
                 let outer = Infinity;
@@ -240,7 +251,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                     const r = surfRadius(surf);
                     if (r > 0 && r < outer) { outer = r; outerSq = surf.type === 'sqc'; }
                 }
-                if (isFinite(outer)) layers.push({ r: outer, mat: c.material, sq: outerSq, sqIn });
+                if (isFinite(outer)) layers.push({ r: outer, mat: c.material, sq: outerSq, sqIn, cell: c.name });
             }
             if (layers.length) {
                 layers.sort((a, b) => a.r - b.r);
@@ -252,10 +263,11 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                         outer: g.r,
                         inner: g.sqIn > 0 && g.sqIn < g.r ? g.sqIn : g.r * 0.97,
                         mat: g.mat,
+                        cell: g.cell,
                     };
                     layers.splice(gi, 1);
                 }
-                return { radii: layers.map((l) => l.r), materials: layers.map((l) => l.mat), grid };
+                return { radii: layers.map((l) => l.r), materials: layers.map((l) => l.mat), cells: layers.map((l) => l.cell), grid };
             }
         }
         return null;
@@ -340,7 +352,9 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
         if (cylinders.length >= maxInstances) { capped = true; return; }
         const layers = pinLayers(name);
         if (!layers) return;
-        const positive = layers.radii.map((r, i) => ({ r, mat: layers.materials[i] ?? `mat${i}` })).filter((l) => l.r > 0);
+        const positive = layers.radii
+            .map((r, i) => ({ r, mat: layers.materials[i] ?? `mat${i}`, cell: layers.cells[i] }))
+            .filter((l) => l.r > 0);
         if (positive.length === 0) return;
         const comps = positive.map((l) => materialComponent(l.mat));
         const kind = classifyKind(name, comps, positive.map((l) => l.mat));
@@ -351,7 +365,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             // Grid-overlay band: draw the spacer, not the fuel signature —
             // parity with the OpenMC column model's gray grid bands.
             if (layers.grid) {
-                cylinders.push({
+                cylinders.push(tagCell({
                     label,
                     radius: Math.min(subPitch * 0.5, layers.grid.outer),
                     height: segHeight,
@@ -360,7 +374,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                     opacity: 1.0,
                     component: Component.Grid,
                     material: layers.grid.mat,
-                });
+                }, layers.grid.cell, name));
                 return;
             }
             let solidIdx = comps.findIndex((c) => c !== Component.Gap && c !== Component.Moderator);
@@ -371,7 +385,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
             if (kind === 'guide') { comp = Component.GuideTube; color = componentColor(comp); }
             else if (kind === 'instrument') { comp = Component.InstrumentTube; color = componentColor(comp); }
             else if (kind === 'absorber') { comp = Component.Absorber; color = componentColor(comp); }
-            cylinders.push({
+            cylinders.push(tagCell({
                 label,
                 radius: Math.min(subPitch * 0.47, Math.max(...positive.map((l) => l.r))),
                 height: segHeight,
@@ -382,15 +396,16 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                 opacity: 1.0,
                 component: comp,
                 material: matName,
-            });
+            }, positive[solidIdx].cell, name));
             return;
         }
 
         const colors = positive.map((l) => materialColor(l.mat));
         const mats = positive.map((l) => l.mat);
-        cylinders.push(...emitLayers(positive.map((l) => l.r), comps, cx, cy, zCenter, segHeight, label, colors, mats));
+        cylinders.push(...emitLayers(positive.map((l) => l.r), comps, cx, cy, zCenter, segHeight, label, colors, mats,
+            positive.map((l) => l.cell), name));
         if (layers.grid) {
-            cylinders.push({
+            cylinders.push(tagCell({
                 label: `${label}_grid`,
                 radius: layers.grid.outer,
                 innerRadius: layers.grid.inner,
@@ -400,7 +415,7 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                 opacity: 1.0,
                 component: Component.Grid,
                 material: layers.grid.mat,
-            });
+            }, layers.grid.cell, name));
         }
     };
 
@@ -467,15 +482,17 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                         const cellCons = baffleRects.get(key);
                         if (cellCons) {
                             const rects: PlateRect[] = [];
-                            for (const { cons } of cellCons) {
+                            for (const { cons, cell } of cellCons) {
                                 const r = plateRectFromConstraints(cons, lat.pitch / 2, lat.pitch / 2);
-                                if (r) rects.push(r);
+                                if (r) rects.push({ ...r, cell });
                             }
                             if (rects.length > 0) {
-                                cylinders.push(...bafflePlatesFromRects(
+                                const plates = bafflePlatesFromRects(
                                     `${label}_r${row}c${col}_baffle`, bx, by, rects,
                                     { height: fullHeight, zCenter: fullZmid },
-                                ));
+                                );
+                                plates.forEach((p, i) => tagCell(p, rects[i].cell, key));
+                                cylinders.push(...plates);
                                 continue;
                             }
                         }
@@ -485,11 +502,15 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
                             ne: isAsm(row + 1, col + 1), nw: isAsm(row + 1, col - 1),
                             se: isAsm(row - 1, col + 1), sw: isAsm(row - 1, col - 1),
                         };
+                        const from = cylinders.length;
                         cylinders.push(...bafflePlates(
                             `${label}_r${row}c${col}_baffle`, bx, by,
                             lat.pitch / 2, lat.pitch / 2, nb,
                             { height: fullHeight, zCenter: fullZmid }, baffleBands.get(key),
                         ));
+                        const steelCell = (cellsByUniverse.get(key) ?? [])
+                            .find((c) => !!c.material && /steel|ss-?304|\bss\b/i.test(c.material));
+                        tagCellsFrom(cylinders, from, steelCell?.name, key);
                         continue;
                     }
                     let px: number;
@@ -544,7 +565,11 @@ export function parseSerpent(text: string, opts?: FidelityOptions): ParseResult 
     if (cylinders.length > 0) {
         let footprint = 0;
         for (const c of cylinders) footprint = Math.max(footprint, Math.hypot(c.x, c.y) + c.radius);
-        const structN = emitSerpentRadialStructure(text, surfs, cylinders, { height: fullHeight, zCenter: fullZmid }, footprint);
+        const cellBetween = (a: string, b: string): string | undefined => cells.find((c) => {
+            const ids = c.surfaces.map((s) => String(s.id));
+            return !c.fill && ids.includes(a) && ids.includes(b);
+        })?.name;
+        const structN = emitSerpentRadialStructure(text, surfs, cylinders, { height: fullHeight, zCenter: fullZmid }, footprint, cellBetween);
         if (structN > 0) {
             notes.push(`Drew ${structN} radial-structure primitive(s) (barrel, arc neutron-shield pads, downcomer, RPV). Baffle/former plates render as thin plates hugging the core-facing edges of peripheral lattice cells.`);
         }
@@ -616,8 +641,10 @@ function averagePinLayers(pins: Map<string, PinDef>): number {
 // ---------------------------------------------------------------------------
 
 function stripComment(line: string): string {
-    // Serpent: `%` to end of line, and `/* */` blocks (handled crudely per line).
-    return line.replace(/%.*$/, '').replace(/\/\*.*?\*\//g, ' ');
+    // `lines` are already comment-free (stripSerpentComments ran on the whole
+    // text, including multi-line `/* */` blocks). This per-line `%` strip is a
+    // belt-and-braces no-op for callers that pass an already-clean line.
+    return line.replace(/%.*$/, '');
 }
 
 function parsePinBlock(lines: string[], i: number, headerTokens: string[], pins: Map<string, PinDef>): number {

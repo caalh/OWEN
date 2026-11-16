@@ -1,17 +1,17 @@
 ---
-description: OWEN releases increment patch by exactly 1 — never skip, never bump minor/major, never 0.x.x — and every version listing is updated together (npm run verify:version)
+description: OWEN patch stays a single digit — at 9 the next release bumps minor (1.4.9 → 1.5.0, never 1.4.10) — and every version listing is updated together (npm run verify:version)
 alwaysApply: true
 ---
 
 # OWEN version cadence
 
-Every OWEN release going forward increments **patch by exactly 1**. Nothing larger.
+The patch number stays a single digit. When the next patch would be 10, bump the minor instead. The maintainer set this on 2026-11-15 so the release after 1.4.9 is **1.5.0**, not 1.4.10. Some projects keep counting (`1.4.10`) because string sorting and a decimal reading both make that look wrong; VS Code compares the numbers, and this repo still refuses the two-digit patch.
 
-- Current line is `1.4.x`. Next numbers are `1.4.7`, `1.4.8`, … `1.4.9`, `1.4.10` (two-digit patch is required once you pass 9 — never write `1.4.01` or restart at `0.0.10`).
-- **Never** bump minor (`1.5.0`) or major (`2.0.0`) unless the maintainer says so in the prompt.
-- **Never** skip a patch (`1.4.2` → `1.4.4`).
-- **Never** ship `0.x.x` or `0.0.x`. OWEN is past 1.0; do not rewind to a 0.0.xx scheme.
-- This cadence holds until a human explicitly changes it. Do not "save" 1.5.0 for a big feature.
+- Current line is `1.5.x`. Next numbers are `1.5.1`, `1.5.2`, … `1.5.9`, then `1.6.0`. Never `1.5.10`. Never `1.5.01`.
+- `v1.4.1` is the 2026-08-13 release. Never reuse a published tag.
+- A minor bump happens only to avoid patch 10, or when the maintainer asks for one. **Never** bump major (`2.0.0`) unless the maintainer says so in the prompt.
+- **Never** skip (`1.5.1` → `1.5.3`).
+- **Never** ship `0.x.x`. OWEN is past 1.0.
 - Do not cut a version the maintainer has not asked for. Work accumulates under `## [Unreleased]` in `CHANGELOG.md` and ships as `owen-neutronics-<current>-local.vsix` for testing until they say "release".
 
 `package.json` `version` is the source of truth in this repo. User-facing release notes go in `CHANGELOG.md`. The public site (`reactormc.net`) shows the last **downloadable** GitHub Release — do not advertise a version that has no VSIX.
@@ -35,7 +35,7 @@ Not listings, leave them alone: `## [1.4.4] - …` history in `CHANGELOG.md`, "s
 
 # Release procedure (all eight, in order)
 
-1. `package.json` version +1 patch; `npm install` (updates the lock). Move `[Unreleased]` in `CHANGELOG.md` under `## [x.y.z] - YYYY-MM-DD`.
+1. `package.json` to the next number in the cadence above (patch +1, or the next minor when the patch would be 10). `npm install` updates the lock. Move `[Unreleased]` in `CHANGELOG.md` under `## [x.y.z] - YYYY-MM-DD`.
 2. `npm run typecheck`, `npm run lint`, `npm test`, the `verify:*` scripts.
 3. `npm run sync:version` — rewrites the two monorepo markdown listings — then mirror `src/`, `package.json`, `package-lock.json`, `CHANGELOG.md`, `README.md`, `.vscodeignore`, `media/vendor`, `docs/` to `BelvoirDynamics/owen/` (never the four AI docs: see the monorepo's `owen-public-sync.mdc`).
 4. `npx @vscode/vsce package -o owen-<version>.vsix` in both folders; leak-check (no `AGENTS.md`, `AI_*`, `PROJECT_STRUCTURE.md`, `.cursor/` inside).
@@ -54,4 +54,4 @@ A release that fixes a reported bug names that person in three places. A "fixed"
 
 The site changelog names them too when `reactor-monte-carlo-guide` records the ship.
 
-**Owed before the next release can ship.** John ([bluetyde](https://github.com/bluetyde)) opened [#7](https://github.com/caalh/owen/issues/7), [#8](https://github.com/caalh/owen/issues/8), and [#9](https://github.com/caalh/owen/issues/9). 1.4.9 named him in `CHANGELOG.md` and the GitHub release notes, and did not add him to the README thanks list. Do not cut a release only to add the line. Do not ship the next release without that thanks line, plus credit for whoever opened issues fixed in that release.
+**Paid in 1.5.0.** John ([bluetyde](https://github.com/bluetyde), [#7](https://github.com/caalh/owen/issues/7), [#8](https://github.com/caalh/owen/issues/8), [#9](https://github.com/caalh/owen/issues/9)) is in the README thanks list. Frank Helk (email, no GitHub login) is credited there for the per-cell preview request and the false undefined-surface and material-sign reports. A later bugfix release still names whoever opened the issues it fixes, in the changelog, the GitHub release notes, and the README thanks list.

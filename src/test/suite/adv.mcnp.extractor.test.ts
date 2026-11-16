@@ -120,7 +120,7 @@ suite('ADV MCNP extractor', () => {
         assert.strictEqual(res.fidelity?.totalPins, 289, `expected 289 pins, got ${res.fidelity?.totalPins}`);
     });
 
-    test('continuation lines: &, 5-space, 2-space, and tab all join', () => {
+    test('continuation lines: &, 5-space, and tab join; a 2-space indent does not', () => {
         const mk = (contPrefix: string, amp: boolean) => [
             ...pinDeck(1),
             amp
@@ -132,15 +132,21 @@ suite('ADV MCNP extractor', () => {
             '900 0 -10 11 -12 13 fill=5 imp:n=1',
             ...COMMON_TAIL,
         ].join('\n');
+        // Valid MCNP continuations (columns 1–5 blank, or a `&`) assemble the fill.
         for (const [name, deck] of [
             ['5-space', mk('     ', false)],
-            ['2-space', mk('  ', false)],
             ['tab', mk('\t', false)],
             ['ampersand', mk('', true)],
         ] as const) {
             const res = parseMcnp(deck);
             assert.strictEqual(res.fidelity?.totalPins, 4, `${name}: expected 4 pins, got ${res.fidelity?.totalPins}`);
         }
+        // A 2-space indent leaves content in columns 1–5, so MCNP reads a NEW
+        // card, not a continuation (the linter flags it mcnp.short-continuation).
+        // It must not silently join — joining it is what misparsed valid decks
+        // with cards indented 1–4 columns (Frank Helk, Nov 2026).
+        const twoSpace = parseMcnp(mk('  ', false));
+        assert.notStrictEqual(twoSpace.fidelity?.totalPins, 4, '2-space fill row must not join as a continuation');
     });
 
     test('comment lines mid-card do not break continuation', () => {

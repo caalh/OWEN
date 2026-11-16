@@ -16,6 +16,7 @@ import {
     parseBatchLog,
     parseReactorResult,
 } from '../mc/reactorLaunch';
+import { requireTrustedWorkspace } from '../util/workspaceTrust';
 
 const wslUser = os.userInfo().username;
 const DEFAULT_PYTHON = `/home/${wslUser}/.conda/envs/openmc/bin/python`;
@@ -34,6 +35,16 @@ function siblingOpenmc(python: string): string {
     return `${python.slice(0, slash).replace(/\\/g, '/')}/openmc`;
 }
 
+// `owen.openmc.pythonExecutable` has a schema default of "python", so a plain
+// cfg.get() never falls through to DEFAULT_PYTHON and OWEN would launch a bare
+// `python` that does not exist under WSL (Ubuntu ships python3). Honor the
+// setting only when the user actually set it; otherwise use the conda env path.
+function resolvedPython(): string {
+    const info = vscode.workspace.getConfiguration('owen').inspect<string>('openmc.pythonExecutable');
+    const set = info?.workspaceFolderValue ?? info?.workspaceValue ?? info?.globalValue;
+    return set && set.trim() ? set.trim() : DEFAULT_PYTHON;
+}
+
 function page(text: string): string {
     const body = text.replace(/[&<>]/g, (ch) => (ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;'));
     return `<!DOCTYPE html><html><body style="font-family: sans-serif; padding: 16px; white-space: pre-wrap;">${body}</body></html>`;
@@ -41,6 +52,7 @@ function page(text: string): string {
 
 export function registerRunReactor(): vscode.Disposable {
     return vscode.commands.registerCommand('owen.runReactor', async () => {
+        if (!(await requireTrustedWorkspace('run a Monte Carlo code'))) return;
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showWarningMessage('OWEN: open an MCNP deck, then run the reactor.');
@@ -80,7 +92,7 @@ export function registerRunReactor(): vscode.Disposable {
         }
 
         const cfg = vscode.workspace.getConfiguration('owen');
-        const python = cfg.get<string>('openmc.pythonExecutable') || DEFAULT_PYTHON;
+        const python = resolvedPython();
         const crossSections = cfg.get<string>('openmc.crossSections') || DEFAULT_XS;
         let armed: string;
         try {
@@ -93,10 +105,13 @@ export function registerRunReactor(): vscode.Disposable {
         const file = path.join(os.tmpdir(), `owen-reactor-${Date.now()}.py`);
         fs.writeFileSync(file, armed.replace(/\r\n/g, '\n'));
         const wslPath = toWsl(file);
-        const command = `sed -i 's/\\r$//' ${wslPath} && export HOME=/home/${wslUser} OPENMC_CROSS_SECTIONS=${crossSections} && cd /tmp && ${python} ${wslPath}`;
+        // Deck- and settings-derived strings (wslPath, crossSections, python) are passed
+        // as positional args ($1..$3), never interpolated into the script, so a hostile
+        // owen.openmc.* setting cannot inject a second shell command. $0 is a label.
+        const command = 'sed -i \'s/\\r$//\' "$1" && export HOME="/home/' + wslUser + '" OPENMC_CROSS_SECTIONS="$2" && cd /tmp && "$3" "$1"';
         show(`OpenMC is running in WSL. A final k appears only after the entropy has flattened.\n${DEPLETION_BLOCKED}`);
 
-        const child = spawn('wsl', ['-e', 'bash', '-lc', command], { windowsHide: true });
+        const child = spawn('wsl', ['-e', 'bash', '-lc', command, 'owen-reactor', wslPath, crossSections, python], { windowsHide: true });
         let log = '';
         const consume = (chunk: Buffer) => {
             log += chunk.toString();

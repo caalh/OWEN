@@ -3,6 +3,9 @@ import * as assert from 'assert';
 import { parseOpenmc } from '../../preview/codes/openmc';
 import { parseSerpent } from '../../preview/codes/serpent';
 import { parseScone } from '../../preview/codes/scone';
+import { stripSerpentComments, stripSconeComments } from '../../preview/commentStrip';
+import { parseSerpentGeometry } from '../../preview/serpentGeometry';
+import { parseSconeGeometry } from '../../preview/sconeGeometry';
 
 suite('ADV OpenMC extractor', () => {
     test('lattice via dict comprehension + template resolves pins', () => {
@@ -323,5 +326,74 @@ suite('ADV SCONE extractor', () => {
         ].join('\n');
         const res = parseScone(deck);
         assert.ok(res.cylinders.length > 0);
+    });
+});
+
+// Shared comment strippers (src/preview/commentStrip.ts). These used to be
+// re-implemented per consumer and had drifted apart (the same divergence that
+// produced Frank Helk's MCNP reports): the Serpent fast extractor only stripped
+// single-line /* */ and the geometry parser wrongly stripped `#`; the SCONE
+// fast extractor wrongly stripped /* */ while its geometry parser did not.
+suite('ADV shared comment strippers', () => {
+    test('Serpent: % line comments and multi-line /* */ blocks; # is NOT a comment', () => {
+        const t = [
+            'surf 1 cyl 0 0 1 % trailing comment',
+            '/* a block comment',
+            '   that spans lines */',
+            'pin P % inline',
+            '# this is not a Serpent comment',
+        ].join('\n');
+        const out = stripSerpentComments(t);
+        assert.ok(!out.includes('trailing comment'), '% line comment stripped');
+        assert.ok(!out.includes('block comment'), 'multi-line /* */ stripped');
+        assert.ok(!out.includes('spans lines'), 'second line of the block stripped');
+        assert.ok(/surf 1 cyl 0 0 1/.test(out), 'code before % preserved');
+        assert.ok(/pin P/.test(out), 'card survives its inline %');
+        assert.ok(out.includes('# this is not'), 'Serpent has no # comment — must be preserved');
+    });
+
+    test('Serpent: fast extractor and geometry parser agree on a block-commented pin', () => {
+        const deck = [
+            'surf s1 cyl 0.0 0.0 0.41',
+            'surf s2 cyl 0.0 0.0 0.48',
+            'pin P',
+            'fuel 0.41',
+            'clad 0.48',
+            'water',
+            '',
+            '/* commented-out spare pin',
+            'pin Q',
+            'junk 0.41',
+            'water',
+            '*/',
+        ].join('\n');
+        // Neither path should see pin Q or its surfaces (both strip the block).
+        assert.ok(!stripSerpentComments(deck).includes('pin Q'), 'pin Q is inside a block comment');
+        assert.doesNotThrow(() => parseSerpent(deck));
+        assert.doesNotThrow(() => parseSerpentGeometry(deck));
+    });
+
+    test('SCONE: // and ! line comments; /* */ is NOT a comment (left intact)', () => {
+        const t = [
+            'type cell; // trailing slashes',
+            'id 3 ! bang comment',
+            'radii (0.4 /* keep */ 0.0);',
+        ].join('\n');
+        const out = stripSconeComments(t);
+        assert.ok(!out.includes('trailing slashes'), '// comment stripped');
+        assert.ok(!out.includes('bang comment'), '! comment stripped');
+        assert.ok(/type cell;/.test(out), 'code before // preserved');
+        assert.ok(/id 3/.test(out), 'code before ! preserved');
+        assert.ok(out.includes('/* keep */'), 'SCONE has no block comment — /* */ must be preserved verbatim');
+    });
+
+    test('SCONE: fast extractor and geometry parser both ignore // and ! comments', () => {
+        const deck = [
+            'pin { id 3; type pinUniverse; radii (0.41 0.0); fills (fuel water); } // a pin',
+            'lat { id 2; type latUniverse; shape (1 1 1); pitch (1.26 1.26 0.0); map ( 3 ); } ! the core',
+        ].join('\n');
+        assert.doesNotThrow(() => parseScone(deck));
+        assert.doesNotThrow(() => parseSconeGeometry(deck));
+        assert.ok(parseScone(deck).cylinders.length > 0, 'geometry still renders with trailing comments');
     });
 });

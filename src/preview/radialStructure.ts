@@ -90,7 +90,7 @@ function subtractSpans(span: Span, cuts: readonly Span[]): Span[] {
 }
 
 /** Plate rectangle in the lattice element's local frame (cm from centre). */
-export interface PlateRect { x0: number; x1: number; y0: number; y1: number }
+export interface PlateRect { x0: number; x1: number; y0: number; y1: number; cell?: number | string }
 
 /** One axis-aligned halfspace of a plate cell: sense>0 keeps axis > d. */
 export interface PlateConstraint { axis: 'x' | 'y'; sense: number; d: number }
@@ -190,7 +190,7 @@ export function mcnpBafflePlateRects(
         }
         if (cons.length === 0) return [];
         const r = plateRectFromConstraints(cons, halfPitchX, halfPitchY);
-        if (r) rects.push(r);
+        if (r) rects.push({ ...r, cell: cell.id });
     }
     return rects;
 }
@@ -483,10 +483,23 @@ export function emitMcnpRadialStructure(
             : mat?.component === Component.Structure ? Component.Vessel
             : mat?.component ?? Component.Vessel;
         const opacity = comp === Component.Moderator ? 0.12 : 0.4;
-        cylinders.push(annularShell(`cell_${cell.id}`, innerR, outerR, comp, mat?.name ?? 'Structure', ctx, opacity));
+        const shell = annularShell(`cell_${cell.id}`, innerR, outerR, comp, mat?.name ?? 'Structure', ctx, opacity);
+        shell.cell = String(cell.id);
+        cylinders.push(shell);
         emitted.push([innerR, outerR]);
         n++;
     }
+
+    // The root cell bounded by both surfaces, so the id-driven shells below
+    // still answer to their deck cell.
+    const rootCellBetween = (sIn: number, sOut: number): number | undefined => {
+        for (const cell of cells) {
+            if (cell.u !== null && cell.u !== 0) continue;
+            const abs = cell.surfaces.map((s) => Math.abs(s));
+            if (abs.includes(sIn) && abs.includes(sOut)) return cell.id;
+        }
+        return undefined;
+    };
 
     // --- BEAVRS id fast path (80–86): fills gaps only. ---------------------
     // Only trusted when the radii are plausibly vessel-scale (decks with
@@ -501,21 +514,28 @@ export function emitMcnpRadialStructure(
     const nsIn = vesselScale(getR(85));
     const nsOut = vesselScale(getR(86));
 
-    const pair = (label: string, ri: number | undefined, ro: number | undefined, comp: ComponentId, mat: string, op: number) => {
+    const pair = (label: string, ri: number | undefined, ro: number | undefined, comp: ComponentId, mat: string, op: number,
+        sIn: number, sOut: number) => {
         if (ri === undefined || ro === undefined || !(ro > ri)) return;
         if (alreadyEmitted(ri, ro)) return;
-        cylinders.push(annularShell(label, ri, ro, comp, mat, ctx, op));
+        const shell = annularShell(label, ri, ro, comp, mat, ctx, op);
+        const owner = rootCellBetween(sIn, sOut);
+        if (owner !== undefined) shell.cell = String(owner);
+        cylinders.push(shell);
         emitted.push([ri, ro]);
         n++;
     };
-    pair('barrel', barrelIn, barrelOut, Component.Vessel, 'SS304', 0.45);
+    pair('barrel', barrelIn, barrelOut, Component.Vessel, 'SS304', 0.45, 80, 81);
     if (nsIn !== undefined && nsOut !== undefined && nsOut > nsIn) {
-        cylinders.push(...neutronShieldPads(nsIn, nsOut, ctx, 'mcnp_ns'));
+        const pads = neutronShieldPads(nsIn, nsOut, ctx, 'mcnp_ns');
+        const owner = rootCellBetween(85, 86);
+        if (owner !== undefined) for (const p of pads) p.cell = String(owner);
+        cylinders.push(...pads);
         n += 4;
     }
-    pair('downcomer', nsOut, linerIn, Component.Moderator, 'Water', 0.12);
-    pair('rpv_liner', linerIn, rpvIn, Component.Vessel, 'SS304', 0.4);
-    pair('rpv', rpvIn, rpvOut, Component.Vessel, 'CarbonSteel', 0.5);
+    pair('downcomer', nsOut, linerIn, Component.Moderator, 'Water', 0.12, 86, 82);
+    pair('rpv_liner', linerIn, rpvIn, Component.Vessel, 'SS304', 0.4, 82, 83);
+    pair('rpv', rpvIn, rpvOut, Component.Vessel, 'CarbonSteel', 0.5, 83, 84);
 
     return n;
 }
@@ -590,6 +610,7 @@ export function emitSerpentRadialStructure(
     cylinders: CylinderSpec[],
     ctx: RadialContext,
     footprint: number,
+    cellBetween?: (inner: string, outer: string) => string | undefined,
 ): number {
     let n = 0;
     const cylRadii: { id: string | number; r: number }[] = [];
@@ -617,14 +638,19 @@ export function emitSerpentRadialStructure(
         let comp: ComponentId = Component.Vessel;
         let mat = 'SS304';
         let op = 0.35;
+        const owner = cellBetween?.(String(a.id), String(b.id));
         if (/ns/i.test(tag)) {
-            cylinders.push(...neutronShieldPads(a.r, b.r, ctx, `serpent_${tag}`));
+            const pads = neutronShieldPads(a.r, b.r, ctx, `serpent_${tag}`);
+            if (owner !== undefined) for (const p of pads) p.cell = owner;
+            cylinders.push(...pads);
             n += 4;
             continue;
         }
         if (/down|wt|water/i.test(tag)) { comp = Component.Moderator; mat = 'Water'; op = 0.12; }
         if (/rpv/i.test(tag) && !/lin/i.test(tag)) { mat = 'CarbonSteel'; op = 0.5; }
-        cylinders.push(annularShell(`serpent_${tag}`, a.r, b.r, comp, mat, ctx, op));
+        const shell = annularShell(`serpent_${tag}`, a.r, b.r, comp, mat, ctx, op);
+        if (owner !== undefined) shell.cell = owner;
+        cylinders.push(shell);
         n++;
     }
     return n;
