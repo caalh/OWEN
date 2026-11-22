@@ -12,7 +12,7 @@ import { buildScene } from '../out-test/preview/extractor.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PREBUILT = join(here, '..', 'prebuilt-models');
-const DECKS = join(homedir(), 'reactor-test-decks');
+const DECKS = join(homedir(), 'GitHub', 'reactor-test-decks');
 
 // Disk decks (skipped silently when not present on this machine).
 const diskCases = [

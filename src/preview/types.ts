@@ -47,9 +47,10 @@ export interface CylinderSpec {
      * - 'ellipsoid' has semi-axes `halfX`/`halfY`/`halfZ`.
      * - 'ellcyl' is an elliptic cylinder along `axis` with in-plane semi-axes
      *   `halfX`/`halfY` and `height`.
-     * - 'polyhedron' is an arbitrary convex solid: `verts` (flat xyz list, cm)
-     *   + `faces` (vertex index loops). Emitted by the CSG engine for planar
-     *   cells (wedges, ducts, channel boxes).
+     * - 'polyhedron' is a solid given as `verts` (flat xyz list, cm) + `faces`
+     *   (vertex index loops). Emitted by the CSG engine for planar cells
+     *   (wedges, ducts, channel boxes), convex. With `sampledCell` set it is a
+     *   surface-nets mesh of a cell no primitive expresses, and not convex.
      * The non-cylinder shapes come from the Stage-2/4 CSG path (csgScene.ts);
      * the instanced pin/lattice fast path still emits cylinders and boxes.
      */
@@ -78,6 +79,8 @@ export interface CylinderSpec {
     verts?: number[];
     /** Polyhedron faces: loops of vertex indices (convex, outward order). */
     faces?: number[][];
+    /** Grid cell size (cm) when the polyhedron was meshed by sampling the exact cell. */
+    sampledCell?: number;
     /**
      * Axial layer (z-band) this cylinder belongs to when the scene is expanded
      * with axial detail. Drives the per-axial-layer show/hide toggle and the

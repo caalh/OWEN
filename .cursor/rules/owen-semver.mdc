@@ -50,7 +50,9 @@ A release that fixes a reported bug names that person in three places. A "fixed"
 
 - `CHANGELOG.md` for that version — name, GitHub login, issue link, what broke.
 - The GitHub release notes — the same names. Do not shorten a reported fix to "various fixes".
-- `README.md` section "Thanks to the people who reported real problems" — name, login link, one line on what they reported.
+- `README.md` section "Thanks" — name, login link, and a short line on what they reported.
+
+That section is the only place in the README a person is named. Feature rows and commands do not say who reported or requested them (Aaron's call, Nov 2026).
 
 The site changelog names them too when `reactor-monte-carlo-guide` records the ship.
 

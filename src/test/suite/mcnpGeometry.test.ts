@@ -19,7 +19,7 @@ import {
     axisPlane, beginSlice, defaultWindow, identifyAt, sliceModel, sliceRowsToRgba, sliceToRgba,
     SLICE_LOST, SLICE_OVERLAP,
 } from '../../preview/slice';
-import { buildCsgScene } from '../../preview/csgScene';
+import { buildCsgScene, sampleRegionMesh } from '../../preview/csgScene';
 import { Component } from '../../preview/types';
 
 type V3 = [number, number, number];
@@ -961,22 +961,193 @@ suite('MCNP geometry engine — CSG scene builder (Stages 2 & 4)', () => {
         assert.ok((annular!.height ?? 0) > 800, `annulus should run the overlapping height, got ${annular!.height}`);
     });
 
-    test('graveyard is never meshed; unresolvable cells degrade with a census entry', () => {
-        const model = parseMcnpGeometry(deck([
-            'hard cell',
-            '1 1 -8 -1 -2 imp:n=1',
-            '9 0 1:2 imp:n=0',
-            '',
-            '1 gq 1 2 3 0.1 0.2 0.3 0 0 0 -25',
-            '2 kx 5 0.5',
-            '',
-            'm1 26056.80c 1',
-        ]));
+    const HARD_CELL = deck([
+        'hard cell',
+        '1 1 -8 -1 -2 imp:n=1',
+        '9 0 1:2 imp:n=0',
+        '',
+        '1 gq 1 2 3 0.1 0.2 0.3 0 0 0 -25',
+        '2 kx 5 0.5',
+        '',
+        'm1 26056.80c 1',
+    ]);
+
+    test('graveyard is never meshed; a cell no primitive expresses is meshed by sampling', () => {
+        const model = parseMcnpGeometry(HARD_CELL);
         const scene = buildCsgScene(model, MATS);
         assert.ok(scene.notes.some((n) => /graveyard|exterior/i.test(n)), 'graveyard note expected');
+        assert.strictEqual(scene.census.failed, 0, JSON.stringify(scene.census));
+        const mesh = scene.cylinders.find((c) => c.cell === '1' && c.sampledCell);
+        assert.ok(mesh && mesh.verts && mesh.faces && mesh.faces.length > 100, 'sampled mesh for cell 1');
+        // Every vertex lies on the boundary of the cell, on the gq or on the
+        // cone, to within one grid cell (corners where they meet round off).
+        const s1 = model.surfaces.get(1)!;
+        const s2 = model.surfaces.get(2)!;
+        const v = mesh.verts;
+        const e = mesh.sampledCell!;
+        assert.ok(e < 0.5, `grid ${e} cm: the scout pass should have found the 10 cm cell inside its ±1000 cm window`);
+        let off = 0;
+        for (let i = 0; i < v.length; i += 3) {
+            const p: V3 = [v[i], v[i + 1], v[i + 2]];
+            const near = (s: typeof s1) => {
+                const f = surfaceValue(s, 0, p);
+                return [-e, e].some((dx) => Math.sign(surfaceValue(s, 0, [p[0] + dx, p[1], p[2]])) !== Math.sign(f))
+                    || [-e, e].some((dy) => Math.sign(surfaceValue(s, 0, [p[0], p[1] + dy, p[2]])) !== Math.sign(f))
+                    || [-e, e].some((dz) => Math.sign(surfaceValue(s, 0, [p[0], p[1], p[2] + dz])) !== Math.sign(f));
+            };
+            if (!near(s1) && !near(s2)) off++;
+        }
+        assert.ok(off / (v.length / 3) < 0.02, `${off} of ${v.length / 3} vertices are off both surfaces`);
+    });
+
+    test('with no triangle budget left, an unresolvable cell still degrades to a named box', () => {
+        const model = parseMcnpGeometry(HARD_CELL);
+        const scene = buildCsgScene(model, MATS, { maxTriangles: 1000 });
         assert.strictEqual(scene.census.failed, 1, JSON.stringify(scene.census));
         assert.ok(scene.cylinders.some((c) => (c.opacity ?? 1) < 0.5), 'translucent fallback drawn');
         assert.ok(scene.warnings.some((w) => /cell 1/i.test(w)), 'warning names the cell');
+    });
+
+    test('surface-nets mesh of a sphere is closed, outward, on the surface, and has its volume', () => {
+        const mesh = sampleRegionMesh(
+            (p) => p[0] * p[0] + p[1] * p[1] + p[2] * p[2] < 1,
+            [{ lo: -1.5, hi: 1.5 }, { lo: -1.5, hi: 1.5 }, { lo: -1.5, hi: 1.5 }],
+            20000, 1e7,
+        );
+        assert.ok(mesh && mesh.faces.length > 500, 'mesh expected');
+        const v = mesh.verts;
+        const edges = new Map<string, number>();
+        let vol = 0;
+        for (const f of mesh.faces) {
+            for (let a = 0; a < f.length; a++) {
+                const i = f[a], j = f[(a + 1) % f.length];
+                const k = i < j ? `${i},${j}` : `${j},${i}`;
+                edges.set(k, (edges.get(k) ?? 0) + 1);
+            }
+            for (let t = 1; t + 1 < f.length; t++) {
+                const [a, b, c] = [f[0], f[t], f[t + 1]].map((q) => [v[3 * q], v[3 * q + 1], v[3 * q + 2]]);
+                vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+            }
+        }
+        assert.ok([...edges.values()].every((n) => n === 2), 'every edge shared by exactly two faces');
+        const exact = (4 / 3) * Math.PI;
+        assert.ok(Math.abs(vol - exact) / exact < 0.01, `volume ${vol} vs ${exact}`);
+        for (let i = 0; i < v.length; i += 3) {
+            const r = Math.hypot(v[i], v[i + 1], v[i + 2]);
+            assert.ok(Math.abs(r - 1) < 0.01, `vertex at r = ${r}`);
+        }
+    });
+
+    // Frank Helk's lunar crater (Nov 2026): the bowl is a `z` surface of
+    // revolution through three points, which no primitive expresses. The
+    // ground around it used to be a translucent box with no bowl in it.
+    const CRATER = deck([
+        'crater',
+        '1 1 -1.5 100 -200 300 -400 imp:p=1',
+        '2 0 -100 -200 300 imp:p=1',
+        '3 0 -400 #1 #2 imp:p=1',
+        '9 0 400 imp:p=0',
+        '',
+        '100 z 0 20000 -2000 18000 -4000 14000',
+        '200 sz -173750000 173750000',
+        '300 pz -3000',
+        '400 so 100000',
+        '',
+        'm1 8016 -0.456 14000 -0.544',
+    ]);
+
+    test('a crater bowl is cut out of the ground and drawn as its own cavity', () => {
+        const model = parseMcnpGeometry(CRATER);
+        const scene = buildCsgScene(model, MATS);
+        assert.ok(!scene.cylinders.some((c) => /unresolved/.test(c.label ?? '')), 'no placeholder boxes');
+        const ground = scene.cylinders.find((c) => c.cell === '1' && c.sampledCell);
+        const bowl = scene.cylinders.find((c) => c.cell === '2' && c.sampledCell);
+        assert.ok(ground?.verts && bowl?.verts, 'both cells sampled');
+        // No ground inside the bowl: above its floor, ground vertices stay
+        // outside the bowl's narrowest radius (140 m at z = −40 m, 180 m at −20 m).
+        let minR = Infinity;
+        for (let i = 0; i < ground.verts.length; i += 3) {
+            if (ground.verts[i + 2] > -1500) minR = Math.min(minR, Math.hypot(ground.verts[i], ground.verts[i + 1]));
+        }
+        assert.ok(minR > 15000, `ground reaches r = ${minR} cm inside the bowl`);
+        let maxR = 0;
+        for (let i = 0; i < bowl.verts.length; i += 3) maxR = Math.max(maxR, Math.hypot(bowl.verts[i], bowl.verts[i + 1]));
+        assert.ok(maxR > 19000 && maxR < 20700, `bowl rim at r = ${maxR} cm (surface 100 meets z = 0 at 200 m)`);
+    });
+
+    test('a bore through a ball, a dimple, and both sheets of a cone are meshed', () => {
+        const model = parseMcnpGeometry(deck([
+            'holes',
+            '1 1 -7.9 -1 2 imp:n=1',
+            '2 1 -7.9 -3 4 imp:n=1',
+            '3 1 -7.9 -5 6 -7 imp:n=1',
+            '',
+            '1 s 0 0 0 12',
+            '2 c/x 0 0 4',
+            '3 s 60 0 0 12',
+            '4 s 72 0 0 4.5',
+            '5 k/z 120 0 0 0.36',
+            '6 pz -10',
+            '7 pz 10',
+            '',
+            'm1 26056 -0.7 24052 -0.19 28058 -0.11',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        const sampled = (cell: string) => scene.cylinders.find((c) => c.cell === cell && c.sampledCell);
+        const drilled = sampled('1');
+        assert.ok(drilled?.verts, `drilled ball meshed: ${JSON.stringify(scene.cylinders.map((c) => c.label))}`);
+        // Nothing of the ball inside the bore (r = 4 about the x axis), away from its ends.
+        for (let i = 0; i < drilled.verts.length; i += 3) {
+            const [x, y, z] = [drilled.verts[i], drilled.verts[i + 1], drilled.verts[i + 2]];
+            if (Math.abs(x) < 8) assert.ok(Math.hypot(y, z) > 3.5, `vertex at (${x}, ${y}, ${z}) inside the bore`);
+        }
+        assert.ok(sampled('2'), 'dimpled ball meshed');
+        const hourglass = sampled('3');
+        assert.ok(hourglass?.verts, 'two-sheet cone meshed');
+        let below = false, above = false;
+        for (let i = 2; i < hourglass.verts.length; i += 3) {
+            if (hourglass.verts[i] < -5) below = true;
+            if (hourglass.verts[i] > 5) above = true;
+        }
+        assert.ok(below && above, 'both sheets drawn');
+    });
+
+    test('a hole too small to resolve on a moon-sized sphere leaves the smooth sphere', () => {
+        const model = parseMcnpGeometry(deck([
+            'moon',
+            '1 1 -1.5 -1 2 imp:p=1',
+            '',
+            '1 sz -173750100 173750000',
+            '2 sz -100 100000',
+            '',
+            'm1 8016 -0.456 14000 -0.544',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        assert.ok(scene.cylinders.some((c) => c.cell === '1' && c.shape === 'sphere' && !c.sampledCell),
+            `moon drawn as a sphere: ${JSON.stringify(scene.cylinders.map((c) => c.label))}`);
+    });
+
+    test('a sphere cut by a plane and a hole is drawn as the cap, not the whole sphere', () => {
+        // Inside a 1737.5 km sphere, above a plane 30 m under its pole, outside
+        // a 1 km sphere: a disc about 10 km across. Ignoring the plane drew the moon.
+        const model = parseMcnpGeometry(deck([
+            'cap',
+            '1 1 -1.5 -200 300 400 imp:p=1',
+            '9 0 200:-300:-400 imp:p=0',
+            '',
+            '200 sz -173750000 173750000',
+            '300 pz -3000',
+            '400 so 100000',
+            '',
+            'm1 8016 -0.456 14000 -0.544',
+        ]));
+        const scene = buildCsgScene(model, MATS);
+        const cap = scene.cylinders.find((c) => c.cell === '1');
+        assert.ok(cap?.verts, `cell 1 should be meshed: ${JSON.stringify(scene.cylinders.map((c) => c.label))}`);
+        let maxR = 0;
+        for (let i = 0; i < cap.verts.length; i += 3) maxR = Math.max(maxR, Math.hypot(cap.verts[i], cap.verts[i + 1]));
+        const capR = Math.sqrt(3000 * (2 * 173750000 - 3000));
+        assert.ok(maxR > 0.8 * capR && maxR < 1.05 * capR, `cap radius ${maxR} vs ${capR}`);
     });
 
     test('oblique plane on a cylinder produces a watertight mesh with the right volume', () => {

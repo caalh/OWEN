@@ -289,7 +289,7 @@ geometry {
     // Honesty baseline (geometry-preview plan, Stage 0.2): a deck made only of
     // unsupported surfaces must warn, naming every skipped surface type — never
     // silently render nothing.
-    test('MCNP deck of only unsupported surfaces warns and names each skipped type', () => {
+    test('MCNP void cell no primitive expresses is meshed as a cavity, never as material', () => {
         const deck = [
             'Unsupported surfaces only',
             '1 0 -1 2 -3 imp:n=1',
@@ -302,16 +302,15 @@ geometry {
             'mode n',
         ].join('\n');
         const scene = buildScene(deck, 'mcnp');
-        // The exact engine draws the void cell as a translucent stand-in (a
-        // cavity, never solid geometry) and says which surface it could not
-        // resolve. Nothing here may pose as real material.
+        // Sphere ∩ outside a cone ∩ torus has no primitive: the exact engine
+        // samples it into a mesh. It is void, so it is drawn as a translucent
+        // cavity. Nothing here may pose as real material.
         for (const c of scene.cylinders) {
-            assert.strictEqual(c.component, 'void', `only void stand-ins may be drawn, got ${c.label} (${c.component})`);
-            assert.ok((c.opacity ?? 1) < 0.5, 'a stand-in must be translucent');
+            assert.strictEqual(c.component, 'void', `only void cavities may be drawn, got ${c.label} (${c.component})`);
+            assert.ok((c.opacity ?? 1) < 0.5, 'a cavity must be translucent');
         }
-        const all = scene.warnings.join(' | ');
-        assert.ok(/cell 1/i.test(all), `warning must name the affected cell — got: ${all}`);
-        assert.ok(/cone|surface 2|kz/i.test(all), `warning must name the surface it gave up on — got: ${all}`);
+        assert.ok(scene.cylinders.some((c) => c.cell === '1' && c.sampledCell),
+            `cell 1 should be meshed by sampling, got ${scene.cylinders.map((c) => c.label).join(', ')}`);
     });
 
     test('partial MCNP coverage is reported through the CSG census, never silently', () => {

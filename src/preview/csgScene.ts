@@ -30,11 +30,12 @@ import {
     McnpSurface,
     RegionNode,
     Shape,
+    toAux,
     toMain,
     Transform,
     Vec3,
 } from './mcnpGeometry';
-import { Bounds, cachedLatticeBasis, cellContains, rootUniverseId, worldBounds } from './mcnpEvaluate';
+import { Bounds, cachedLatticeBasis, cellContains, rootUniverseId, surfaceValue, worldBounds } from './mcnpEvaluate';
 
 export interface MaterialLookup {
     name: string;
@@ -630,6 +631,8 @@ interface EmitCtx {
     /** Running CSG-mesh triangle count (drives tessellation coarsening). */
     triCounter: { count: number };
     maxTriangles: number;
+    /** Set for top-level placements only: lattice elements repeat too often to sample. */
+    sampler?: { model: McnpGeometryModel; nodesLeft: number };
 }
 
 type EmitStatus = 'exact' | 'approximated' | 'failed';
@@ -922,11 +925,66 @@ function emitPolyhedronTerm(bk: TermBuckets, ctx: EmitCtx): Emission | null {
     return { spec: [spec], status, detail: status === 'approximated' ? firstNote(bk) : undefined };
 }
 
+/**
+ * Clamp a planar window to the boxes of the closed solids the term is inside.
+ * Without this a cell inside a 1737 km sphere and above one plane got a box
+ * reaching hundreds of km past the sphere (Frank Helk's lunar crater).
+ */
+function clampToEnclosing(bk: TermBuckets, w: Array<{ lo: number; hi: number }>): void {
+    const clamp = (ai: number, lo: number, hi: number): void => {
+        const nlo = Math.max(w[ai].lo, lo), nhi = Math.min(w[ai].hi, hi);
+        if (nlo <= nhi) { w[ai].lo = nlo; w[ai].hi = nhi; }
+    };
+    const ai = (a: Axis): number => (a === 'x' ? 0 : a === 'y' ? 1 : 2);
+    const others = (a: number): [number, number] => (a === 0 ? [1, 2] : a === 1 ? [0, 2] : [0, 1]);
+    for (const s of bk.inSphere) for (let i = 0; i < 3; i++) clamp(i, s.c[i] - s.r, s.c[i] + s.r);
+    // A sphere cut by the window is a cap: its reach along one axis shrinks
+    // with the distance the window keeps from the centre on the other two
+    // (a 1737 km sphere above a plane 30 m under its pole is a 10 km disc).
+    // (r − s)(r + s) instead of r² − s² keeps the cap of a huge sphere exact.
+    for (let pass = 0; pass < 2; pass++) {
+        for (const s of bk.inSphere) {
+            const gap = [0, 1, 2].map((i) => Math.max(0, w[i].lo - s.c[i], s.c[i] - w[i].hi));
+            for (let j = 0; j < 3; j++) {
+                const [u, v] = others(j);
+                const off = Math.hypot(gap[u], gap[v]);
+                if (off >= s.r) continue;
+                const half = Math.sqrt((s.r - off) * (s.r + off));
+                clamp(j, s.c[j] - half, s.c[j] + half);
+            }
+        }
+    }
+    for (const e of bk.inEllipsoid) {
+        const r = [e.rx, e.ry, e.rz];
+        for (let i = 0; i < 3; i++) clamp(i, e.c[i] - r[i], e.c[i] + r[i]);
+    }
+    for (const c of bk.inCyl) {
+        if (!c.axis) continue;
+        const [u, v] = others(ai(c.axis));
+        clamp(u, c.u0 - c.r, c.u0 + c.r);
+        clamp(v, c.v0 - c.r, c.v0 + c.r);
+    }
+    for (const c of bk.inEllCyl) {
+        const [u, v] = others(ai(c.axis));
+        clamp(u, c.c[0] - c.r1, c.c[0] + c.r1);
+        clamp(v, c.c[1] - c.r2, c.c[1] + c.r2);
+    }
+    for (const t of bk.inTorus) {
+        const a = ai(t.axis);
+        const [u, v] = others(a);
+        const reach = t.major + t.tube;
+        clamp(a, t.center[a] - t.tube, t.center[a] + t.tube);
+        clamp(u, t.center[u] - reach, t.center[u] + reach);
+        clamp(v, t.center[v] - reach, t.center[v] + reach);
+    }
+}
+
 /** Last resort: translucent bounding box of the term's planar window. */
 function emitFallback(bk: TermBuckets, ctx: EmitCtx, why: string): Emission {
     const wx = axialWindow(bk.planes, 'x', ctx.bounds);
     const wy = axialWindow(bk.planes, 'y', ctx.bounds);
     const wz = axialWindow(bk.planes, 'z', ctx.bounds);
+    clampToEnclosing(bk, [wx, wy, wz]);
     const spec: CylinderSpec = {
         x: (wx.lo + wx.hi) / 2, y: (wy.lo + wy.hi) / 2, z: (wz.lo + wz.hi) / 2,
         radius: Math.max(0.01, (wx.hi - wx.lo) / 2),
@@ -939,6 +997,371 @@ function emitFallback(bk: TermBuckets, ctx: EmitCtx, why: string): Emission {
         label: `${ctx.label} (unresolved)`,
     };
     return { spec: [spec], status: 'failed', detail: why };
+}
+
+// ---------------------------------------------------------------------------
+// Sampled mesh (a term no primitive can express, or one only drawn by
+// ignoring some of its constraints)
+// ---------------------------------------------------------------------------
+//
+// The term's exact point test is sampled on a grid over its window and turned
+// into a surface with naive surface nets: one vertex per grid cell the surface
+// crosses, placed at the mean of its edge crossings (each found by bisection
+// on the exact test, so vertices sit on the real surface), and one quad per
+// crossing edge. Grid nodes outside the window count as outside, so the mesh
+// closes where the window truncates the term.
+
+/** Triangles one sampled term may use, before the scene budget shares it out. */
+const SAMPLED_TERM_TRIANGLES = 60_000;
+/** Point tests allowed for all sampled terms in one scene. */
+const SAMPLED_SCENE_NODES = 6_000_000;
+const SAMPLED_MIN_CELLS = 8;
+const SAMPLED_MAX_CELLS = 256;
+const SAMPLED_BISECT_STEPS = 10;
+
+export interface SampledMesh {
+    verts: number[];
+    faces: number[][];
+    /** Grid cell size per axis (cm). */
+    step: Vec3;
+    /** Point tests spent (grid nodes). */
+    nodes: number;
+}
+
+/**
+ * Surface-nets mesh of `{p : test(p)}` inside the window. Returns null when
+ * the window is not finite or the node budget would be exceeded.
+ */
+export function sampleRegionMesh(
+    test: (p: Vec3) => boolean,
+    win: Array<{ lo: number; hi: number }>,
+    triangleAllowance: number,
+    nodeBudget: number,
+): SampledMesh | null {
+    const ext = win.map((w) => w.hi - w.lo);
+    if (!ext.every((e) => Number.isFinite(e))) return null;
+    if (ext.some((e) => e <= 0)) return { verts: [], faces: [], step: [0, 0, 0], nodes: 0 };
+    // Surface-net faces on a box-like region ≈ 4·(nx·ny + ny·nz + nx·nz)
+    // triangles; pick the isotropic cell size that fits the allowance.
+    const area = ext[0] * ext[1] + ext[1] * ext[2] + ext[0] * ext[2];
+    const h = Math.sqrt((4 * area) / Math.max(1000, triangleAllowance));
+    const n = ext.map((e) => Math.min(SAMPLED_MAX_CELLS, Math.max(SAMPLED_MIN_CELLS, Math.round(e / h))));
+    const N = n.map((k) => k + 3); // padding node on each side
+    const total = N[0] * N[1] * N[2];
+    if (total > nodeBudget) return null;
+    const step: Vec3 = [ext[0] / n[0], ext[1] / n[1], ext[2] / n[2]];
+    const pos = (i: number, j: number, k: number): Vec3 => [
+        win[0].lo + (i - 1) * step[0],
+        win[1].lo + (j - 1) * step[1],
+        win[2].lo + (k - 1) * step[2],
+    ];
+    const tol = ext.map((e) => e * 1e-9);
+    const inWin = (p: Vec3): boolean =>
+        p[0] >= win[0].lo - tol[0] && p[0] <= win[0].hi + tol[0]
+        && p[1] >= win[1].lo - tol[1] && p[1] <= win[1].hi + tol[1]
+        && p[2] >= win[2].lo - tol[2] && p[2] <= win[2].hi + tol[2];
+    const inside = (p: Vec3): boolean => inWin(p) && test(p);
+
+    const idx = (i: number, j: number, k: number): number => (k * N[1] + j) * N[0] + i;
+    const occ = new Uint8Array(total);
+    let any = false;
+    for (let k = 1; k <= n[2] + 1; k++) {
+        for (let j = 1; j <= n[1] + 1; j++) {
+            for (let i = 1; i <= n[0] + 1; i++) {
+                if (inside(pos(i, j, k))) { occ[idx(i, j, k)] = 1; any = true; }
+            }
+        }
+    }
+    if (!any) return { verts: [], faces: [], step, nodes: total };
+
+    const crossing = new Map<number, Vec3>();
+    const edgeCross = (i: number, j: number, k: number, axis: number): Vec3 => {
+        const key = idx(i, j, k) * 3 + axis;
+        const hit = crossing.get(key);
+        if (hit) return hit;
+        const a = pos(i, j, k);
+        const b = pos(i + (axis === 0 ? 1 : 0), j + (axis === 1 ? 1 : 0), k + (axis === 2 ? 1 : 0));
+        let pin: Vec3 = occ[idx(i, j, k)] ? a : b;
+        let pout: Vec3 = occ[idx(i, j, k)] ? b : a;
+        for (let s = 0; s < SAMPLED_BISECT_STEPS; s++) {
+            const mid: Vec3 = [(pin[0] + pout[0]) / 2, (pin[1] + pout[1]) / 2, (pin[2] + pout[2]) / 2];
+            if (inside(mid)) pin = mid; else pout = mid;
+        }
+        const out: Vec3 = [(pin[0] + pout[0]) / 2, (pin[1] + pout[1]) / 2, (pin[2] + pout[2]) / 2];
+        crossing.set(key, out);
+        return out;
+    };
+
+    const C = [N[0] - 1, N[1] - 1, N[2] - 1];
+    const cubeVert = new Int32Array(C[0] * C[1] * C[2]).fill(-1);
+    const cidx = (i: number, j: number, k: number): number => (k * C[1] + j) * C[0] + i;
+    const verts: number[] = [];
+    // The 12 cube edges as (corner offset, axis).
+    const EDGES: Array<[number, number, number, number]> = [
+        [0, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 1, 1, 0],
+        [0, 0, 0, 1], [1, 0, 0, 1], [0, 0, 1, 1], [1, 0, 1, 1],
+        [0, 0, 0, 2], [1, 0, 0, 2], [0, 1, 0, 2], [1, 1, 0, 2],
+    ];
+    for (let k = 0; k < C[2]; k++) {
+        for (let j = 0; j < C[1]; j++) {
+            for (let i = 0; i < C[0]; i++) {
+                let ins = 0;
+                for (let c = 0; c < 8; c++) ins += occ[idx(i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1))];
+                if (ins === 0 || ins === 8) continue;
+                let sx = 0, sy = 0, sz = 0, m = 0;
+                for (const [di, dj, dk, axis] of EDGES) {
+                    const a = occ[idx(i + di, j + dj, k + dk)];
+                    const b = occ[idx(i + di + (axis === 0 ? 1 : 0), j + dj + (axis === 1 ? 1 : 0), k + dk + (axis === 2 ? 1 : 0))];
+                    if (a === b) continue;
+                    const p = edgeCross(i + di, j + dj, k + dk, axis);
+                    sx += p[0]; sy += p[1]; sz += p[2]; m++;
+                }
+                cubeVert[cidx(i, j, k)] = verts.length / 3;
+                verts.push(sx / m, sy / m, sz / m);
+            }
+        }
+    }
+
+    const faces: number[][] = [];
+    // Each crossing grid edge is shared by four cells; join their vertices.
+    // Padding nodes are always outside, so a crossing edge never touches the
+    // outer layer and all four cells exist.
+    for (let k = 1; k < N[2] - 1; k++) {
+        for (let j = 1; j < N[1] - 1; j++) {
+            for (let i = 1; i < N[0] - 1; i++) {
+                const here = occ[idx(i, j, k)];
+                for (let axis = 0; axis < 3; axis++) {
+                    const ni = i + (axis === 0 ? 1 : 0), nj = j + (axis === 1 ? 1 : 0), nk = k + (axis === 2 ? 1 : 0);
+                    if (here === occ[idx(ni, nj, nk)]) continue;
+                    let ring: number[];
+                    if (axis === 0) ring = [cidx(i, j - 1, k - 1), cidx(i, j, k - 1), cidx(i, j, k), cidx(i, j - 1, k)];
+                    else if (axis === 1) ring = [cidx(i - 1, j, k - 1), cidx(i - 1, j, k), cidx(i, j, k), cidx(i, j, k - 1)];
+                    else ring = [cidx(i - 1, j - 1, k), cidx(i, j - 1, k), cidx(i, j, k), cidx(i - 1, j, k)];
+                    const q = ring.map((c) => cubeVert[c]);
+                    if (q.some((v) => v < 0)) continue;
+                    faces.push(here ? q : q.reverse());
+                }
+            }
+        }
+    }
+    return { verts, faces, step, nodes: total };
+}
+
+/** Coarse pass: grid nodes over the window, about this many in all. */
+const SAMPLED_SCOUT_NODES = 64 ** 3;
+
+/**
+ * The part of the window the region occupies, from a coarse grid, padded by
+ * one coarse cell and kept inside the window. Null when no node is inside.
+ */
+function occupiedWindow(
+    test: (p: Vec3) => boolean,
+    win: Array<{ lo: number; hi: number }>,
+    sampler: { nodesLeft: number },
+): Array<{ lo: number; hi: number }> | null {
+    const ext = win.map((w) => w.hi - w.lo);
+    if (!ext.every((e) => Number.isFinite(e) && e > 0)) return null;
+    const h = Math.cbrt((ext[0] * ext[1] * ext[2]) / SAMPLED_SCOUT_NODES);
+    const n = ext.map((e) => Math.min(SAMPLED_MAX_CELLS, Math.max(SAMPLED_MIN_CELLS, Math.round(e / h))));
+    const nodes = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
+    if (nodes > sampler.nodesLeft) return null;
+    sampler.nodesLeft -= nodes;
+    const step = ext.map((e, a) => e / n[a]);
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    const p: Vec3 = [0, 0, 0];
+    for (let k = 0; k <= n[2]; k++) {
+        p[2] = win[2].lo + k * step[2];
+        for (let j = 0; j <= n[1]; j++) {
+            p[1] = win[1].lo + j * step[1];
+            for (let i = 0; i <= n[0]; i++) {
+                p[0] = win[0].lo + i * step[0];
+                if (!test(p)) continue;
+                for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[a]); hi[a] = Math.max(hi[a], p[a]); }
+            }
+        }
+    }
+    if (lo[0] > hi[0]) return null;
+    return win.map((w, a) => ({ lo: Math.max(w.lo, lo[a] - step[a]), hi: Math.min(w.hi, hi[a] + step[a]) }));
+}
+
+function selfContradictory(term: Literal[]): boolean {
+    const seen = new Map<string, number>();
+    for (const lit of term) {
+        const key = `${lit.surface}.${lit.facet}`;
+        const prev = seen.get(key);
+        if (prev !== undefined && prev !== lit.sense) return true;
+        seen.set(key, lit.sense);
+    }
+    return false;
+}
+
+/** Exact point test for one DNF term (all literals hold). */
+function termTest(model: McnpGeometryModel, term: Literal[]): ((p: Vec3) => boolean) | null {
+    const tests: Array<(p: Vec3) => boolean> = [];
+    for (const lit of term) {
+        let surface = model.surfaces.get(lit.surface);
+        let tr: Transform | null = null;
+        if (!surface) {
+            const gen = model.generatedSurfaces.get(lit.surface);
+            if (!gen) return null;
+            surface = model.surfaces.get(gen.surface);
+            if (!surface) return null;
+            tr = gen.tr;
+        }
+        const s = surface;
+        const pre = tr;
+        const sense = lit.sense;
+        tests.push((p) => {
+            const f = surfaceValue(s, lit.facet, pre ? toAux(pre, p) : p);
+            return sense === -1 ? f < 0 : f > 0;
+        });
+    }
+    return (p) => {
+        for (const t of tests) if (!t(p)) return false;
+        return true;
+    };
+}
+
+/** Axis-aligned box a drawn primitive covers (conservative for rare shapes). */
+function specBox(s: CylinderSpec): { min: Vec3; max: Vec3 } {
+    if (s.verts && s.verts.length >= 3) {
+        const min: Vec3 = [Infinity, Infinity, Infinity];
+        const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < s.verts.length; i += 3) {
+            for (let a = 0; a < 3; a++) {
+                min[a] = Math.min(min[a], s.verts[i + a]);
+                max[a] = Math.max(max[a], s.verts[i + a]);
+            }
+        }
+        return { min, max };
+    }
+    const c: Vec3 = [s.x, s.y, s.z];
+    const r = s.radius ?? 0;
+    const half = (s.height ?? 0) / 2;
+    let h: Vec3;
+    if (s.shape === 'sphere') h = [r, r, r];
+    else if (s.shape === 'ellipsoid') h = [s.halfX ?? r, s.halfY ?? r, s.halfZ ?? r];
+    else if (s.shape === 'box') h = [s.halfX ?? r, s.halfY ?? r, half];
+    else if (s.shape === 'torus') {
+        const reach = r + (s.tube ?? 0);
+        const t = s.tube ?? 0;
+        h = s.axis === 'x' ? [t, reach, reach] : s.axis === 'y' ? [reach, t, reach] : [reach, reach, t];
+    } else {
+        const rx = s.shape === 'ellcyl' ? (s.halfX ?? r) : Math.max(r, s.topRadius ?? 0);
+        const ry = s.shape === 'ellcyl' ? (s.halfY ?? r) : rx;
+        h = s.axis === 'x' ? [half, rx, ry] : s.axis === 'y' ? [rx, half, ry] : [rx, ry, half];
+    }
+    return { min: [c[0] - h[0], c[1] - h[1], c[2] - h[2]], max: [c[0] + h[0], c[1] + h[1], c[2] + h[2]] };
+}
+
+/**
+ * Does an approximated primitive reach outside the term's window? That is the
+ * case worth sampling: the primitive ignored a clip that removes most of it.
+ */
+function overflowsWindow(specs: CylinderSpec[], win: Array<{ lo: number; hi: number }>): boolean {
+    for (const s of specs) {
+        const b = specBox(s);
+        for (let a = 0; a < 3; a++) {
+            const slack = 0.01 * (win[a].hi - win[a].lo) + 1e-6;
+            if (b.min[a] < win[a].lo - slack || b.max[a] > win[a].hi + slack) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * For a primitive that stays inside its window: would a sampled mesh show what
+ * it left out? Subtracted spheres, cylinders and tori count only when they are
+ * a few grid cells across: a 4 cm bore through a 24 cm ball is, a 1 km hole in
+ * a 1737 km moon is not, and there the smooth primitive looks better. With
+ * nothing subtracted, the primitive's own shape is the approximation (one
+ * sheet of a two-sheet cone, an oblique clip), and sampling fixes it.
+ */
+function samplingResolvesOmission(specs: CylinderSpec[], bk: TermBuckets, allowance: number): boolean {
+    const holes = [...bk.outCyl.map((c) => c.r), ...bk.outSphere.map((s) => s.r), ...bk.outTorus.map((t) => t.tube)];
+    if (holes.length === 0) return true;
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    for (const s of specs) {
+        const b = specBox(s);
+        for (let a = 0; a < 3; a++) { min[a] = Math.min(min[a], b.min[a]); max[a] = Math.max(max[a], b.max[a]); }
+    }
+    const ext = [0, 1, 2].map((a) => Math.max(0, max[a] - min[a]));
+    const area = ext[0] * ext[1] + ext[1] * ext[2] + ext[0] * ext[2];
+    const h = Math.sqrt((4 * area) / Math.max(1000, allowance));
+    return Math.max(...holes) >= 3 * h;
+}
+
+/** A translucent void needs less detail than a solid, and must not starve the solids after it. */
+const SAMPLED_VOID_TRIANGLES = 12_000;
+/** Share of the triangle budget solids leave for the voids that usually follow them. */
+const SAMPLED_VOID_RESERVE = 0.15;
+
+function emitSampledTerm(term: Literal[], bk: TermBuckets, ctx: EmitCtx, primitive: Emission | null): Emission | null {
+    const sampler = ctx.sampler;
+    if (!sampler) return null;
+    const remaining = ctx.maxTriangles - ctx.triCounter.count;
+    const isVoid = ctx.component === Component.Void;
+    const allowance = isVoid
+        ? Math.min(SAMPLED_VOID_TRIANGLES, remaining / 8)
+        : Math.min(SAMPLED_TERM_TRIANGLES, (remaining - SAMPLED_VOID_RESERVE * ctx.maxTriangles) / 4);
+    if (allowance < (isVoid ? 1000 : 2000)) return null;
+    const wx = axialWindow(bk.planes, 'x', ctx.bounds);
+    const wy = axialWindow(bk.planes, 'y', ctx.bounds);
+    const wz = axialWindow(bk.planes, 'z', ctx.bounds);
+    const win = [wx, wy, wz];
+    clampToEnclosing(bk, win);
+    if (primitive && primitive.status === 'approximated'
+        && !overflowsWindow(primitive.spec, win)
+        && !samplingResolvesOmission(primitive.spec, bk, allowance)) return null;
+    const test = termTest(sampler.model, term);
+    if (!test) return null;
+    // The window can be far bigger than the cell (an axis no surface bounds
+    // falls back to ±1000 cm): find the occupied part first, then mesh it.
+    let found = occupiedWindow(test, win, sampler);
+    if (!found) return null;
+    const vol = (w: Array<{ lo: number; hi: number }>) => w.reduce((m, a) => m * (a.hi - a.lo), 1);
+    // A window that was already tight gains nothing from a finer scout.
+    const firstShrink = vol(found) / vol(win);
+    for (let pass = 0; pass < 3 && firstShrink <= 0.5; pass++) {
+        const tighter = occupiedWindow(test, found, sampler);
+        if (!tighter) break;
+        const shrink = vol(tighter) / vol(found);
+        found = tighter;
+        if (shrink > 0.5) break;
+    }
+    const mesh = sampleRegionMesh(test, found, allowance, sampler.nodesLeft);
+    if (!mesh) return null;
+    sampler.nodesLeft -= mesh.nodes;
+    // Nothing found inside is not proof the term is empty: keep the old path.
+    if (mesh.faces.length === 0) return null;
+    ctx.triCounter.count += mesh.faces.length * 2;
+    const lo: Vec3 = [Infinity, Infinity, Infinity];
+    const hi: Vec3 = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < mesh.verts.length; i += 3) {
+        for (let a = 0; a < 3; a++) {
+            lo[a] = Math.min(lo[a], mesh.verts[i + a]);
+            hi[a] = Math.max(hi[a], mesh.verts[i + a]);
+        }
+    }
+    const cell = Math.max(...mesh.step);
+    const spec: CylinderSpec = {
+        x: (lo[0] + hi[0]) / 2, y: (lo[1] + hi[1]) / 2, z: (lo[2] + hi[2]) / 2,
+        radius: Math.max(0.01, (hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2),
+        height: Math.max(0.01, hi[2] - lo[2]),
+        shape: 'polyhedron',
+        verts: mesh.verts,
+        faces: mesh.faces,
+        sampledCell: cell,
+        color: ctx.color, component: ctx.component, material: ctx.materialName,
+        label: `${ctx.label} (sampled)`,
+    };
+    return { spec: [spec], status: 'approximated', detail: `sampled mesh, ${formatCm(cell)} cm grid` };
+}
+
+function formatCm(v: number): string {
+    return v >= 100 ? Math.round(v).toLocaleString('en-US') : v.toPrecision(3);
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,6 +1582,7 @@ export function buildCsgScene(
     const maxPrims = opts.maxPrimitives && opts.maxPrimitives > 0 ? opts.maxPrimitives : 20000;
     const maxTriangles = opts.maxTriangles && opts.maxTriangles > 0 ? opts.maxTriangles : DEFAULT_MAX_CSG_TRIANGLES;
     const triCounter = { count: 0 };
+    const sampler = { model, nodesLeft: SAMPLED_SCENE_NODES };
 
     const rawBounds = worldBounds(model);
     // Pad the clip box: worldBounds is built from surface *positions*, so a
@@ -1278,6 +1702,7 @@ export function buildCsgScene(
             label: `cell ${cellId}`,
             triCounter,
             maxTriangles,
+            sampler: pl.depth === 0 ? sampler : undefined,
         };
 
         const dnfCtx: DnfCtx = { model, stack: new Set([cellId]) };
@@ -1293,6 +1718,9 @@ export function buildCsgScene(
             worstDetail = em.detail;
         } else {
             for (const term of dnf) {
+                // `#` expansion yields terms that need both sides of one
+                // surface. They are empty; any primitive drawn for them is wrong.
+                if (selfContradictory(term)) continue;
                 const bk = newBuckets();
                 for (const lit of term) {
                     const surf = resolveSurface(model, lit.surface);
@@ -1312,15 +1740,16 @@ export function buildCsgScene(
                     bucketShape(bk, shape, lit.sense, surf.tr, `surface ${lit.surface}`);
                 }
 
-                const em =
+                let em =
                     emitCylinderTerm(bk, ctx) ??
                     emitSphereTerm(bk, ctx) ??
                     emitConeTerm(bk, ctx) ??
                     emitEllipsoidTerm(bk, ctx) ??
                     emitEllCylTerm(bk, ctx) ??
                     emitTorusTerm(bk, ctx) ??
-                    emitPolyhedronTerm(bk, ctx) ??
-                    emitFallback(bk, ctx, firstNote(bk) ?? 'mixed quadric constraints');
+                    emitPolyhedronTerm(bk, ctx);
+                if (!em || em.status !== 'exact') em = emitSampledTerm(term, bk, ctx, em) ?? em;
+                em ??= emitFallback(bk, ctx, firstNote(bk) ?? 'mixed quadric constraints');
                 cellSpecs.push(...em.spec);
                 if (em.status === 'failed' && worst !== 'failed') { worst = 'failed'; worstDetail = em.detail; }
                 else if (em.status === 'approximated' && worst === 'exact') { worst = 'approximated'; worstDetail = em.detail; }

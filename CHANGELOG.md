@@ -5,6 +5,79 @@ All notable changes to the OWEN VS Code extension are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-11-21
+
+Frank Helk sent a second round by email: a lunar-crater deck whose area of
+interest sits at the Moon's north pole, three requests for the 3D slice
+planes, a visible-volume box, and a color picker that appeared on a cell
+complement. All of them are below. Thank you again, Frank.
+
+### Added
+
+- **Slice planes you can place exactly** (requested by Frank Helk). Each of
+  the X, Y, and Z slices now has a reverse checkbox, a number box that takes
+  the exact cut position in cm (it may go past the slider's range), and two
+  tilts about the other two axes, each limited to ±90°. A new "Cut only where
+  slices overlap (wedge)" option removes the intersection of the active slices
+  instead of their union, so X and Y at the centre give a 90° cutaway and X
+  tilted −70° about Z gives a 20° wedge.
+- **Visible volume** (requested by Frank Helk). A lower and upper X, Y, and Z
+  in cm limit what the 3D preview draws, framing, and slider ranges. Auto
+  (the default) uses the whole model. A lower limit that is not below the
+  upper one is refused with a message instead of applied.
+- **Typed 2D slice offset**: the 2D slice offset is a number box as well as a
+  slider.
+- **Cells no primitive can draw are meshed from the exact geometry**
+  (reported by Frank Helk: "no craters, just a sphere"). His crater wall is a
+  `z` surface of revolution through three points. The 3D preview used to draw
+  the crater and the ground around it as translucent placeholder boxes, so the
+  bowl never appeared. Such a cell is now sampled with the exact point test and
+  meshed with surface nets, with vertices placed on the real surface. The
+  bowl, its floor, and the rim show in 3D. The same path replaces a primitive
+  that reached far outside its cell because a clipping plane was ignored: his
+  deck's leak past the world sphere is now drawn as the 10 km cap it really
+  is, not as the whole Moon. Lattice elements keep the fast path, and a
+  scene-wide triangle and sample budget falls back to the old box when spent.
+  Hover reads "meshed from the exact cell" with the grid size.
+- **Holes and two-sheet cones are meshed too.** A sphere with a cylinder bored
+  through it or spheres cut out of it used to be drawn as the whole sphere,
+  and a two-sheet cone as one sheet. Such a cell is now meshed whenever the
+  part the primitive left out is at least three grid cells across. A hole too
+  small for the grid (a 1 km hole in a 1,737 km moon) keeps the smooth
+  primitive. Translucent void cells mesh on a smaller share of the budget, so
+  they no longer fall back to boxes after the solids, and a cell whose window
+  is already tight skips the second coarse search.
+
+### Fixed
+
+- **The 3D preview was a mirror image of the deck.** Deck x, y, z went to the
+  renderer's x, z, y, which is a reflection, so every view was mirrored: seen
+  from −y with z up, +x appeared on the left, and a torus cut open on its +x
+  side opened toward −x. Deck y now maps to the renderer's −z, a rotation,
+  and the axes helper shows red, green, and blue along deck x, y, and z.
+  Slices, the visible volume, picking, measuring, and the overlays use the
+  same mapping.
+- **Zooming into a small feature on a huge model** (reported by Frank Helk).
+  On a moon-sized deck, zooming toward the crater went black and orbit and pan
+  became unusable, because the orbit pivot stayed deep inside the Moon and the
+  camera's near plane grew with its distance. The wheel now
+  zooms toward the point under the cursor and carries the pivot along, ticks
+  pass through void shells instead of crawling through them, and the near and
+  far planes follow the camera's distance to what it is looking at. Orbit and
+  pan therefore stay proportional to the feature you zoomed into.
+- **Oversized fallback boxes**: a cell drawn by the fallback path now has its
+  box clamped to the sphere, ellipsoid, axis-aligned cylinder, or torus that
+  encloses it. In the lunar deck, a crater cell's box shrank from about
+  ±2,000 km to ±206 m.
+- **Empty terms from `#` complements are no longer drawn**: expanding a
+  complement can produce a term that needs both sides of one surface. It is
+  empty, but it used to be drawn as an unclipped sphere or a box.
+- **Striping where a translucent cavity meets solid ground**: translucent
+  meshes are pushed back a few depth units, so the solid face wins.
+- **Color picker on a cell complement** (reported by Frank Helk). VS Code read
+  `#101` in an MCNP cell card as a hex color and drew a swatch. OWEN now turns
+  off the editor's color decorators for MCNP, Serpent, SCONE, and PHITS files.
+
 ## [1.5.0] - 2026-11-15
 
 Frank Helk ran OWEN on a real MCNP deck and reported, by email, two parser

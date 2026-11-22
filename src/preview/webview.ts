@@ -595,6 +595,26 @@ export function buildPreviewHtml(webview: vscode.Webview, threeBase = 'vscode-re
     return buildHtml(webview, threeBase);
 }
 
+/** Panel controls for one 3D slice plane: side, exact position, and two tilts. */
+function clipAxisHtml(axis: 'X' | 'Y' | 'Z', onId: string, label: string, tiltAbout: [string, string]): string {
+    const tilt = (k: 'A' | 'B', about: string): string => `
+            <label><span>Tilt about ${about}</span><span><input type="number" class="num deg" id="clip${axis}Tilt${k}Num" min="-90" max="90" step="any" value="0" /> °</span></label>
+            <input type="range" id="clip${axis}Tilt${k}" min="-90" max="90" step="0.5" value="0" />`;
+    return `
+        <div class="ctrl">
+          <div class="crow">
+            <label><input type="checkbox" id="${onId}" /> ${label}</label>
+            <label title="Cut away the other side of the plane"><input type="checkbox" id="clip${axis}Rev" /> reverse</label>
+          </div>
+          <input type="range" id="clip${axis}" min="-1" max="1" step="0.01" value="0" disabled />
+          <div class="clipMore" id="clip${axis}More" style="display:none">
+            <label><span>Position</span><span><input type="number" class="num" id="clip${axis}Num" step="any" value="0" title="Type an exact position and press Enter" /> cm</span></label>
+            ${tilt('A', tiltAbout[0])}
+            ${tilt('B', tiltAbout[1])}
+          </div>
+        </div>`;
+}
+
 /**
  * @param threeBase webview URI of `media/vendor/three` — three.js and its
  *   addons ship inside the VSIX (see `scripts/vendor-webview-libs.mjs`), so the
@@ -642,6 +662,17 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
   .ctrl { font-size: 11px; margin-top: 8px; }
   .ctrl label { display: flex; justify-content: space-between; opacity: 0.8; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
+  .ctrl .crow { display: flex; justify-content: space-between; align-items: center; opacity: 0.8; }
+  .ctrl .crow label { display: inline-flex; align-items: center; gap: 4px; opacity: 1; cursor: pointer; }
+  input.num { width: 86px; box-sizing: border-box; background: #0f1626; color: #cdd6f4; border: 1px solid #2b3a5c; border-radius: 4px; padding: 1px 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
+  input.num.deg { width: 56px; }
+  input.num:disabled { opacity: 0.45; }
+  input.num.bad { border-color: #f38ba8; }
+  .clipMore { margin: 2px 0 6px 14px; }
+  .clipMore label { margin-top: 3px; }
+  #boxGrid { display: grid; grid-template-columns: 14px 1fr 1fr; gap: 4px 6px; align-items: center; font-size: 11px; margin-top: 4px; }
+  #boxGrid input.num { width: 100%; }
+  #boxGrid .hd { opacity: 0.6; }
   #warnings {
     padding: 8px 12px; font-size: 11px; border-bottom: 1px solid #1f2940;
     flex: 0 1 auto; max-height: 34%; overflow-y: auto;
@@ -749,7 +780,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
           <button data-axis="yz">YZ</button>
         </div>
         <div class="ctrl">
-          <label><span>Plane offset</span><span id="sliceOffVal">0.00 cm</span></label>
+          <label><span>Plane offset</span><span><input type="number" class="num" id="sliceOffNum" step="any" value="0" title="Type an exact offset and press Enter" /> cm</span></label>
           <input type="range" id="sliceOffset" min="-10" max="10" step="0.1" value="0" />
         </div>
         <div class="ctrl">
@@ -863,19 +894,26 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
           <label>Shell opacity <span id="opVal">0.45</span></label>
           <input type="range" id="opacity" min="0.05" max="1" step="0.05" value="0.45" />
         </div>
-        <div class="ctrl">
-          <label><span><input type="checkbox" id="clipOn" /> Slice (X)</span><span id="clipXVal"></span></label>
-          <input type="range" id="clipX" min="-1" max="1" step="0.01" value="0" disabled />
-        </div>
-        <div class="ctrl">
-          <label><span><input type="checkbox" id="clipYOn" /> Slice (Y)</span><span id="clipYVal"></span></label>
-          <input type="range" id="clipY" min="-1" max="1" step="0.01" value="0" disabled />
-        </div>
-        <div class="ctrl">
-          <label><span><input type="checkbox" id="clipZOn" /> Slice (Z · axial)</span><span id="clipZVal"></span></label>
-          <input type="range" id="clipZ" min="-1" max="1" step="0.01" value="0" disabled />
-        </div>
+        ${clipAxisHtml('X', 'clipOn', 'Slice (X)', ['Y', 'Z'])}
+        ${clipAxisHtml('Y', 'clipYOn', 'Slice (Y)', ['X', 'Z'])}
+        ${clipAxisHtml('Z', 'clipZOn', 'Slice (Z · axial)', ['X', 'Y'])}
+        <label class="row" title="Off: each slice removes its own side. On: only the region every active slice removes is cut away, so two slices make a wedge cutaway.">
+          <input type="checkbox" id="clipWedge" />
+          <span class="name">Cut only where slices overlap (wedge)</span>
+        </label>
         <div class="btnrow"><button id="resetView">Reset view</button></div>
+      </div>
+
+      <div class="section" id="boxSection">
+        <div class="title"><span>Visible volume</span></div>
+        <label class="row"><input type="checkbox" id="boxAuto" checked /><span class="name">Auto (everything)</span></label>
+        <div id="boxGrid">
+          <span></span><span class="hd">lower (cm)</span><span class="hd">upper (cm)</span>
+          <span>X</span><input type="number" class="num" id="boxXlo" step="any" disabled /><input type="number" class="num" id="boxXhi" step="any" disabled />
+          <span>Y</span><input type="number" class="num" id="boxYlo" step="any" disabled /><input type="number" class="num" id="boxYhi" step="any" disabled />
+          <span>Z</span><input type="number" class="num" id="boxZlo" step="any" disabled /><input type="number" class="num" id="boxZhi" step="any" disabled />
+        </div>
+        <div class="ctrl" id="boxNote" style="opacity:0.6">Clear Auto to draw only inside these limits; the camera frames them.</div>
       </div>
 
       <div class="section" id="measureSection">
@@ -922,7 +960,18 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     let lastRenderedScene = null;
     let contextLost = false;
     let replacingRenderer = false;
+    // Deck (x, y, z) is three (x, z, −y): z up, and a rotation rather than a
+    // swap, so the view is not a mirror image of the deck.
+    function toWorld(x, y, z) { return new THREE.Vector3(x, z, -y); }
+    function deckOf(world) { return { x: world.x, y: -world.z, z: world.y }; }
+    // Deck extents, named by three axis: X = deck x, Y = deck z, Z = deck y.
     let sceneBounds = null;   // declared here: rebuildRenderer() reads it during startup
+    // Visible-volume limits, named like sceneBounds; null = Auto. Drawn
+    // as renderer-level clipping planes, which three.js always unions, so the
+    // box keeps working when the slices switch to wedge (intersection) mode.
+    let userBox = null;
+    const boxPlanes = [0, 1, 2, 3, 4, 5].map(() => new THREE.Plane());
+    let viewRadius = 20;      // half-extent of what resetView framed
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b1018);
@@ -968,6 +1017,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       r.setPixelRatio(dpr);
       r.setSize(stage.clientWidth, stage.clientHeight);
       r.localClippingEnabled = true;
+      r.clippingPlanes = userBox ? boxPlanes : [];
       r.domElement.addEventListener('webglcontextlost', onContextLost, false);
       return r;
     }
@@ -1041,11 +1091,21 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     const root = new THREE.Group();
     scene.add(root);
     const axes = new THREE.AxesHelper(5);
+    axes.rotation.x = -Math.PI / 2;   // red, green, blue along deck x, y, z
     scene.add(axes);
 
-    const clipX = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
-    const clipY = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
-    const clipZ = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0); // world Y = deck z (axial)
+    // The three slice planes, in deck axes (deck x, y, z = world X, −Z, Y). Each
+    // keeps the low side of its axis unless reversed, sits at an exact
+    // position, and tilts up to ±90° about the other two axes, turning around
+    // the line through that position and the centre of the view.
+    const CLIP_AXES = [
+      { key: 'X', on: 'clipOn', deck: 0, tilt: [1, 2] },
+      { key: 'Y', on: 'clipYOn', deck: 1, tilt: [0, 2] },
+      { key: 'Z', on: 'clipZOn', deck: 2, tilt: [0, 1] },
+    ].map((a) => Object.assign(a, {
+      plane: new THREE.Plane(), enabled: false, offset: 0, reverse: false, tiltA: 0, tiltB: 0, placed: false,
+    }));
+    let clipWedge = false;
     let lastFidelity = null;
 
     let groups = [];          // { mesh, instances: [{matrix, comp, mat, ax, zc}] }
@@ -1077,11 +1137,42 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     }
 
     function currentClipPlanes() {
-      const planes = [];
-      if (document.getElementById('clipOn').checked) planes.push(clipX);
-      if (document.getElementById('clipYOn').checked) planes.push(clipY);
-      if (document.getElementById('clipZOn').checked) planes.push(clipZ);
-      return planes;
+      return CLIP_AXES.filter((a) => a.enabled).map((a) => a.plane);
+    }
+
+    function viewBounds() { return userBox || sceneBounds; }
+    /** Centre of the framed volume in deck coordinates. */
+    function viewCenterDeck() {
+      const b = viewBounds();
+      if (!b) return [0, 0, 0];
+      return [(b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2, (b.minY + b.maxY) / 2];
+    }
+    function rotateDeck(v, axis, deg) {
+      const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+      const x = v[0], y = v[1], z = v[2];
+      if (axis === 0) return [x, y * c - z * s, y * s + z * c];
+      if (axis === 1) return [x * c + z * s, y, -x * s + z * c];
+      return [x * c - y * s, x * s + y * c, z];
+    }
+    function updateClipPlane(a) {
+      let n = [0, 0, 0];
+      n[a.deck] = -1;
+      n = rotateDeck(n, a.tilt[0], a.tiltA);
+      n = rotateDeck(n, a.tilt[1], a.tiltB);
+      if (a.reverse) n = [-n[0], -n[1], -n[2]];
+      const p = viewCenterDeck();
+      p[a.deck] = a.offset;
+      a.plane.setFromNormalAndCoplanarPoint(toWorld(n[0], n[1], n[2]), toWorld(p[0], p[1], p[2]));
+    }
+    function updateBoxPlanes() {
+      const b = userBox;
+      if (!b) return;
+      boxPlanes[0].set(new THREE.Vector3(1, 0, 0), -b.minX);
+      boxPlanes[1].set(new THREE.Vector3(-1, 0, 0), b.maxX);
+      boxPlanes[2].set(new THREE.Vector3(0, 1, 0), -b.minY);
+      boxPlanes[3].set(new THREE.Vector3(0, -1, 0), b.maxY);
+      boxPlanes[4].set(new THREE.Vector3(0, 0, -1), -b.minZ);
+      boxPlanes[5].set(new THREE.Vector3(0, 0, 1), b.maxZ);
     }
 
     // A see-through twin of a group: same geometry and colours, drawn
@@ -1092,7 +1183,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       const mat = new THREE.MeshStandardMaterial({
         color: 0xffffff, roughness: 0.6, metalness: 0.0,
         transparent: true, opacity: ghostOpacity, depthWrite: false,
-        side: THREE.DoubleSide, clippingPlanes: currentClipPlanes(),
+        side: THREE.DoubleSide, clippingPlanes: currentClipPlanes(), clipIntersection: clipWedge,
       });
       const ghost = new THREE.InstancedMesh(g.mesh.geometry, mat, g.instances.length);
       ghost.frustumCulled = false;
@@ -1204,7 +1295,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         if (!byKey.has(key)) byKey.set(key, { solid, r, h, shape, segs, op, hx, hy, hz, inner, arcLen, topR, tube, axis, items: [] });
         byKey.get(key).items.push(c);
 
-        // bounds (world mapping: X=c.x, Y=c.z, Z=c.y)
+        // bounds (X=c.x, Y=c.z, Z=c.y; see sceneBounds)
         if (shape === 'polyhedron' && Array.isArray(c.verts)) {
           for (let vi = 0; vi + 2 < c.verts.length; vi += 3) {
             minX = Math.min(minX, c.verts[vi]); maxX = Math.max(maxX, c.verts[vi]);
@@ -1224,11 +1315,11 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       for (const grp of byKey.values()) {
         let geo;
         // Local-axis bake: cylinder-like primitives extrude along local +Y
-        // (deck z). axis 'x' → three X (rotateZ −90°); 'y' → three Z
-        // (rotateX +90°). Torus holes start on local +Z instead.
+        // (deck z). axis 'x' → three +X (rotateZ −90°); 'y' → three −Z
+        // (rotateX −90°). Torus holes start on local +Z instead.
         const bakeAxialRot = (g) => {
           if (grp.axis === 'x') g.rotateZ(-Math.PI / 2);
-          else if (grp.axis === 'y') g.rotateX(Math.PI / 2);
+          else if (grp.axis === 'y') g.rotateX(-Math.PI / 2);
           return g;
         };
         if (grp.shape === 'box') {
@@ -1241,10 +1332,10 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
           s.absarc(0, 0, grp.r, -half, half, false);
           s.absarc(0, 0, Math.max(0.01, grp.inner), half, -half, true);
           geo = new THREE.ExtrudeGeometry(s, { depth: grp.h, bevelEnabled: false, curveSegments: 24 });
-          // Shape plane (x,y) → world plan (X,Z); extrusion +z → world -Y, so
-          // recenter the height range on the instance origin.
-          geo.rotateX(Math.PI / 2);
-          geo.translate(0, grp.h / 2, 0);
+          // Shape plane (x,y) → deck plan (x,y) = world (X,−Z); extrusion +z →
+          // world +Y, so recenter the height range on the instance origin.
+          geo.rotateX(-Math.PI / 2);
+          geo.translate(0, -grp.h / 2, 0);
         } else if (grp.shape === 'sphere') {
           geo = sphericalShellGeometry(grp.r, grp.inner, grp.r > 8 ? 48 : 28, grp.r > 8 ? 32 : 18);
         } else if (grp.shape === 'cone') {
@@ -1255,7 +1346,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
           geo = new THREE.TorusGeometry(grp.r, grp.tube, 14, 48);
           // Torus hole axis is local +Z; map to the deck axis.
           if (grp.axis === 'x') geo.rotateY(Math.PI / 2);
-          else if (grp.axis === 'y') { /* hole axis already three Z = deck y */ }
+          else if (grp.axis === 'y') { /* hole axis already three Z = deck −y */ }
           else geo.rotateX(-Math.PI / 2);
         } else if (grp.shape === 'ellipsoid') {
           geo = new THREE.SphereGeometry(1, 28, 18); // per-instance scale
@@ -1274,8 +1365,8 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
             for (let t = 1; t + 1 < face.length; t++) {
               for (const vi of [face[0], face[t], face[t + 1]]) {
                 const off = vi * 3;
-                // deck (x,y,z) → three (X,Y,Z) = (x, z, y)
-                pos.push((verts[off] || 0) - cx, (verts[off + 2] || 0) - cz, (verts[off + 1] || 0) - cy);
+                // deck (x,y,z) → three (X,Y,Z) = (x, z, −y)
+                pos.push((verts[off] || 0) - cx, (verts[off + 2] || 0) - cz, cy - (verts[off + 1] || 0));
               }
             }
           }
@@ -1293,6 +1384,12 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
           // both sides so no face can vanish.
           side: (grp.solid && grp.shape !== 'polyhedron' && !(grp.inner > 0.0001)) ? THREE.FrontSide : THREE.DoubleSide,
           depthWrite: grp.solid,
+          // A translucent cavity shares faces with the solid around it (a
+          // crater void on the ground it was cut from); push it back a few
+          // depth units so the solid wins instead of striping.
+          polygonOffset: !grp.solid,
+          polygonOffsetFactor: 1,
+          polygonOffsetUnits: 4,
           clippingPlanes: [],
         });
         if (!grp.solid) translucentMats.push({ mat, base: grp.op });
@@ -1301,17 +1398,17 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         const color = new THREE.Color();
         const instances = [];
         grp.items.forEach((c, i) => {
-          dummy.position.set(c.x, c.z || 0, c.y);
+          dummy.position.copy(toWorld(c.x, c.y, c.z || 0));
           dummy.rotation.set(0, 0, 0);
           if (grp.shape === 'arc') {
             // Geometry is centered on plan angle 0; rotate to the arc's own
-            // center. World Z = deck +y, so plan angle θ needs rotation.y = -θ.
+            // center. World Z = deck −y, so plan angle θ is rotation.y = +θ.
             const centerDeg = (c.thetaStart || 0) + grp.arcLen / 2;
-            dummy.rotation.y = -centerDeg * Math.PI / 180;
+            dummy.rotation.y = centerDeg * Math.PI / 180;
           }
           dummy.scale.set(1, 1, 1);
           if (grp.shape === 'ellipsoid') {
-            // Unit sphere → semi-axes; deck (x,y,z) → three (X,Z,Y).
+            // Unit sphere → semi-axes; deck (x,y,z) lengths lie along three (X,Z,Y).
             dummy.scale.set(Math.max(0.01, c.halfX || c.radius), Math.max(0.01, c.halfZ || c.radius), Math.max(0.01, c.halfY || c.radius));
           } else if (grp.shape === 'ellcyl') {
             // Unit-radius cylinder → in-plane semi-axes r1 (halfX), r2 (halfY).
@@ -1334,6 +1431,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
             shape: grp.shape, solid: grp.solid, label: c.label || '',
             axIndex: (typeof c.axialIndex === 'number' ? c.axialIndex : null),
             cell: c.cell || '', uni: c.universe || '',
+            sampled: c.sampledCell || 0,
           });
         });
         mesh.instanceMatrix.needsUpdate = true;
@@ -1362,7 +1460,6 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     let ovEnabled = {};
     const OV_COLOR = { source: 0xf2a33c, tally: 0x38bdf8 };
     const OV_LABEL = { source: 'Source points / boxes', tally: 'Tally meshes' };
-    function toWorld(x, y, z) { return new THREE.Vector3(x, z, y); }
     function fmtPt(x, y, z) { return '(' + [x, y, z].map((v) => Number(v.toPrecision(5))).join(', ') + ')'; }
     function boxLines(o, color) {
       const lo = [Math.min(o.x, o.x2), Math.min(o.y, o.y2), Math.min(o.z, o.z2)];
@@ -1488,8 +1585,13 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       const planes = currentClipPlanes();
       for (const g of groups) {
         g.mesh.material.clippingPlanes = planes;
-        if (g.ghost) g.ghost.material.clippingPlanes = planes;
+        g.mesh.material.clipIntersection = clipWedge;
+        if (g.ghost) {
+          g.ghost.material.clippingPlanes = planes;
+          g.ghost.material.clipIntersection = clipWedge;
+        }
       }
+      if (renderer) renderer.clippingPlanes = userBox ? boxPlanes : [];
     }
 
     /**
@@ -1814,22 +1916,53 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
 
     function resetView() {
       _prevCamValid = false;   // new scene / new framing: drop stale camera-motion history
-      if (!sceneBounds) { camera.position.set(40, 40, 40); controls.target.set(0, 0, 0); controls.update(); return; }
-      const b = sceneBounds;
-      const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2, cz = (b.minZ + b.maxZ) / 2;
+      fillBoxFields();
+      const b = viewBounds();
+      if (!b) { camera.position.set(40, 40, 40); controls.target.set(0, 0, 0); controls.update(); return; }
+      const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2, cz = -(b.minZ + b.maxZ) / 2;
       const dx = b.maxX - b.minX, dy = b.maxY - b.minY, dz = b.maxZ - b.minZ;
       const radius = Math.max(dx, dy, dz, 2) * 0.5;
       const dist = radius * 2.6 + 4;
-      camera.near = Math.max(0.05, radius / 1000); camera.far = radius * 40 + 1000; camera.updateProjectionMatrix();
+      viewRadius = radius;
       camera.position.set(cx + dist, cy + dist * 0.8, cz + dist);
       controls.target.set(cx, cy, cz);
       controls.maxDistance = Math.max(dist * 8, radius * 20);
       controls.update();
+      updateDepthRange();
       axes.scale.setScalar(Math.max(1, radius * 0.15));
-      // clip slider ranges
-      const sx = document.getElementById('clipX'); sx.min = b.minX; sx.max = b.maxX; sx.value = cx; clipX.constant = cx;
-      const sy = document.getElementById('clipY'); sy.min = b.minZ; sy.max = b.maxZ; sy.value = cz; clipY.constant = cz;
-      const sz = document.getElementById('clipZ'); sz.min = b.minY; sz.max = b.maxY; sz.value = cy; clipZ.constant = cy;
+      // Slice ranges follow the framed volume, in deck axes.
+      const lo = [b.minX, b.minZ, b.minY], hi = [b.maxX, b.maxZ, b.maxY];
+      for (const a of CLIP_AXES) {
+        const s = document.getElementById('clip' + a.key);
+        s.min = lo[a.deck]; s.max = hi[a.deck];
+        s.step = Math.max((hi[a.deck] - lo[a.deck]) / 2000, 1e-4);
+        if (!a.placed || a.offset < lo[a.deck] || a.offset > hi[a.deck]) {
+          a.offset = (lo[a.deck] + hi[a.deck]) / 2;
+          a.placed = false;
+        }
+        syncClipInputs(a);
+        updateClipPlane(a);
+      }
+    }
+
+    // Near follows the orbit distance; far always reaches past the framed
+    // volume. One pair for the whole scene put the near plane 2 km out on a
+    // deck spanning a 1737 km moon, and zooming into a 30 m crater on it went
+    // black. 24-bit depth stays usable up to a far/near ratio of about 1e7, so
+    // past that near gives way, never far: in Auto on such a scene the camera
+    // cannot get closer than ~50 cm to a surface, and a Visible volume lifts it.
+    const _viewCenter = new THREE.Vector3();
+    function updateDepthRange() {
+      const d = camera.position.distanceTo(controls.target);
+      const c = viewCenterDeck();
+      _viewCenter.copy(toWorld(c[0], c[1], c[2]));
+      const far = (camera.position.distanceTo(_viewCenter) + viewRadius) * 1.5 + 100;
+      const near = Math.max(1e-3, d * 1e-3, far * 1e-7);
+      if (camera.near !== near || camera.far !== far) {
+        camera.near = near;
+        camera.far = far;
+        camera.updateProjectionMatrix();
+      }
     }
 
     // --- UI wiring ---
@@ -1872,16 +2005,110 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     });
     const op = document.getElementById('opacity');
     op.addEventListener('input', () => { shellOpacity = parseFloat(op.value); document.getElementById('opVal').textContent = op.value; applyOpacity(); });
-    const clipOn = document.getElementById('clipOn'), clipXs = document.getElementById('clipX');
-    clipOn.addEventListener('change', () => { clipXs.disabled = !clipOn.checked; applyClipping(); });
-    clipXs.addEventListener('input', () => { clipX.constant = parseFloat(clipXs.value); document.getElementById('clipXVal').textContent = parseFloat(clipXs.value).toFixed(1); });
-    const clipYOn = document.getElementById('clipYOn'), clipYs = document.getElementById('clipY');
-    clipYOn.addEventListener('change', () => { clipYs.disabled = !clipYOn.checked; applyClipping(); });
-    clipYs.addEventListener('input', () => { clipY.constant = parseFloat(clipYs.value); document.getElementById('clipYVal').textContent = parseFloat(clipYs.value).toFixed(1); });
-    const clipZOn = document.getElementById('clipZOn'), clipZs = document.getElementById('clipZ');
-    clipZOn.addEventListener('change', () => { clipZs.disabled = !clipZOn.checked; applyClipping(); });
-    clipZs.addEventListener('input', () => { clipZ.constant = parseFloat(clipZs.value); document.getElementById('clipZVal').textContent = parseFloat(clipZs.value).toFixed(1); });
+    // Six significant figures: a moon-sized bound must not print as 173750000.00001.
+    function fmtCm(v) { return String(Number(Number(v).toPrecision(6))); }
+    function syncClipInputs(a) {
+      const s = document.getElementById('clip' + a.key);
+      s.value = a.offset;
+      s.disabled = !a.enabled;
+      document.getElementById('clip' + a.key + 'Num').value = fmtCm(a.offset);
+      document.getElementById('clip' + a.key + 'Rev').checked = a.reverse;
+      document.getElementById(a.on).checked = a.enabled;
+      document.getElementById('clip' + a.key + 'More').style.display = a.enabled ? 'block' : 'none';
+      for (const k of ['A', 'B']) {
+        const deg = k === 'A' ? a.tiltA : a.tiltB;
+        document.getElementById('clip' + a.key + 'Tilt' + k).value = deg;
+        document.getElementById('clip' + a.key + 'Tilt' + k + 'Num').value = fmtCm(deg);
+      }
+    }
+    function clipChanged(a) {
+      updateClipPlane(a);
+      syncClipInputs(a);
+      applyClipping();
+    }
+    function readNumber(el) {
+      const v = parseFloat(el.value);
+      el.classList.toggle('bad', !isFinite(v));
+      return isFinite(v) ? v : null;
+    }
+    for (const a of CLIP_AXES) {
+      const id = 'clip' + a.key;
+      document.getElementById(a.on).addEventListener('change', (e) => { a.enabled = !!e.target.checked; clipChanged(a); });
+      document.getElementById(id + 'Rev').addEventListener('change', (e) => { a.reverse = !!e.target.checked; clipChanged(a); });
+      document.getElementById(id).addEventListener('input', (e) => {
+        a.offset = parseFloat(e.target.value); a.placed = true; clipChanged(a);
+      });
+      // A typed position is used exactly, even outside the slider's range.
+      document.getElementById(id + 'Num').addEventListener('change', (e) => {
+        const v = readNumber(e.target);
+        if (v === null) return;
+        a.offset = v; a.placed = true; clipChanged(a);
+      });
+      for (const k of ['A', 'B']) {
+        const set = (v) => {
+          const deg = Math.max(-90, Math.min(90, v));
+          if (k === 'A') a.tiltA = deg; else a.tiltB = deg;
+          clipChanged(a);
+        };
+        document.getElementById(id + 'Tilt' + k).addEventListener('input', (e) => set(parseFloat(e.target.value)));
+        document.getElementById(id + 'Tilt' + k + 'Num').addEventListener('change', (e) => {
+          const v = readNumber(e.target);
+          if (v !== null) set(v);
+        });
+      }
+    }
+    document.getElementById('clipWedge').addEventListener('change', (e) => { clipWedge = !!e.target.checked; applyClipping(); });
     document.getElementById('resetView').addEventListener('click', resetView);
+
+    // --- Visible volume (deck coordinates in the fields; world-mapped inside) ---
+    const BOX_IDS = ['boxXlo', 'boxXhi', 'boxYlo', 'boxYhi', 'boxZlo', 'boxZhi'];
+    function fillBoxFields() {
+      const b = userBox || sceneBounds;
+      if (!b) return;
+      const deck = [b.minX, b.maxX, b.minZ, b.maxZ, b.minY, b.maxY];
+      BOX_IDS.forEach((id, i) => {
+        const el = document.getElementById(id);
+        el.value = fmtCm(deck[i]);
+        el.classList.remove('bad');
+      });
+    }
+    function setBoxNote(text, bad) {
+      const el = document.getElementById('boxNote');
+      el.textContent = text;
+      el.style.color = bad ? '#f38ba8' : '';
+      el.style.opacity = bad ? '1' : '0.6';
+    }
+    function applyBoxFields() {
+      const v = BOX_IDS.map((id) => readNumber(document.getElementById(id)));
+      if (v.some((x) => x === null)) { setBoxNote('Every limit needs a number.', true); return; }
+      for (let i = 0; i < 3; i++) {
+        if (!(v[2 * i] < v[2 * i + 1])) {
+          setBoxNote('The lower ' + 'XYZ'[i] + ' limit must be below the upper one.', true);
+          document.getElementById(BOX_IDS[2 * i]).classList.add('bad');
+          return;
+        }
+      }
+      userBox = { minX: v[0], maxX: v[1], minZ: v[2], maxZ: v[3], minY: v[4], maxY: v[5] };
+      setBoxNote('Drawing only inside these limits. Tick Auto to show everything again.', false);
+      updateBoxPlanes();
+      applyClipping();
+      resetView();
+    }
+    const boxAuto = document.getElementById('boxAuto');
+    boxAuto.addEventListener('change', () => {
+      for (const id of BOX_IDS) document.getElementById(id).disabled = boxAuto.checked;
+      if (boxAuto.checked) {
+        userBox = null;
+        setBoxNote('Clear Auto to draw only inside these limits; the camera frames them.', false);
+        applyClipping();
+        resetView();
+      } else {
+        applyBoxFields();
+      }
+    });
+    for (const id of BOX_IDS) {
+      document.getElementById(id).addEventListener('change', () => { if (!boxAuto.checked) applyBoxFields(); });
+    }
 
     // --- Fidelity controls (re-extracted by the extension host) ---
     function requestFidelity(detail) {
@@ -1912,8 +2139,6 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     let measurements = [];                       // completed measurements
     let measSeq = 0;
 
-    // World axes map to deck axes as X=deck.x, Y=deck.z (axial), Z=deck.y.
-    function deckOf(world) { return { x: world.x, y: world.z, z: world.y }; }
     function meshList() { return groups.map((g) => g.mesh); }
     function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
     function markerRadius() {
@@ -1971,7 +2196,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       pickGrid = { cell, map, big };
     }
 
-    // Ray vs one instance in deck coordinates (x,y plan; z axial). Cylinders,
+    // Ray vs one instance in plan coordinates (world X, Z; Y axial). Cylinders,
     // rings, boxes and spheres are exact; rarer shapes (arc, cone, torus,
     // ellipsoid, polyhedron) fall back to their bounding cylinder — plenty for
     // a hover readout. Returns the ray parameter t, or Infinity.
@@ -2054,9 +2279,9 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
           tMin = Math.max(tMin, ta); tMax = Math.min(tMax, tb);
           return null;
         };
-        // sceneBounds is world-mapped: X = deck x, Z = deck y (plan), Y = deck z.
+        // The walk is in world plan (X, Z); sceneBounds Z holds deck y = −Z.
         if (clamp(ox, dx, sceneBounds.minX, sceneBounds.maxX) === 'miss') tMax = -1;
-        if (clamp(oy, dy, sceneBounds.minZ, sceneBounds.maxZ) === 'miss') tMax = -1;
+        if (clamp(oy, dy, -sceneBounds.maxZ, -sceneBounds.minZ) === 'miss') tMax = -1;
       }
       if (tMax < tMin) return;
       const planSpeed = Math.hypot(dx, dy);
@@ -2079,13 +2304,13 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       }
     }
 
-    function pickAtFast(clientX, clientY) {
+    function pickAtFast(clientX, clientY, throughVoid) {
       const rect = renderer.domElement.getBoundingClientRect();
       ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(ndc, camera);
       const ro = raycaster.ray.origin, rd = raycaster.ray.direction;
-      // Deck coordinates: world X = deck x, world Z = deck y, world Y = deck z.
+      // Plan (X, Z) and axial Y, the frame the instance matrices are read in.
       const ox = ro.x, oy = ro.z, oz = ro.y;
       const dx = rd.x, dy = rd.z, dz = rd.y;
       let best = null, bestT = Infinity;
@@ -2096,6 +2321,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         seen.add(key);
         const inst = groups[gi] && groups[gi].instances[id];
         if (!inst || !isInstanceVisible(inst)) return;
+        if (throughVoid && inst.comp === 'void') return;
         const t = rayHitInstance(inst, ox, oy, oz, dx, dy, dz);
         if (t >= bestT) return;
         // A slice (X/Y/Z clipping plane) hides geometry on the clipped side, but
@@ -2110,9 +2336,14 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       return { inst: best.inst, point, gi: best.gi, id: best.id };
     }
 
-    function pickAt(clientX, clientY) {
+    /**
+     * Nearest visible instance under the cursor. throughVoid skips void-cell
+     * cavities: the wheel zoom flies through empty space instead of crawling
+     * up to every translucent "space" or "sick bay" sphere on the way.
+     */
+    function pickAt(clientX, clientY, throughVoid) {
       if (!groups.length) return null;
-      if (pickGrid) return pickAtFast(clientX, clientY);
+      if (pickGrid) return pickAtFast(clientX, clientY, throughVoid);
       const rect = renderer.domElement.getBoundingClientRect();
       ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -2126,6 +2357,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         if (!g || h.instanceId == null) continue;
         const inst = g.instances[h.instanceId];
         if (!inst || !isInstanceVisible(inst)) continue;   // never pick a hidden layer
+        if (throughVoid && inst.comp === 'void') continue;
         if (isWorldClipped(h.point.x, h.point.y, h.point.z)) continue;   // on a clipped-away side
         return { inst, point: h.point, gi: h.object.userData.groupIndex, id: h.instanceId };
       }
@@ -2160,13 +2392,14 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     // the pin to keep going.
     function isWorldClipped(wx, wy, wz) {
       _clipPt.set(wx, wy, wz);
-      const on = document.getElementById('clipOn');
-      const yOn = document.getElementById('clipYOn');
-      const zOn = document.getElementById('clipZOn');
-      if (on && on.checked && clipX.distanceToPoint(_clipPt) < 0) return true;
-      if (yOn && yOn.checked && clipY.distanceToPoint(_clipPt) < 0) return true;
-      if (zOn && zOn.checked && clipZ.distanceToPoint(_clipPt) < 0) return true;
-      return false;
+      if (userBox) {
+        for (const p of boxPlanes) if (p.distanceToPoint(_clipPt) < 0) return true;
+      }
+      const planes = currentClipPlanes();
+      if (!planes.length) return false;
+      // Mirrors the shader: union by default, intersection in wedge mode.
+      if (clipWedge) return planes.every((p) => p.distanceToPoint(_clipPt) < 0);
+      return planes.some((p) => p.distanceToPoint(_clipPt) < 0);
     }
     function pointInInstance(inst, ox, oy, oz) {
       const e = inst.matrix.elements;
@@ -2276,29 +2509,54 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     // Approaching a surface decelerates to a crawl (MIN_STEP) that carries
     // the camera through it, so nothing ever stalls permanently; the
     // fly-through resolver below keeps the camera out of opaque solids.
-    // The orbit target is never touched — drag/orbit stay classic.
+    // The view direction never changes on a wheel tick. The target moves
+    // only by the sideways part of the camera's step, which keeps the point
+    // under the cursor under the cursor. With the target pinned, OrbitControls
+    // re-aimed at it after every off-centre tick and the feature drifted
+    // outward, off a moon-sized scene in two ticks. At the screen centre the
+    // sideways part is zero, so zooming there leaves the pivot alone.
     const ZOOM_STANDOFF = 1.0;   // cm; deceleration reference outside the surface
     const ZOOM_MIN_STEP = 0.3;   // cm; crawl step right at a surface
     const _zoomAnchor = new THREE.Vector3();
+    const _zoomView = new THREE.Vector3();
     function onWheelZoom(e) {
       if (!renderer || !controls || contextLost || replacingRenderer) return;
       e.preventDefault();
       const dpr = window.devicePixelRatio | 0 || 1;
       const scale = Math.pow(0.95, Math.abs(e.deltaY) / (100 * dpr));
-      const pick = pickAt(e.clientX, e.clientY);
+      const pick = pickAt(e.clientX, e.clientY, true);
       if (pick) _zoomAnchor.copy(pick.point);
       else _zoomAnchor.copy(controls.target);   // over void: classic dolly
       _zoomDir.copy(_zoomAnchor).sub(camera.position);
       const dist = _zoomDir.length();
       if (dist < 1e-6) return;
       _zoomDir.multiplyScalar(1 / dist);
+      _zoomView.copy(controls.target).sub(camera.position);
+      const depth = _zoomView.length();
+      if (depth < 1e-9) return;
+      _zoomView.multiplyScalar(1 / depth);
+      const along = _zoomDir.dot(_zoomView);
       const usable = Math.max(0, dist - ZOOM_STANDOFF);
+      const step = e.deltaY < 0
+        ? Math.max(usable * (1 - scale), ZOOM_MIN_STEP)
+        : -Math.max(usable * (1 / scale - 1), ZOOM_MIN_STEP);
+      camera.position.addScaledVector(_zoomDir, step);
+      let ahead = depth - step * along;
+      if (ahead < controls.minDistance * 2) {
+        // The camera overtook its pivot (crawling through a translucent shell,
+        // say). Re-seat it on the next surface under the cursor: a pivot left
+        // a hair ahead turns orbit into look-around and freezes pan.
+        controls.target.copy(camera.position).addScaledVector(_zoomView, controls.minDistance * 2);
+        controls.update();
+        camera.updateMatrixWorld();
+        const next = pickAt(e.clientX, e.clientY, true);
+        ahead = next ? _pivotTmp.copy(next.point).sub(camera.position).dot(_zoomView) : 0;
+      }
+      controls.target.copy(camera.position)
+        .addScaledVector(_zoomView, Math.max(ahead, controls.minDistance * 2));
       if (e.deltaY < 0) {
-        const step = Math.max(usable * (1 - scale), ZOOM_MIN_STEP);
-        camera.position.addScaledVector(_zoomDir, step);
+        if (pick) followPivot(_zoomAnchor);
       } else {
-        const step = Math.max(usable * (1 / scale - 1), ZOOM_MIN_STEP);
-        camera.position.addScaledVector(_zoomDir, -step);
         const dT = camera.position.distanceTo(controls.target);
         if (isFinite(controls.maxDistance) && dT > controls.maxDistance) {
           camera.position.sub(controls.target)
@@ -2306,6 +2564,29 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
             .add(controls.target);
         }
       }
+    }
+
+    // Stock OrbitControls orbits and pans at a rate set by the distance to the
+    // target. Once the wheel has carried the camera twenty times closer to the
+    // surface under the cursor than to the target (a crater on a moon whose
+    // centre is the target), a one-pixel drag swung the view by kilometres and
+    // a wheel tick over empty space dollied 5% of the way to the far-off
+    // target. Slide the target along the line of sight to the surface's depth:
+    // the picture does not move, and orbit, pan, and zoom become local. The
+    // same holds the other way, for a target twenty times nearer than the
+    // surface. On a reactor core neither ratio is reached, so the pivot stays.
+    const PIVOT_FOLLOW_RATIO = 20;
+    const _pivotDir = new THREE.Vector3();
+    const _pivotTmp = new THREE.Vector3();
+    function followPivot(anchor) {
+      _pivotDir.copy(controls.target).sub(camera.position);
+      const dT = _pivotDir.length();
+      if (dT < 1e-9) return;
+      _pivotDir.multiplyScalar(1 / dT);
+      const depth = _pivotTmp.copy(anchor).sub(camera.position).dot(_pivotDir);
+      if (!(depth > 0)) return;
+      if (dT < PIVOT_FOLLOW_RATIO * depth && depth < PIVOT_FOLLOW_RATIO * dT) return;
+      controls.target.copy(camera.position).addScaledVector(_pivotDir, Math.max(depth, controls.minDistance * 2));
     }
 
     const _prevCamPos = new THREE.Vector3();
@@ -2393,6 +2674,8 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         rows.push(line('Major radius', fmtLen(inst.r) + ' cm'));
       } else if (inst.shape === 'ellipsoid' || inst.shape === 'ellcyl') {
         rows.push(line('Semi-axes', fmtLen(inst.hx) + ' × ' + fmtLen(inst.hy) + ' cm'));
+      } else if (inst.shape === 'polyhedron' && inst.sampled > 0) {
+        rows.push(line('Shape', 'meshed from the exact cell, ' + fmtLen(inst.sampled) + ' cm grid'));
       } else if (inst.shape === 'polyhedron') {
         rows.push(line('Shape', 'planar solid (CSG)'));
       } else {
@@ -2463,7 +2746,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       const inst = pick.inst;
       if (inst.shape === 'box') { setMeasHint('That part is a box — radius applies to cylindrical shells.'); return; }
       if (inst.shape === 'arc') { setMeasHint('That part is an arc segment — its ring spans ' + fmtLen(inst.ri) + ' → ' + fmtLen(inst.r) + ' cm.'); return; }
-      if (inst.shape === 'polyhedron') { setMeasHint('That part is a planar CSG solid — use the distance tool on its edges.'); return; }
+      if (inst.shape === 'polyhedron') { setMeasHint((inst.sampled > 0 ? 'That part is a meshed CSG cell' : 'That part is a planar CSG solid') + ' — use the distance tool on its edges.'); return; }
       if (inst.shape === 'ellipsoid' || inst.shape === 'ellcyl') { setMeasHint('That part is elliptical — semi-axes ' + fmtLen(inst.hx) + ' × ' + fmtLen(inst.hy) + ' cm.'); return; }
       if (inst.shape === 'cone') { setMeasHint('Cone: base radius ' + fmtLen(inst.r) + ' cm.'); return; }
       if (inst.shape === 'torus') { setMeasHint('Torus: major radius ' + fmtLen(inst.r) + ' cm.'); return; }
@@ -2599,6 +2882,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       if (gpuOverlay.style.display !== 'none') gpuOverlay.style.display = 'none';
       controls.update();
       resolveCameraCollision();
+      updateDepthRange();
       updateLabels();
       renderer.render(scene, camera);
     }
@@ -2625,6 +2909,36 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
         target: controls ? [controls.target.x, controls.target.y, controls.target.z] : null,
         near: camera.near, far: camera.far,
         bounds: sceneBounds,
+        box: userBox,
+        viewRadius,
+        globalPlanes: renderer ? renderer.clippingPlanes.length : -1,
+      };
+    };
+    // Deck coordinates in, true if that point is cut away by a slice or the box.
+    window.__owenPreviewClipped = function (x, y, z) { const w = toWorld(x, y, z); return isWorldClipped(w.x, w.y, w.z); };
+    // Deck point to page pixel coordinates, so a test can aim the mouse at it.
+    window.__owenPreviewProject = function (x, y, z) {
+      const v = toWorld(x, y, z).project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height, inFront: v.z < 1 };
+    };
+    // Place the camera at a deck point looking at another, for screenshots.
+    window.__owenPreviewLookAt = function (ex, ey, ez, tx, ty, tz) {
+      camera.position.copy(toWorld(ex, ey, ez));
+      controls.target.copy(toWorld(tx, ty, tz));
+      controls.update();
+      camera.updateMatrixWorld();
+      updateDepthRange();
+    };
+    window.__owenPreviewClipState = function () {
+      return {
+        wedge: clipWedge,
+        axes: CLIP_AXES.map((a) => ({
+          key: a.key, enabled: a.enabled, reverse: a.reverse, offset: a.offset, tiltA: a.tiltA, tiltB: a.tiltB,
+          normal: (({ x, y, z }) => [x, y, z])(deckOf(a.plane.normal)), constant: a.plane.constant,
+        })),
+        materialPlanes: groups.length ? groups[0].mesh.material.clippingPlanes.length : 0,
+        materialIntersection: groups.length ? groups[0].mesh.material.clipIntersection : null,
       };
     };
     window.__owenPreviewPick = function (clientX, clientY) {
@@ -2663,6 +2977,7 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
       if (!renderer || contextLost) return { lit: -1, total: 0 };
       controls.update();
       resolveCameraCollision();
+      updateDepthRange();
       renderer.render(scene, camera);
       const gl = renderer.getContext();
       const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
@@ -2991,8 +3306,16 @@ function buildHtml(webview: vscode.Webview, threeBase: string): string {
     });
     document.getElementById('sliceOffset').addEventListener('input', (e) => {
       sliceOffset = parseFloat(e.target.value);
-      document.getElementById('sliceOffVal').textContent = sliceOffset.toFixed(2) + ' cm';
+      document.getElementById('sliceOffNum').value = fmtCm(sliceOffset);
       scheduleSlice();
+    });
+    // The slider steps 1/200 of the model; a typed offset is used exactly.
+    document.getElementById('sliceOffNum').addEventListener('change', (e) => {
+      const v = readNumber(e.target);
+      if (v === null) return;
+      sliceOffset = v;
+      document.getElementById('sliceOffset').value = v;
+      requestSlice();
     });
     document.getElementById('sliceCanvas').addEventListener('click', (e) => {
       if (!lastSliceMeta) return;

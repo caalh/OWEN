@@ -50,6 +50,7 @@ if (!existsSync(compiled)) {
   process.exit(2);
 }
 const { buildPreviewHtml } = require(compiled);
+const { buildScene } = require(join(repo, 'out', 'src', 'preview', 'extractor.js'));
 
 // ---- puppeteer
 function loadPuppeteer() {
@@ -127,6 +128,26 @@ function cellScene() {
   sc.cylinders.push({ x: 0, y: 0, z: 0, radius: 12, innerRadius: 11.5, height: 380, component: 'vessel', material: 'SS304', color: '#6c7086', opacity: 0.3 });
   return wrap(sc.cylinders, 'mcnp', 'layers', 289);
 }
+// A 1737.5 km moon, a 1 km world sphere on its pole, and a 10 m boulder 50 m
+// up: seven decades between the scene and the thing being looked at. Stands
+// in for Frank Helk's lunar-crater deck (Nov 2026), whose 30 m crater went
+// black on zoom and swung by kilometres on a one-pixel drag.
+const MOON_DECK = `moon-scale preview check
+1  1 -1.5  -10 -11      imp:p=1  $ ground inside the 1 km world
+2  1 -1.5  -12          imp:p=1  $ 10 m boulder, 50 m above the pole
+3  0       10 -11 12    imp:p=1  $ space inside the world
+4  1 -1.5  -10 11       imp:p=1  $ the rest of the moon
+5  0       11 10        imp:p=0  $ graveyard
+
+10 sz -173750000 173750000
+11 so 100000
+12 sz 5000 1000
+
+mode p
+m1 8016 -0.46 14000 -0.54
+sdef pos 0 0 20000 par=p erg=1
+nps 10
+`;
 function wrap(cyls, language, detail, pins) {
   const comps = new Map(), mats = new Map(), cells = new Map();
   for (const c of cyls) {
@@ -383,6 +404,178 @@ try {
   check(barAfter.includes('Solid'), 'the bar stays up with a Solid button to bring the cell back');
   const cellErrs = pageErrors.slice(errs6);
   check(cellErrs.length === 0, `no page errors in the per-cell section${cellErrs.length ? ': ' + cellErrs.join(' | ') : ''}`);
+
+  console.log('\n[7] moon-scale scene: zoom to a 10 m boulder, orbit, visible volume');
+  const errs7 = pageErrors.length;
+  await post(buildScene(MOON_DECK, 'mcnp'));
+  await sleep(800);
+  const BOULDER = [0, 0, 5000], BOULDER_R = 1000;
+  const project = (p) => page.evaluate((x, y, z) => window.__owenPreviewProject(x, y, z), p[0], p[1], p[2]);
+  const camToBoulder = (dd) => Math.hypot(dd.cam[0] - BOULDER[0], dd.cam[1] - BOULDER[2], dd.cam[2] - BOULDER[1]);
+  d = await dbg();
+  const startDist = camToBoulder(d);
+  check(d.viewRadius > 1e8, `auto bounds frame the whole moon (radius ${d.viewRadius.toExponential(2)} cm)`);
+  // Keep the cursor on the boulder, as a user would. Before zoom-to-cursor
+  // the view re-aimed at the moon's centre every tick and the boulder left
+  // the canvas within two. Translucent shells on the way (the world sphere)
+  // decelerate the zoom on purpose, so allow plenty of ticks.
+  let worstDrift = 0, offCanvas = false;
+  for (let i = 0; i < 160; i++) {
+    const at = await project(BOULDER);
+    if (!at.inFront || at.x < r.x || at.x > r.x + r.w || at.y < r.y || at.y > r.y + r.h) { offCanvas = true; break; }
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.wheel({ deltaY: -1000 });
+    await sleep(40);
+    const after = await project(BOULDER);
+    worstDrift = Math.max(worstDrift, Math.hypot(after.x - at.x, after.y - at.y));
+    if (camToBoulder(await dbg()) < 8 * BOULDER_R) break;
+  }
+  await sleep(500);
+  d = await dbg(); s = await sample();
+  const near7 = camToBoulder(d);
+  check(!offCanvas, `the boulder never leaves the canvas while zooming at it (worst one-tick drift ${worstDrift.toFixed(1)} px)`);
+  check(near7 < 20 * BOULDER_R, `wheel reaches the boulder from orbit (${startDist.toExponential(2)} -> ${near7.toFixed(0)} cm)`);
+  check(d.near < (near7 - BOULDER_R) / 10, `near plane sits well inside the gap to the boulder (near ${d.near.toFixed(2)} cm, gap ${(near7 - BOULDER_R).toFixed(0)} cm)`);
+  check(s.lit > 0, `boulder close-up is not a black screen (${s.lit}/${s.total} lit)`);
+  const atB = await project(BOULDER);
+  const pickB = await page.evaluate((x, y) => window.__owenPreviewPickCell(x, y), atB.x, atB.y);
+  check(pickB === '2', `the boulder (cell 2) is under the cursor after the zoom (${pickB})`);
+  const pivotDist = d.distance;
+  check(pivotDist < 20 * near7, `orbit pivot followed the zoom (camera-to-target ${pivotDist.toFixed(0)} cm, not the moon's centre)`);
+  const camBefore = d.cam;
+  await page.mouse.move(atB.x, atB.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 5; i++) await page.mouse.move(atB.x + i * 2, atB.y);
+  await page.mouse.up();
+  await sleep(600);
+  d = await dbg();
+  const swing = Math.hypot(d.cam[0] - camBefore[0], d.cam[1] - camBefore[1], d.cam[2] - camBefore[2]);
+  check(swing < 0.5 * near7, `a 10 px orbit drag moves the camera ${swing.toFixed(0)} cm, not kilometres`);
+  const atAfter = await project(BOULDER);
+  check(atAfter.inFront && atAfter.x > r.x && atAfter.x < r.x + r.w && atAfter.y > r.y && atAfter.y < r.y + r.h,
+    'the boulder is still on screen after the drag');
+  const beforeVoid = camToBoulder(d);
+  await page.mouse.move(r.x + 4, r.y + 4);
+  await page.mouse.wheel({ deltaY: -100 });
+  await sleep(300);
+  d = await dbg(); s = await sample();
+  const voidMove = Math.abs(camToBoulder(d) - beforeVoid);
+  check(voidMove < 0.5 * beforeVoid, `a wheel tick at the screen corner stays local (moved ${voidMove.toFixed(0)} cm of ${beforeVoid.toFixed(0)})`);
+  check(s.lit > 0, `still not black after the corner tick (${s.lit}/${s.total} lit)`);
+
+  const setBox = (vals) => page.evaluate((v) => {
+    const ids = ['boxXlo', 'boxXhi', 'boxYlo', 'boxYhi', 'boxZlo', 'boxZhi'];
+    ids.forEach((id, i) => { document.getElementById(id).value = String(v[i]); });
+    document.getElementById(ids[5]).dispatchEvent(new Event('change'));
+  }, vals);
+  await page.click('#boxAuto');
+  await setBox([-20000, 20000, -20000, 20000, -1000, 7000]);
+  await sleep(400);
+  d = await dbg(); s = await sample();
+  check(d.box && d.globalPlanes === 6, `visible volume applied as six renderer clip planes (${d.globalPlanes})`);
+  check(d.viewRadius === 20000, `camera framed the volume, not the moon (radius ${d.viewRadius} cm)`);
+  check(d.distance < 1e5, `camera sits near the volume (${d.distance.toFixed(0)} cm from its centre)`);
+  const clipped = (p) => page.evaluate((x, y, z) => window.__owenPreviewClipped(x, y, z), p[0], p[1], p[2]);
+  check(await clipped([0, 0, -50000]) === true, 'a point below the volume is cut away');
+  check(await clipped(BOULDER) === false, 'the boulder inside the volume is kept');
+  check(s.lit > 0, `the framed volume draws (${s.lit}/${s.total} lit)`);
+  const badBefore = d.box;
+  await setBox([-20000, 20000, 500, -500, -1000, 7000]);
+  const note = await page.evaluate(() => document.getElementById('boxNote').textContent);
+  d = await dbg();
+  check(/lower Y/.test(note) && d.box && d.box.minZ === badBefore.minZ, `an inverted Y range is refused with a message ("${note}")`);
+  await page.click('#boxAuto');
+  await sleep(300);
+  d = await dbg();
+  check(d.box === null && d.globalPlanes === 0 && d.viewRadius > 1e8, 'ticking Auto removes the limits and frames everything again');
+  const moonErrs = pageErrors.slice(errs7);
+  check(moonErrs.length === 0, `no page errors in the moon-scale section${moonErrs.length ? ': ' + moonErrs.join(' | ') : ''}`);
+
+  console.log('\n[8] 3D slices: reverse, exact position, tilt, wedge cutaway');
+  const errs8 = pageErrors.length;
+  await post(assemblyScene());
+  await sleep(600);
+  const clipState = () => page.evaluate(() => window.__owenPreviewClipState());
+  const typeInto = (id, v) => page.evaluate((i, val) => {
+    const el = document.getElementById(i);
+    el.value = String(val);
+    el.dispatchEvent(new Event('change'));
+  }, id, v);
+  await page.click('#clipOn');
+  let cl = await clipState();
+  check(cl.axes[0].enabled && cl.materialPlanes === 1, 'Slice (X) adds one clip plane');
+  check(Math.abs(cl.axes[0].offset) < 1e-9, `X slice starts at the centre (${cl.axes[0].offset})`);
+  check(await clipped([5, 0, 0]) === true && await clipped([-5, 0, 0]) === false, 'default X slice removes the +x side');
+  check(await page.evaluate(() => getComputedStyle(document.getElementById('clipXMore')).display !== 'none'),
+    'position and tilt fields appear once the slice is on');
+  await page.click('#clipXRev');
+  check(await clipped([5, 0, 0]) === false && await clipped([-5, 0, 0]) === true, 'reverse removes the -x side instead');
+  await typeInto('clipXNum', 3.25);
+  cl = await clipState();
+  check(cl.axes[0].offset === 3.25, `a typed position is used exactly (${cl.axes[0].offset})`);
+  check(await clipped([3.2, 0, 0]) === true && await clipped([3.3, 0, 0]) === false, 'the cut sits at x = 3.25 cm');
+  await typeInto('clipXTiltBNum', 120);
+  cl = await clipState();
+  const nrm = cl.axes[0].normal;
+  check(cl.axes[0].tiltB === 90, `tilt is limited to ±90° (${cl.axes[0].tiltB})`);
+  check(Math.abs(nrm[0]) < 1e-9 && Math.abs(nrm[1] - 1) < 1e-9 && Math.abs(nrm[2]) < 1e-9,
+    `a reversed X slice tilted 90° about Z faces +y (${nrm.map((v) => v.toFixed(3)).join(', ')})`);
+  await typeInto('clipXTiltBNum', 0);
+  await typeInto('clipXNum', 0);
+  await page.click('#clipXRev');
+  await page.click('#clipYOn');
+  cl = await clipState();
+  check(cl.materialPlanes === 2 && cl.materialIntersection === false, 'two slices, union mode');
+  check(await clipped([5, -5, 0]) === true, 'union: the X slice alone removes (5, -5)');
+  await page.click('#clipWedge');
+  cl = await clipState();
+  check(cl.materialIntersection === true, 'wedge mode switches the materials to clipIntersection');
+  check(await clipped([5, 5, 0]) === true && await clipped([5, -5, 0]) === false && await clipped([-5, 5, 0]) === false,
+    'wedge: only the +x +y quarter is cut away');
+  await typeInto('clipXTiltBNum', -70);
+  const polar = (deg) => [5 * Math.cos(deg * Math.PI / 180), 5 * Math.sin(deg * Math.PI / 180), 0];
+  check(await clipped(polar(10)) === true && await clipped(polar(30)) === false && await clipped(polar(-10)) === false,
+    'tilting X by -70° about Z narrows the cutaway to a 20° wedge');
+  s = await sample();
+  check(s.lit > 0, `the wedge-cut assembly still draws (${s.lit}/${s.total} lit)`);
+  const sliceErrs = pageErrors.slice(errs8);
+  check(sliceErrs.length === 0, `no page errors in the slice section${sliceErrs.length ? ': ' + sliceErrs.join(' | ') : ''}`);
+
+  // Until 1.5.1 deck (x, y, z) went to three (x, z, y), a reflection: every
+  // view was a mirror image, and Frank Helk's C-ring opened the wrong way.
+  console.log('\n[9] handedness: the view is the deck, not its mirror image');
+  const errs9 = pageErrors.length;
+  for (const id of ['clipWedge', 'clipOn', 'clipYOn', 'clipZOn']) {
+    if (await page.evaluate((i) => document.getElementById(i).checked, id)) await page.click('#' + id);
+  }
+  // Cube vertices sit at deck y in [-25, -15] while the item's own origin is
+  // (0, 0, 0), so a wrong sign on the vertex offset puts it at +y.
+  const cubeV = [];
+  for (const z of [-5, 5]) for (const y of [-25, -15]) for (const x of [-5, 5]) cubeV.push(x, y, z);
+  const cubeF = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+  await post(wrap([
+    { x: 20, y: 0, z: 0, radius: 3, height: 6, component: 'px', material: 'A', color: '#f38ba8', opacity: 1, cell: '91' },
+    { x: 0, y: 0, z: 20, radius: 3, height: 6, component: 'pz', material: 'B', color: '#a6e3a1', opacity: 1, cell: '92' },
+    { shape: 'arc', x: 0, y: 0, z: 0, radius: 20, innerRadius: 15, thetaStart: 80, thetaLength: 20, height: 6, component: 'arc', material: 'C', color: '#89b4fa', opacity: 1, cell: '93' },
+    { shape: 'polyhedron', x: 0, y: 0, z: 0, radius: 10, height: 10, verts: cubeV, faces: cubeF, component: 'poly', material: 'D', color: '#f9e2af', opacity: 1, cell: '94' },
+  ], 'mcnp', 'layers', 4));
+  await sleep(600);
+  const lookAt = (e, t) => page.evaluate((a, b) => window.__owenPreviewLookAt(a[0], a[1], a[2], b[0], b[1], b[2]), e, t);
+  const pickCellAt = (p) => page.evaluate((x, y) => window.__owenPreviewPickCell(x, y), p.x, p.y);
+  await lookAt([0, -150, 0], [0, 0, 0]);
+  await sleep(200);
+  const o9 = await project([0, 0, 0]), px9 = await project([20, 0, 0]), pz9 = await project([0, 0, 20]);
+  check(px9.x > o9.x + 20, `seen from -y with z up, +x is on the right (origin ${o9.x.toFixed(0)} px, +x ${px9.x.toFixed(0)} px)`);
+  check(pz9.y < o9.y - 20, `and +z is up (origin ${o9.y.toFixed(0)} px, +z ${pz9.y.toFixed(0)} px)`);
+  check(await pickCellAt(px9) === '91' && await pickCellAt(pz9) === '92', 'the +x and +z cylinders are drawn where the deck puts them');
+  await lookAt([150, 0, 0], [0, 0, 0]);
+  await sleep(200);
+  const o9b = await project([0, 0, 0]), py9 = await project([0, 17.5, 0]), my9 = await project([0, -20, 0]);
+  check(py9.x > o9b.x + 20, `seen from +x with z up, +y is on the right (origin ${o9b.x.toFixed(0)} px, +y ${py9.x.toFixed(0)} px)`);
+  check(await pickCellAt(py9) === '93', 'an arc centred on 90° sits at +y');
+  check(await pickCellAt(my9) === '94', 'a polyhedron with vertices at -y sits at -y');
+  const handErrs = pageErrors.slice(errs9);
+  check(handErrs.length === 0, `no page errors in the handedness section${handErrs.length ? ': ' + handErrs.join(' | ') : ''}`);
 } catch (err) {
   failures.push(`harness error: ${err && err.message || err}`);
   console.error(err);
