@@ -316,13 +316,13 @@ for Radiation Transport Modeling*, PNNL. https://doi.org/10.2172/1782721 — via
 
 ## Thanks
 
-These people ran OWEN on real decks and reported what broke:
+With thanks to those who tested OWEN and sent reports:
 
-- [b-shaffer](https://github.com/b-shaffer) — MCNP line length, preview rendering, and converter issues.
-- Cibi Sundaram ([cibi-sundaram](https://github.com/cibi-sundaram)) — MCNP 6.3.1 `READ` cards.
-- Lubomír Bureš (Saltfoss Energy) — the geometry tools on multi-file decks.
-- John ([bluetyde](https://github.com/bluetyde)) — converter bugs [#7](https://github.com/caalh/owen/issues/7), [#8](https://github.com/caalh/owen/issues/8), and [#9](https://github.com/caalh/owen/issues/9).
-- Frank Helk — MCNP parsing errors, per-cell 3D controls, and the lunar-crater deck behind the meshed cells, slices, zoom, and visible volume.
+- [b-shaffer](https://github.com/b-shaffer)
+- Cibi Sundaram ([cibi-sundaram](https://github.com/cibi-sundaram))
+- Lubomír Bureš (Saltfoss Energy)
+- John ([bluetyde](https://github.com/bluetyde))
+- Frank Helk
 
 Found something wrong? [Open an issue](https://github.com/caalh/owen/issues); a deck attached gets it fixed fastest.
 
